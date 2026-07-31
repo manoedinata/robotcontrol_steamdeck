@@ -24,6 +24,9 @@ While the Home controller panel is active, the application sends packed Y/theta 
 - `src/views/SettingsView.vue`: camera URL field parsing/assembly, per-axis velocity-limit fields, and the keyboard preference toggle.
 - `src/composables/useSettings.js`: module-level reactive settings state (camera URL, velocity limits, and keyboard preference) shared between routes.
 - `src/composables/useGamepad.js`: shared Gamepad API polling, reactive axes/controller identity, held-direction repeat, and prioritized UI action dispatch.
+- `src/composables/useSettingsGamepadNavigation.js`: Settings form focus movement, control activation, sidebar return, and Save focus restoration.
+- `src/composables/useOnScreenKeyboardNavigation.js`: keyboard-modal D-pad/stick navigation, A/B handling, Escape handling, and initial key focus.
+- `src/utils/spatialFocus.js`: shared geometry-based directional focus selection used by Settings and the on-screen keyboard.
 - `src/styles.css`: global layout optimized for a 1280x800 display.
 - `settings.json`: local runtime configuration stored beside `launch.sh`.
 

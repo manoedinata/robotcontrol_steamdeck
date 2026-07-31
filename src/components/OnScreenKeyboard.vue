@@ -1,9 +1,7 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ArrowBigUp, Check, Delete, Trash2, X } from '@lucide/vue'
-import { useGamepad } from '../composables/useGamepad'
-
-const { registerHandler } = useGamepad()
+import { useOnScreenKeyboardNavigation } from '../composables/useOnScreenKeyboardNavigation'
 
 const props = defineProps({
   layout: {
@@ -29,7 +27,8 @@ const emit = defineEmits(['cancel', 'done'])
 const keyboard = ref(null)
 const draft = ref(props.value)
 const shifted = ref(false)
-let unregisterGamepadHandler
+
+useOnScreenKeyboardNavigation(keyboard, () => emit('cancel'))
 
 const letterRows = [
   ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
@@ -95,73 +94,6 @@ function finish() {
   emit('done', draft.value)
 }
 
-function handleWindowKeydown(event) {
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    emit('cancel')
-  }
-}
-
-function focusKeyInDirection(direction) {
-  const buttons = [...keyboard.value.querySelectorAll('button:not(:disabled)')]
-  const current = document.activeElement
-  if (!buttons.includes(current)) {
-    buttons[0]?.focus()
-    return
-  }
-
-  const currentRect = current.getBoundingClientRect()
-  const currentX = currentRect.left + currentRect.width / 2
-  const currentY = currentRect.top + currentRect.height / 2
-  const candidates = buttons.filter((button) => {
-    if (button === current) return false
-    const rect = button.getBoundingClientRect()
-    const x = rect.left + rect.width / 2
-    const y = rect.top + rect.height / 2
-    if (direction === 'up') return y < currentY - 4
-    if (direction === 'down') return y > currentY + 4
-    if (direction === 'left') return x < currentX - 4
-    return x > currentX + 4
-  })
-
-  const next = candidates.sort((a, b) => {
-    const score = (button) => {
-      const rect = button.getBoundingClientRect()
-      const x = rect.left + rect.width / 2
-      const y = rect.top + rect.height / 2
-      const primary = ['up', 'down'].includes(direction) ? Math.abs(y - currentY) : Math.abs(x - currentX)
-      const secondary = ['up', 'down'].includes(direction) ? Math.abs(x - currentX) : Math.abs(y - currentY)
-      return primary + secondary * 2
-    }
-    return score(a) - score(b)
-  })[0]
-
-  next?.focus()
-}
-
-function handleGamepadNavigation(action) {
-  const direction = action.replace('stick-', '')
-  if (['up', 'down', 'left', 'right'].includes(direction)) {
-    focusKeyInDirection(direction)
-  } else if (action === 'activate') {
-    document.activeElement?.click()
-  } else if (action === 'cancel') {
-    emit('cancel')
-  }
-  return true
-}
-
-onMounted(async () => {
-  window.addEventListener('keydown', handleWindowKeydown)
-  await nextTick()
-  keyboard.value?.querySelector('[data-osk-key]')?.focus()
-  unregisterGamepadHandler = registerHandler(handleGamepadNavigation, 100)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleWindowKeydown)
-  unregisterGamepadHandler?.()
-})
 </script>
 
 <template>

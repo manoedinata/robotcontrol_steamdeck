@@ -1,12 +1,9 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { Camera, Gauge, Keyboard, Network, Save } from '@lucide/vue'
 import OnScreenKeyboard from '../components/OnScreenKeyboard.vue'
-import { useGamepad } from '../composables/useGamepad'
+import { useSettingsGamepadNavigation } from '../composables/useSettingsGamepadNavigation'
 import { useSettings } from '../composables/useSettings'
-
-const { registerHandler } = useGamepad()
-let unregisterGamepadHandler
 
 const {
   cameraUrl,
@@ -31,6 +28,7 @@ const activeKeyboard = ref(null)
 const settingsState = ref('idle')
 const settingsMessage = ref('')
 let keyboardReturnControl = null
+const { focusSaveControl } = useSettingsGamepadNavigation(activeKeyboard)
 
 const keyboardFields = {
   sourceIp: { label: 'Source IP', layout: 'ip', maxLength: 253 },
@@ -64,73 +62,6 @@ function cancelKeyboard() {
 function commitKeyboardValue(value) {
   fieldValues[activeKeyboard.value.name].value = value
   closeKeyboard()
-}
-
-function gamepadControls() {
-  return [...document.querySelectorAll('#settings-page [data-gamepad-control]:not(:disabled)')]
-}
-
-function focusControlInDirection(direction) {
-  const controls = gamepadControls()
-  const current = document.activeElement
-  if (!controls.includes(current)) {
-    controls[0]?.focus()
-    return
-  }
-
-  const currentRect = current.getBoundingClientRect()
-  const currentX = currentRect.left + currentRect.width / 2
-  const currentY = currentRect.top + currentRect.height / 2
-  const candidates = controls.filter((control) => {
-    if (control === current) return false
-    const rect = control.getBoundingClientRect()
-    const x = rect.left + rect.width / 2
-    const y = rect.top + rect.height / 2
-    if (direction === 'up') return y < currentY - 4
-    if (direction === 'down') return y > currentY + 4
-    if (direction === 'left') return x < currentX - 4
-    return x > currentX + 4
-  })
-
-  const next = candidates.sort((a, b) => {
-    const score = (control) => {
-      const rect = control.getBoundingClientRect()
-      const x = rect.left + rect.width / 2
-      const y = rect.top + rect.height / 2
-      const primary = ['up', 'down'].includes(direction) ? Math.abs(y - currentY) : Math.abs(x - currentX)
-      const secondary = ['up', 'down'].includes(direction) ? Math.abs(x - currentX) : Math.abs(y - currentY)
-      return primary + secondary * 2
-    }
-    return score(a) - score(b)
-  })[0]
-
-  next?.focus({ preventScroll: true })
-  next?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-}
-
-function handleGamepadNavigation(action) {
-  if (activeKeyboard.value || !document.activeElement?.closest?.('#settings-page')) return false
-
-  if (['up', 'down', 'left', 'right'].includes(action)) {
-    focusControlInDirection(action)
-    return true
-  }
-  if (action === 'activate') {
-    const control = document.activeElement
-    if (control instanceof HTMLSelectElement) {
-      const nextIndex = (control.selectedIndex + 1) % control.options.length
-      control.selectedIndex = nextIndex
-      control.dispatchEvent(new Event('change', { bubbles: true }))
-    } else {
-      control?.click()
-    }
-    return true
-  }
-  if (action === 'cancel') {
-    document.querySelector(`.sidebar [data-route-name="settings"]`)?.focus()
-    return true
-  }
-  return false
 }
 
 function populateCameraFields(url) {
@@ -182,12 +113,6 @@ watch(oskEnabled, (enabled) => {
   if (!enabled && activeKeyboard.value) closeKeyboard()
 })
 
-onMounted(() => {
-  unregisterGamepadHandler = registerHandler(handleGamepadNavigation, 50)
-})
-
-onBeforeUnmount(() => unregisterGamepadHandler?.())
-
 async function saveCameraSettings() {
   settingsState.value = 'saving'
   settingsMessage.value = ''
@@ -211,8 +136,7 @@ async function saveCameraSettings() {
     settingsMessage.value = 'Settings could not be saved.'
     console.error(error)
   } finally {
-    await nextTick()
-    document.querySelector('#settings-page [data-gamepad-save]')?.focus({ preventScroll: true })
+    await focusSaveControl()
   }
 }
 </script>

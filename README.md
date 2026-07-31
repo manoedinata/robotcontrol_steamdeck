@@ -238,9 +238,13 @@ The receiver must use the same packed layout and little-endian byte order. The E
     │   └── OnScreenKeyboard.vue Built-in Settings keyboard with tailored layouts
     ├── composables
     │   ├── useGamepad.js      Shared Gamepad API polling and prioritized UI actions
+    │   ├── useOnScreenKeyboardNavigation.js Keyboard-modal controller navigation
+    │   ├── useSettingsGamepadNavigation.js Settings form controller navigation
     │   └── useSettings.js     Shared reactive settings state and persistence interface
     ├── router
     │   └── index.js           Eager Home/Settings routes using hash history
+    ├── utils
+    │   └── spatialFocus.js    Shared geometry-based directional focus selection
     └── views
         ├── HomeView.vue       Composition shell rendering CameraFeed and ControllerPanel
         └── SettingsView.vue   Camera source and velocity-limit form and persistence
@@ -269,6 +273,7 @@ Keep filesystem access, transcoder processes, and application lifecycle operatio
 - `HomeView.vue` and `SettingsView.vue` are route-level components, not manually toggled page components.
 - `HomeView.vue` is a thin composition shell: `CameraFeed.vue` owns camera state and rendering, while `ControllerPanel.vue` owns gamepad polling, velocity math, and composes two `Joystick.vue` instances.
 - `useGamepad.js` owns the single Gamepad API polling loop. Prioritized handlers route D-pad, left-stick, A, and B actions to the keyboard modal, Settings form, or sidebar while `ControllerPanel.vue` consumes the same reactive axes for robot velocity.
+- `useSettingsGamepadNavigation.js` and `useOnScreenKeyboardNavigation.js` own their respective focus and activation lifecycles. Both use `spatialFocus.js` for directional DOM focus selection, keeping navigation mechanics out of the Settings and keyboard components.
 - `useSettings.js` owns one module-level reactive store shared across routes: the camera URL, per-axis velocity limits, and keyboard preference. `ControllerPanel.vue` reads the limits to scale its output.
 - Vue code requests persistence through the preload bridge; only the Electron main process reads or writes `settings.json`.
 - Hash history is intentional because production loads `dist/index.html` from `file://` without an HTTP server.
