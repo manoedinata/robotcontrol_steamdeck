@@ -6,13 +6,14 @@ This repository is a Steam Deck-oriented Electron and Vue application for viewin
 
 The target viewport is 1280x800. The primary runtime environment is SteamOS Gaming Mode.
 
-The application does not currently send velocity commands to a robot, ROS, or any network transport. Do not describe it as a complete robot control client until a command transport is implemented.
+The main process can send packed Y/theta velocity datagrams over UDP, but the controller output is not yet connected to a destination or transmission loop. Do not describe the application as a complete robot control client until that integration is implemented.
 
 ## Architecture
 
 - `main.js`: Electron main process, BrowserWindow creation, IPC handlers, settings filesystem access, and RTSP transcoder lifecycle.
 - `preload.js`: narrow context bridge exposed as `window.electronAPI`.
 - `rtsp-transcoder.js`: one-source RTSP/TCP to MJPEG relay using bundled `ffmpeg`, bound to a tokenized loopback URL.
+- `udp-client.js`: validates and packs a 3-byte ASCII header plus two little-endian signed 32-bit velocities into an 11-byte UDP datagram.
 - `src/App.vue`: persistent sidebar shell and Exit action.
 - `src/router/index.js`: eagerly imported Home and Settings routes using hash history. Hash history is required for production `file://` loading.
 - `src/views/HomeView.vue`: thin composition shell that renders `CameraFeed` and `ControllerPanel` inside the Home layout.
@@ -47,6 +48,8 @@ Keep these BrowserWindow settings:
 Do not access Node.js, Electron, or the filesystem directly from Vue code. Add narrowly scoped IPC methods in `main.js` and expose only those methods through `preload.js`. Validate renderer-provided IPC payloads in the main process unless a specific IPC contract, such as settings persistence, intentionally accepts renderer-owned structured data unchanged.
 
 Keep application lifecycle and settings filesystem ownership in the main process. Do not broaden `window.electronAPI` with generic IPC, filesystem, or shell access.
+
+The UDP preload contract is `sendUdpMessage(host, port, header, velocity)`, where `header` is exactly three ASCII characters and `velocity` is `[yVelocity, thetaVelocity]`. The main process validates the host and port; `udp-client.js` validates and serializes both signed 32-bit integers. Keep the packet packed with Y at byte offset `3`, theta at byte offset `7`, and little-endian byte order unless the receiver protocol changes explicitly. Close the UDP socket during application shutdown.
 
 ### Settings
 
@@ -149,7 +152,7 @@ There are currently no automated test or lint scripts. Do not report tests or li
 
 ## Known Gaps
 
-- Velocity commands are not sent to robot middleware or a network endpoint.
+- The packed UDP sender is not yet connected to controller output, destination settings, or a transmission loop.
 - RTSP is supported through the main-process MJPEG relay; Chromium still cannot render `rtsp://` directly.
 - Camera credentials are not represented by the Settings form, although manually persisted URL credentials can be passed to `ffmpeg`.
 - RTSP transcoding supports one source, outputs MJPEG at 15 fps, and may be CPU intensive.

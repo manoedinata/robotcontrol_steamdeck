@@ -2,9 +2,11 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const { RtspTranscoder } = require('./rtsp-transcoder')
+const { UdpClient } = require('./udp-client')
 
 const settingsPath = path.join(__dirname, 'settings.json')
 const rtspTranscoder = new RtspTranscoder()
+const udpClient = new UdpClient()
 
 async function loadSettings() {
     try {
@@ -32,6 +34,20 @@ async function resolveCameraStream(_event, cameraUrl) {
     }
 
     return rtspTranscoder.resolveStreamUrl(cameraUrl)
+}
+
+async function sendUdpMessage(_event, host, port, header, velocity) {
+    if (
+        typeof host !== 'string'
+        || host.trim().length === 0
+        || !Number.isInteger(port)
+        || port < 1
+        || port > 65535
+    ) {
+        throw new TypeError('Invalid arguments for sending UDP message.')
+    }
+
+    await udpClient.sendMessage(host, port, header, velocity)
 }
 
 function createWindow() {
@@ -74,10 +90,14 @@ app.whenReady().then(() => {
     ipcMain.handle('settings:load', loadSettings)
     ipcMain.handle('settings:save', saveSettings)
     ipcMain.handle('camera:resolve-stream', resolveCameraStream)
+    ipcMain.handle('udp:send-message', sendUdpMessage)
     ipcMain.on('app:quit', () => app.quit())
 })
 
-app.on('before-quit', () => rtspTranscoder.stop())
+app.on('before-quit', () => {
+    rtspTranscoder.stop()
+    udpClient.close()
+})
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
