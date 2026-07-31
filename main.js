@@ -7,9 +7,6 @@ const { UdpClient } = require('./udp-client')
 const settingsPath = path.join(__dirname, 'settings.json')
 const rtspTranscoder = new RtspTranscoder()
 const udpClient = new UdpClient()
-let lastUdpDestination = null
-let shutdownStarted = false
-let shutdownReady = false
 
 async function loadSettings() {
     try {
@@ -51,7 +48,6 @@ async function sendUdpMessage(_event, host, port, header, velocity) {
     }
 
     await udpClient.sendMessage(host, port, header, velocity)
-    lastUdpDestination = { host: host.trim(), port }
 }
 
 function createWindow() {
@@ -98,34 +94,9 @@ app.whenReady().then(() => {
     ipcMain.on('app:quit', () => app.quit())
 })
 
-app.on('before-quit', (event) => {
-    if (shutdownReady) return
-
-    event.preventDefault()
-    if (shutdownStarted) return
-    shutdownStarted = true
-
-    const stopAndQuit = async () => {
-        try {
-            if (lastUdpDestination) {
-                await udpClient.sendMessage(
-                    lastUdpDestination.host,
-                    lastUdpDestination.port,
-                    'ITS',
-                    [0, 0],
-                )
-            }
-        } catch (error) {
-            console.error('Failed to send final UDP stop command:', error)
-        } finally {
-            rtspTranscoder.stop()
-            udpClient.close()
-            shutdownReady = true
-            app.quit()
-        }
-    }
-
-    stopAndQuit()
+app.on('before-quit', () => {
+    rtspTranscoder.stop()
+    udpClient.close()
 })
 
 app.on('window-all-closed', () => {

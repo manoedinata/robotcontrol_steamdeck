@@ -203,7 +203,7 @@ A `0.12` dead zone is applied to hardware gamepad values before they are normali
 
 ### UDP Packet Format
 
-While the Home controller panel is mounted and a valid destination is configured, it calls `window.electronAPI.sendUdpMessage(host, port, 'ITS', [yVelocity, thetaVelocity])` every 100 ms. It sends one final zero-velocity command when the panel unmounts. The main process also sends a zero command to the last active destination before closing the UDP socket during application shutdown.
+While the Home controller panel is mounted and a valid destination is configured, it calls `window.electronAPI.sendUdpMessage(host, port, 'ITS', [yVelocity, thetaVelocity])` every 100 ms. Leaving Home or quitting the application stops transmission without sending a special final zero-velocity command. The receiving STM32 must use a UDP receive-timeout watchdog that stops the wheels when command datagrams cease.
 
 Each call sends one fixed-size, 11-byte UDP datagram. The header must be exactly three ASCII characters and velocity is `[yVelocity, thetaVelocity]`, encoded as two IEEE-754 32-bit floating-point values.
 
@@ -281,6 +281,7 @@ Keep filesystem access, transcoder processes, and application lifecycle operatio
 ## Current Limitations
 
 - UDP delivery is connectionless; the application cannot confirm that the robot received a datagram.
+- Motion shutdown on lost or stopped transmission depends on the STM32 UDP receive-timeout watchdog; the application does not send a final stop datagram when Home unmounts or Electron quits.
 - RTSP transcoding is limited to one source at 15 fps and uses CPU-intensive MJPEG output.
 - RTSP startup and authentication failures depend on `ffmpeg` diagnostics and are not surfaced as structured UI errors.
 - Camera authentication is not represented in the Settings form.

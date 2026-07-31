@@ -21,7 +21,6 @@ let animationFrame
 let releaseGamepad
 let sendTimer
 let sendInFlight = false
-let sendZeroAfterFlight = false
 let lastSendError = ''
 
 const yVelocity = computed(() => -leftStickY.value * maxYVelocity.value)
@@ -64,10 +63,6 @@ async function sendVelocity(y = yVelocity.value, theta = thetaVelocity.value) {
     }
   } finally {
     sendInFlight = false
-    if (sendZeroAfterFlight) {
-      sendZeroAfterFlight = false
-      sendVelocity(0, 0)
-    }
   }
 }
 
@@ -101,11 +96,6 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(animationFrame)
   releaseGamepad?.()
   window.clearInterval(sendTimer)
-  if (sendInFlight) {
-    sendZeroAfterFlight = true
-  } else {
-    sendVelocity(0, 0)
-  }
 })
 </script>
 

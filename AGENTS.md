@@ -74,9 +74,9 @@ The current persisted contract is:
 
 `maxYVelocity` and `maxThetaVelocity` are the per-axis velocity caps (default `10`). `useSettings.js` owns these defaults and applies them when stored keys are missing. The main process persists and returns the Settings IPC payload unchanged; validation constraints are expressed by the Settings form before it sends the payload.
 
-`udpHost` defaults to an empty string and `udpPort` defaults to `0` for existing settings files, disabling transmission until a valid destination is saved. `ControllerPanel.vue` sends header `ITS` and `[yVelocity, thetaVelocity]` every 100 ms while mounted. Do not overlap sends, and retain the final zero-velocity command on unmount, including when a regular send is still in flight.
+`udpHost` defaults to an empty string and `udpPort` defaults to `0` for existing settings files, disabling transmission until a valid destination is saved. `ControllerPanel.vue` sends header `ITS` and `[yVelocity, thetaVelocity]` every 100 ms while mounted. Do not overlap sends. When Home unmounts, stop the send timer without issuing a special final zero-velocity command.
 
-UDP destination fields are optional so users can save unrelated settings while transmission is disabled. The built-in keyboard's hostname layout must support letters, digits, dots, and hyphens. During application shutdown, the main process sends `[0, 0]` with header `ITS` to the last successfully used destination before closing the UDP socket.
+UDP destination fields are optional so users can save unrelated settings while transmission is disabled. The built-in keyboard's hostname layout must support letters, digits, dots, and hyphens. During application shutdown, close the UDP socket without sending a final stop datagram. The receiving STM32 owns motion fail-safe behavior and must stop the wheels when its UDP receive-timeout watchdog expires.
 
 `useOnScreenKeyboard` defaults to `true` in `useSettings.js` for existing files where it is missing. When enabled, Settings inputs must remain read-only with `inputmode="none"` and open `OnScreenKeyboard.vue`; this prevents Steam keyboard events from modifying native fields. Disabling it restores native editing for physical keyboards. The app cannot and must not claim to disable Steam's global `Steam + X` overlay. Preserve Done-as-commit and Cancel-without-change semantics.
 
@@ -176,6 +176,7 @@ There are currently no automated test or lint scripts. Do not report tests or li
 ## Known Gaps
 
 - UDP is connectionless, so delivery and receiver health are not acknowledged by this application.
+- The application intentionally sends no final zero-velocity datagram when Home unmounts or Electron quits; wheel stopping on communication loss depends on the STM32 UDP receive-timeout watchdog.
 - RTSP is supported through the main-process MJPEG relay; Chromium still cannot render `rtsp://` directly.
 - Camera credentials are not represented by the Settings form, although manually persisted URL credentials can be passed to `ffmpeg`.
 - RTSP transcoding supports one source, outputs MJPEG at 15 fps, and may be CPU intensive.
