@@ -135,7 +135,7 @@ The form assembles the camera fields into one URL and saves it alongside the vel
 }
 ```
 
-The Electron main process owns the file and validates the velocity limits (finite, positive, clamped to `0.1`–`100`, defaulting to `10`) and the keyboard preference (strict boolean, defaulting to `true`) on both load and save. The Vue views share the current values through `useSettings.js`; writes use a temporary file followed by rename to reduce the chance of a partially written settings file. Existing `settings.json` files without the newer keys remain compatible and receive the defaults.
+The Electron main process owns the file but persists and returns the Settings IPC payload without applying defaults or normalization. The Vue views share the current values through `useSettings.js`, which supplies the default velocity limits and keyboard preference when stored keys are missing. Writes use a temporary file followed by rename to reduce the chance of a partially written settings file.
 
 When the built-in keyboard is enabled, Settings text and number fields are read-only and use `inputmode="none"` so SteamOS has no editable field to target. Selecting a field opens a layout tailored to its value: IP address, integer, decimal, or stream path. **Done** commits the draft; **Cancel** leaves the original value unchanged. Disable the toggle and save Settings to restore normal native fields for a physical keyboard. The application cannot disable Steam's global keyboard overlay, which can still be opened with `Steam + X`.
 

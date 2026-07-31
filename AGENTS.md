@@ -44,7 +44,7 @@ Keep these BrowserWindow settings:
 - `contextIsolation: true`
 - `nodeIntegration: false`
 
-Do not access Node.js, Electron, or the filesystem directly from Vue code. Add narrowly scoped IPC methods in `main.js` and expose only those methods through `preload.js`. Validate all renderer-provided IPC payloads in the main process.
+Do not access Node.js, Electron, or the filesystem directly from Vue code. Add narrowly scoped IPC methods in `main.js` and expose only those methods through `preload.js`. Validate renderer-provided IPC payloads in the main process unless a specific IPC contract, such as settings persistence, intentionally accepts renderer-owned structured data unchanged.
 
 Keep application lifecycle and settings filesystem ownership in the main process. Do not broaden `window.electronAPI` with generic IPC, filesystem, or shell access.
 
@@ -63,9 +63,9 @@ The current persisted contract is:
 
 `SettingsView.vue` presents protocol, IP, port, and subpath separately, then assembles one `cameraUrl`. It also exposes `maxYVelocity` and `maxThetaVelocity` as separate numeric fields. `useSettings.js` keeps the URL and both limits reactive across views. Preserve compatibility with existing `settings.json` files when changing this schema.
 
-`maxYVelocity` and `maxThetaVelocity` are the per-axis velocity caps (default `10`). The main process validates them in `normalizeMaxVelocity`: non-finite, non-positive, or missing values fall back to `10`, and valid values are clamped to `0.1`–`100`. Existing `settings.json` files without these keys must keep loading with the `10` default. Always validate renderer-provided limits in the main process; do not trust the renderer to clamp.
+`maxYVelocity` and `maxThetaVelocity` are the per-axis velocity caps (default `10`). `useSettings.js` owns these defaults and applies them when stored keys are missing. The main process persists and returns the Settings IPC payload unchanged; validation constraints are expressed by the Settings form before it sends the payload.
 
-`useOnScreenKeyboard` is a strict boolean and defaults to `true` for existing files where it is missing. When enabled, Settings inputs must remain read-only with `inputmode="none"` and open `OnScreenKeyboard.vue`; this prevents Steam keyboard events from modifying native fields. Disabling it restores native editing for physical keyboards. The app cannot and must not claim to disable Steam's global `Steam + X` overlay. Preserve Done-as-commit and Cancel-without-change semantics.
+`useOnScreenKeyboard` defaults to `true` in `useSettings.js` for existing files where it is missing. When enabled, Settings inputs must remain read-only with `inputmode="none"` and open `OnScreenKeyboard.vue`; this prevents Steam keyboard events from modifying native fields. Disabling it restores native editing for physical keyboards. The app cannot and must not claim to disable Steam's global `Steam + X` overlay. Preserve Done-as-commit and Cancel-without-change semantics.
 
 The current form offers HTTP and RTSP only. Its parser does not preserve URL query parameters or fragments. Account for that limitation when changing URL handling; do not silently claim full arbitrary-URL editing or HTTPS form support.
 

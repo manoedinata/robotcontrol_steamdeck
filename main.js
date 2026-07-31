@@ -6,67 +6,24 @@ const { RtspTranscoder } = require('./rtsp-transcoder')
 const settingsPath = path.join(__dirname, 'settings.json')
 const rtspTranscoder = new RtspTranscoder()
 
-// Velocity limits are configurable per axis. Defaults preserve the historical
-// -10..+10 cap so existing settings.json files behave unchanged.
-const DEFAULT_MAX_VELOCITY = 10
-const MIN_MAX_VELOCITY = 0.1
-const MAX_MAX_VELOCITY = 100
-
-const defaultSettings = Object.freeze({
-    cameraUrl: '',
-    maxYVelocity: DEFAULT_MAX_VELOCITY,
-    maxThetaVelocity: DEFAULT_MAX_VELOCITY,
-    useOnScreenKeyboard: true,
-})
-
-// Coerce a stored/renderer value into a finite velocity limit within bounds,
-// falling back to the default when the input is missing or invalid.
-function normalizeMaxVelocity(value) {
-    const parsed = typeof value === 'number' ? value : Number.parseFloat(value)
-
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-        return DEFAULT_MAX_VELOCITY
-    }
-
-    return Math.min(MAX_MAX_VELOCITY, Math.max(MIN_MAX_VELOCITY, parsed))
-}
-
 async function loadSettings() {
     try {
         const contents = await fs.readFile(settingsPath, 'utf8')
-        const settings = JSON.parse(contents)
-
-        return {
-            cameraUrl: typeof settings.cameraUrl === 'string' ? settings.cameraUrl : '',
-            maxYVelocity: normalizeMaxVelocity(settings.maxYVelocity),
-            maxThetaVelocity: normalizeMaxVelocity(settings.maxThetaVelocity),
-            useOnScreenKeyboard: typeof settings.useOnScreenKeyboard === 'boolean'
-                ? settings.useOnScreenKeyboard
-                : true,
-        }
+        return JSON.parse(contents)
     } catch (error) {
         if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) {
             console.error('Failed to load settings:', error)
         }
-        return { ...defaultSettings }
+        return {}
     }
 }
 
 async function saveSettings(_event, settings) {
-    const cameraUrl = typeof settings?.cameraUrl === 'string' ? settings.cameraUrl.trim() : ''
-    const nextSettings = {
-        cameraUrl,
-        maxYVelocity: normalizeMaxVelocity(settings?.maxYVelocity),
-        maxThetaVelocity: normalizeMaxVelocity(settings?.maxThetaVelocity),
-        useOnScreenKeyboard: typeof settings?.useOnScreenKeyboard === 'boolean'
-            ? settings.useOnScreenKeyboard
-            : true,
-    }
     const temporaryPath = `${settingsPath}.tmp`
 
-    await fs.writeFile(temporaryPath, `${JSON.stringify(nextSettings, null, 2)}\n`, 'utf8')
+    await fs.writeFile(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8')
     await fs.rename(temporaryPath, settingsPath)
-    return nextSettings
+    return settings
 }
 
 async function resolveCameraStream(_event, cameraUrl) {
