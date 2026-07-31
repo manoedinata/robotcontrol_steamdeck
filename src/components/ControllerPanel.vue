@@ -89,7 +89,7 @@ function updateGamepad() {
 onMounted(() => {
   releaseGamepad = acquireGamepad()
   animationFrame = requestAnimationFrame(updateGamepad)
-  sendTimer = window.setInterval(sendVelocity, 100)
+  sendTimer = window.setInterval(sendVelocity, 20)
 })
 
 onBeforeUnmount(() => {
