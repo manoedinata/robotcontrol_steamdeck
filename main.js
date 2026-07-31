@@ -16,6 +16,7 @@ const defaultSettings = Object.freeze({
     cameraUrl: '',
     maxYVelocity: DEFAULT_MAX_VELOCITY,
     maxThetaVelocity: DEFAULT_MAX_VELOCITY,
+    useOnScreenKeyboard: true,
 })
 
 // Coerce a stored/renderer value into a finite velocity limit within bounds,
@@ -39,6 +40,9 @@ async function loadSettings() {
             cameraUrl: typeof settings.cameraUrl === 'string' ? settings.cameraUrl : '',
             maxYVelocity: normalizeMaxVelocity(settings.maxYVelocity),
             maxThetaVelocity: normalizeMaxVelocity(settings.maxThetaVelocity),
+            useOnScreenKeyboard: typeof settings.useOnScreenKeyboard === 'boolean'
+                ? settings.useOnScreenKeyboard
+                : true,
         }
     } catch (error) {
         if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) {
@@ -54,6 +58,9 @@ async function saveSettings(_event, settings) {
         cameraUrl,
         maxYVelocity: normalizeMaxVelocity(settings?.maxYVelocity),
         maxThetaVelocity: normalizeMaxVelocity(settings?.maxThetaVelocity),
+        useOnScreenKeyboard: typeof settings?.useOnScreenKeyboard === 'boolean'
+            ? settings.useOnScreenKeyboard
+            : true,
     }
     const temporaryPath = `${settingsPath}.tmp`
 

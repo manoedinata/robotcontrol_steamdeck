@@ -1,9 +1,16 @@
 <script setup>
 import { ref, watch } from 'vue'
-import { Camera, Gauge, Save } from '@lucide/vue'
+import { Camera, Gauge, Keyboard, Save } from '@lucide/vue'
+import OnScreenKeyboard from '../components/OnScreenKeyboard.vue'
 import { useSettings } from '../composables/useSettings'
 
-const { cameraUrl, maxYVelocity, maxThetaVelocity, saveSettings } = useSettings()
+const {
+  cameraUrl,
+  maxYVelocity,
+  maxThetaVelocity,
+  useOnScreenKeyboard,
+  saveSettings,
+} = useSettings()
 
 const streamType = ref('http')
 const sourceIp = ref('')
@@ -11,8 +18,30 @@ const port = ref('')
 const subpath = ref('')
 const maxY = ref(maxYVelocity.value)
 const maxTheta = ref(maxThetaVelocity.value)
+const oskEnabled = ref(useOnScreenKeyboard.value)
+const activeKeyboard = ref(null)
 const settingsState = ref('idle')
 const settingsMessage = ref('')
+
+const keyboardFields = {
+  sourceIp: { label: 'Source IP', layout: 'ip', maxLength: 253 },
+  port: { label: 'Port', layout: 'integer', maxLength: 5 },
+  subpath: { label: 'Stream subpath', layout: 'text', maxLength: 256 },
+  maxY: { label: 'Max Y-velocity', layout: 'decimal', maxLength: 5 },
+  maxTheta: { label: 'Max Theta-velocity', layout: 'decimal', maxLength: 5 },
+}
+
+const fieldValues = { sourceIp, port, subpath, maxY, maxTheta }
+
+function openKeyboard(fieldName) {
+  if (!oskEnabled.value) return
+  activeKeyboard.value = { name: fieldName, ...keyboardFields[fieldName] }
+}
+
+function commitKeyboardValue(value) {
+  fieldValues[activeKeyboard.value.name].value = value
+  activeKeyboard.value = null
+}
 
 function populateCameraFields(url) {
   if (!url) {
@@ -47,6 +76,14 @@ watch(maxThetaVelocity, (next) => {
   maxTheta.value = next
 }, { immediate: true })
 
+watch(useOnScreenKeyboard, (next) => {
+  oskEnabled.value = next
+}, { immediate: true })
+
+watch(oskEnabled, (enabled) => {
+  if (!enabled) activeKeyboard.value = null
+})
+
 async function saveCameraSettings() {
   settingsState.value = 'saving'
   settingsMessage.value = ''
@@ -59,6 +96,7 @@ async function saveCameraSettings() {
       cameraUrl,
       maxYVelocity: Number.parseFloat(maxY.value),
       maxThetaVelocity: Number.parseFloat(maxTheta.value),
+      useOnScreenKeyboard: oskEnabled.value,
     })
     settingsState.value = 'saved'
     settingsMessage.value = 'Settings saved.'
@@ -101,10 +139,15 @@ async function saveCameraSettings() {
             v-model.trim="sourceIp"
             class="form-control"
             type="text"
-            inputmode="decimal"
+            :inputmode="oskEnabled ? 'none' : 'decimal'"
+            :readonly="oskEnabled"
             placeholder="192.168.1.20"
             autocomplete="off"
             required
+            @pointerdown="oskEnabled && $event.preventDefault()"
+            @click="openKeyboard('sourceIp')"
+            @keydown.enter.prevent="openKeyboard('sourceIp')"
+            @keydown.space.prevent="openKeyboard('sourceIp')"
           />
         </div>
 
@@ -115,11 +158,16 @@ async function saveCameraSettings() {
             v-model="port"
             class="form-control"
             type="number"
-            inputmode="numeric"
+            :inputmode="oskEnabled ? 'none' : 'numeric'"
+            :readonly="oskEnabled"
             min="1"
             max="65535"
             placeholder="8080"
             required
+            @pointerdown="oskEnabled && $event.preventDefault()"
+            @click="openKeyboard('port')"
+            @keydown.enter.prevent="openKeyboard('port')"
+            @keydown.space.prevent="openKeyboard('port')"
           />
         </div>
 
@@ -130,8 +178,14 @@ async function saveCameraSettings() {
             v-model.trim="subpath"
             class="form-control"
             type="text"
+            :inputmode="oskEnabled ? 'none' : 'text'"
+            :readonly="oskEnabled"
             placeholder="video"
             autocomplete="off"
+            @pointerdown="oskEnabled && $event.preventDefault()"
+            @click="openKeyboard('subpath')"
+            @keydown.enter.prevent="openKeyboard('subpath')"
+            @keydown.space.prevent="openKeyboard('subpath')"
           />
         </div>
       </div>
@@ -152,12 +206,17 @@ async function saveCameraSettings() {
             v-model="maxY"
             class="form-control"
             type="number"
-            inputmode="decimal"
+            :inputmode="oskEnabled ? 'none' : 'decimal'"
+            :readonly="oskEnabled"
             min="0.1"
             max="100"
             step="0.1"
             placeholder="10"
             required
+            @pointerdown="oskEnabled && $event.preventDefault()"
+            @click="openKeyboard('maxY')"
+            @keydown.enter.prevent="openKeyboard('maxY')"
+            @keydown.space.prevent="openKeyboard('maxY')"
           />
         </div>
 
@@ -168,13 +227,43 @@ async function saveCameraSettings() {
             v-model="maxTheta"
             class="form-control"
             type="number"
-            inputmode="decimal"
+            :inputmode="oskEnabled ? 'none' : 'decimal'"
+            :readonly="oskEnabled"
             min="0.1"
             max="100"
             step="0.1"
             placeholder="10"
             required
+            @pointerdown="oskEnabled && $event.preventDefault()"
+            @click="openKeyboard('maxTheta')"
+            @keydown.enter.prevent="openKeyboard('maxTheta')"
+            @keydown.space.prevent="openKeyboard('maxTheta')"
           />
+        </div>
+      </div>
+
+      <div class="settings-panel-heading settings-panel-heading-divided">
+        <Keyboard :size="20" aria-hidden="true" />
+        <div>
+          <h2>Text input</h2>
+          <p>Use the built-in keyboard for Settings fields.</p>
+        </div>
+      </div>
+
+      <div class="keyboard-setting-row">
+        <div>
+          <strong>On-screen keyboard</strong>
+          <span>Use On-screen Keyboard instead of Steam keyboard.</span>
+        </div>
+        <div class="form-check form-switch">
+          <input
+            id="osk-enabled"
+            v-model="oskEnabled"
+            class="form-check-input"
+            type="checkbox"
+            role="switch"
+          />
+          <label class="form-check-label" for="osk-enabled">{{ oskEnabled ? 'Enabled' : 'Disabled' }}</label>
         </div>
       </div>
 
@@ -192,5 +281,16 @@ async function saveCameraSettings() {
         </button>
       </div>
     </form>
+
+    <OnScreenKeyboard
+      v-if="activeKeyboard"
+      :key="activeKeyboard.name"
+      :layout="activeKeyboard.layout"
+      :max-length="activeKeyboard.maxLength"
+      :title="activeKeyboard.label"
+      :value="String(fieldValues[activeKeyboard.name].value ?? '')"
+      @cancel="activeKeyboard = null"
+      @done="commitKeyboardValue"
+    />
   </section>
 </template>

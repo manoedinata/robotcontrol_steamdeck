@@ -579,6 +579,224 @@ textarea {
     min-width: 0;
 }
 
+.settings-field .form-control[readonly] {
+    cursor: pointer;
+    background: #ffffff;
+}
+
+.settings-field .form-control[readonly]:focus {
+    border-color: #198754;
+    box-shadow: 0 0 0 0.25rem rgb(25 135 84 / 18%);
+}
+
+.keyboard-setting-row {
+    min-height: 68px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 12px 18px;
+}
+
+.keyboard-setting-row strong,
+.keyboard-setting-row span {
+    display: block;
+}
+
+.keyboard-setting-row strong {
+    margin-bottom: 2px;
+    font-size: 0.875rem;
+}
+
+.keyboard-setting-row span {
+    color: #687078;
+    font-size: 0.8rem;
+}
+
+.keyboard-setting-row .form-switch {
+    min-width: 112px;
+    margin: 0;
+}
+
+.keyboard-setting-row .form-check-input {
+    cursor: pointer;
+}
+
+.keyboard-setting-row .form-check-input:checked {
+    border-color: #198754;
+    background-color: #198754;
+}
+
+.osk-backdrop {
+    position: fixed;
+    z-index: 1000;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgb(21 25 29 / 72%);
+}
+
+.osk-panel {
+    width: min(900px, calc(100vw - 40px));
+    max-height: calc(100vh - 40px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid #adb5bd;
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 18px 48px rgb(0 0 0 / 30%);
+}
+
+.osk-header,
+.osk-footer {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+}
+
+.osk-header {
+    justify-content: space-between;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.osk-header h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.osk-preview {
+    min-height: 58px;
+    display: flex;
+    align-items: center;
+    margin: 14px 16px 0;
+    padding: 10px 14px;
+    overflow: hidden;
+    color: #20252b;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 1.05rem;
+    white-space: nowrap;
+    border: 2px solid #198754;
+    border-radius: 6px;
+    background: #f8f9fa;
+}
+
+.osk-placeholder {
+    color: #8a9198;
+}
+
+.osk-cursor {
+    width: 2px;
+    height: 24px;
+    flex: 0 0 auto;
+    margin-left: 2px;
+    background: #198754;
+}
+
+.osk-body {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 138px;
+    gap: 12px;
+    padding: 14px 16px;
+}
+
+.osk-body-numeric {
+    grid-template-columns: minmax(220px, 340px) 138px;
+    justify-content: center;
+}
+
+.osk-key-rows,
+.osk-edit-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.osk-key-row {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+}
+
+.osk-key,
+.osk-command {
+    min-height: 52px;
+    color: #20252b;
+    font-weight: 700;
+    border: 1px solid #adb5bd;
+    border-radius: 6px;
+    background: #f8f9fa;
+    box-shadow: 0 2px 0 #ced4da;
+}
+
+.osk-key {
+    min-width: 0;
+    flex: 1 1 0;
+    font-size: 1.05rem;
+    text-transform: none;
+}
+
+.osk-key:hover,
+.osk-key:focus-visible,
+.osk-command:hover,
+.osk-command:focus-visible {
+    border-color: #198754;
+    outline: 3px solid rgb(25 135 84 / 22%);
+    background: #e7f3ed;
+}
+
+.osk-key:active,
+.osk-command:active {
+    transform: translateY(1px);
+    box-shadow: 0 1px 0 #ced4da;
+}
+
+.osk-key-action,
+.osk-command {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+}
+
+.osk-key-action[aria-pressed="true"] {
+    color: #ffffff;
+    border-color: #146c43;
+    background: #146c43;
+}
+
+.osk-command {
+    width: 100%;
+    padding: 8px;
+    font-size: 0.8rem;
+}
+
+.osk-command-danger {
+    color: #842029;
+}
+
+.osk-footer {
+    justify-content: flex-end;
+    gap: 10px;
+    border-top: 1px solid #dee2e6;
+    background: #f8f9fa;
+}
+
+.osk-footer .btn {
+    min-width: 112px;
+    min-height: 44px;
+}
+
+.osk-footer .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
 .settings-actions {
     min-height: 62px;
     display: flex;

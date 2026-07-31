@@ -29,8 +29,9 @@ A Steam Deck-oriented Electron application for viewing a robot camera and visual
 - Maps the left stick vertical axis to linear Y velocity, capped at a configurable limit.
 - Maps the right stick horizontal axis to angular theta velocity, capped at a configurable limit.
 - Lets the maximum Y and theta velocities be set independently from the Settings page.
+- Provides a built-in Settings keyboard that avoids duplicate Steam keyboard input.
 - Supports pointer and touch dragging for both on-screen joystick controls.
-- Stores the camera source and velocity limits in `settings.json` beside the launcher.
+- Stores the camera source, velocity limits, and keyboard preference in `settings.json` beside the launcher.
 - Runs as a frameless Electron application with Home and Settings routes plus an in-app Exit action.
 - Uses a layout sized to fit the Steam Deck display without scrolling.
 
@@ -119,17 +120,24 @@ Open **Settings** and provide:
 - **Max Y-velocity:** linear cap applied to the left stick, `0.1` to `100` (default `10`)
 - **Max Theta-velocity:** angular cap applied to the right stick, `0.1` to `100` (default `10`)
 
+**Text input**
+
+- **On-screen keyboard:** opens a field-specific built-in keyboard for Settings values (enabled by default)
+
 The form assembles the camera fields into one URL and saves it alongside the velocity limits in `settings.json`:
 
 ```json
 {
   "cameraUrl": "http://192.168.1.20:8080/video",
   "maxYVelocity": 10,
-  "maxThetaVelocity": 10
+  "maxThetaVelocity": 10,
+  "useOnScreenKeyboard": true
 }
 ```
 
-The Electron main process owns the file and validates the velocity limits (finite, positive, clamped to `0.1`–`100`, defaulting to `10`) on both load and save. The Vue views share the current values through `useSettings.js`; writes use a temporary file followed by rename to reduce the chance of a partially written settings file. Existing `settings.json` files without the velocity keys keep working and fall back to the `10` default.
+The Electron main process owns the file and validates the velocity limits (finite, positive, clamped to `0.1`–`100`, defaulting to `10`) and the keyboard preference (strict boolean, defaulting to `true`) on both load and save. The Vue views share the current values through `useSettings.js`; writes use a temporary file followed by rename to reduce the chance of a partially written settings file. Existing `settings.json` files without the newer keys remain compatible and receive the defaults.
+
+When the built-in keyboard is enabled, Settings text and number fields are read-only and use `inputmode="none"` so SteamOS has no editable field to target. Selecting a field opens a layout tailored to its value: IP address, integer, decimal, or stream path. **Done** commits the draft; **Cancel** leaves the original value unchanged. Disable the toggle and save Settings to restore normal native fields for a physical keyboard. The application cannot disable Steam's global keyboard overlay, which can still be opened with `Steam + X`.
 
 The current Settings form exposes HTTP and RTSP and reconstructs the URL from protocol, host, port, and path. It does not preserve query parameters or fragments. If a camera URL needs HTTPS or query-string credentials/options, the current form must be extended before it can safely edit that URL.
 
@@ -182,9 +190,10 @@ A `0.12` dead zone is applied to hardware gamepad values before they are normali
     ├── components
     │   ├── CameraFeed.vue     Camera state, <img> rendering, and status overlay
     │   ├── ControllerPanel.vue Gamepad polling, velocity math, and joystick layout
-    │   └── Joystick.vue       Reusable single-axis joystick with pointer/touch drag
+    │   ├── Joystick.vue       Reusable single-axis joystick with pointer/touch drag
+    │   └── OnScreenKeyboard.vue Built-in Settings keyboard with tailored layouts
     ├── composables
-    │   └── useSettings.js     Shared reactive settings state (camera URL + velocity limits)
+    │   └── useSettings.js     Shared reactive settings state and persistence interface
     ├── router
     │   └── index.js           Eager Home/Settings routes using hash history
     └── views
@@ -213,7 +222,7 @@ Keep filesystem access, transcoder processes, and application lifecycle operatio
 - `App.vue` owns the persistent shell and renders routed pages through `RouterView`.
 - `HomeView.vue` and `SettingsView.vue` are route-level components, not manually toggled page components.
 - `HomeView.vue` is a thin composition shell: `CameraFeed.vue` owns camera state and rendering, while `ControllerPanel.vue` owns gamepad polling, velocity math, and composes two `Joystick.vue` instances.
-- `useSettings.js` owns one module-level reactive store shared across routes: the camera URL plus the per-axis velocity limits. `ControllerPanel.vue` reads the limits to scale its output.
+- `useSettings.js` owns one module-level reactive store shared across routes: the camera URL, per-axis velocity limits, and keyboard preference. `ControllerPanel.vue` reads the limits to scale its output.
 - Vue code requests persistence through the preload bridge; only the Electron main process reads or writes `settings.json`.
 - Hash history is intentional because production loads `dist/index.html` from `file://` without an HTTP server.
 
@@ -225,6 +234,7 @@ Keep filesystem access, transcoder processes, and application lifecycle operatio
 - Camera authentication is not represented in the Settings form.
 - The Settings form does not expose HTTPS or preserve URL query parameters and fragments.
 - Gamepad axis indices assume a conventional Steam Deck/gamepad mapping.
+- The built-in keyboard prevents native Settings input while enabled, but cannot disable Steam's global `Steam + X` keyboard overlay.
 - There are no automated tests, lint rules, installers, or packaged release artifacts yet.
 
 ## Contributing

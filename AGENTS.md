@@ -19,8 +19,9 @@ The application does not currently send velocity commands to a robot, ROS, or an
 - `src/components/CameraFeed.vue`: camera state, `<img>` rendering, and the status overlay/indicator. Consumes `useSettings` directly.
 - `src/components/ControllerPanel.vue`: Gamepad API polling, dead zone, per-axis velocity math, and the joystick/status layout.
 - `src/components/Joystick.vue`: reusable single-axis joystick (`v-model` position, `axis` prop, pointer/touch drag with `drag-start`/`drag-end` events).
-- `src/views/SettingsView.vue`: camera URL field parsing/assembly plus the per-axis velocity-limit fields.
-- `src/composables/useSettings.js`: module-level reactive settings state (camera URL and velocity limits) shared between routes.
+- `src/components/OnScreenKeyboard.vue`: modal Settings keyboard with IP, integer, decimal, and text layouts plus commit/cancel behavior.
+- `src/views/SettingsView.vue`: camera URL field parsing/assembly, per-axis velocity-limit fields, and the keyboard preference toggle.
+- `src/composables/useSettings.js`: module-level reactive settings state (camera URL, velocity limits, and keyboard preference) shared between routes.
 - `src/styles.css`: global layout optimized for a 1280x800 display.
 - `settings.json`: local runtime configuration stored beside `launch.sh`.
 
@@ -55,13 +56,16 @@ The current persisted contract is:
 {
   "cameraUrl": "http://192.168.1.20:8080/video",
   "maxYVelocity": 10,
-  "maxThetaVelocity": 10
+  "maxThetaVelocity": 10,
+  "useOnScreenKeyboard": true
 }
 ```
 
 `SettingsView.vue` presents protocol, IP, port, and subpath separately, then assembles one `cameraUrl`. It also exposes `maxYVelocity` and `maxThetaVelocity` as separate numeric fields. `useSettings.js` keeps the URL and both limits reactive across views. Preserve compatibility with existing `settings.json` files when changing this schema.
 
 `maxYVelocity` and `maxThetaVelocity` are the per-axis velocity caps (default `10`). The main process validates them in `normalizeMaxVelocity`: non-finite, non-positive, or missing values fall back to `10`, and valid values are clamped to `0.1`–`100`. Existing `settings.json` files without these keys must keep loading with the `10` default. Always validate renderer-provided limits in the main process; do not trust the renderer to clamp.
+
+`useOnScreenKeyboard` is a strict boolean and defaults to `true` for existing files where it is missing. When enabled, Settings inputs must remain read-only with `inputmode="none"` and open `OnScreenKeyboard.vue`; this prevents Steam keyboard events from modifying native fields. Disabling it restores native editing for physical keyboards. The app cannot and must not claim to disable Steam's global `Steam + X` overlay. Preserve Done-as-commit and Cancel-without-change semantics.
 
 The current form offers HTTP and RTSP only. Its parser does not preserve URL query parameters or fragments. Account for that limitation when changing URL handling; do not silently claim full arbitrary-URL editing or HTTPS form support.
 
@@ -99,6 +103,7 @@ The application must fit the Steam Deck's 1280x800 viewport without page scrolli
 - The persistent vertical sidebar.
 - A flexible camera region above a compact joystick row.
 - Stable joystick dimensions and puck travel.
+- Touch- and controller-focusable built-in keyboard keys with stable dimensions.
 - One-row camera settings at the target viewport.
 - Usable responsive behavior down to the Electron window minimum of 960x640. The current Settings row needs explicit verification at that minimum and may require responsive work.
 
@@ -150,5 +155,6 @@ There are currently no automated test or lint scripts. Do not report tests or li
 - RTSP transcoding supports one source, outputs MJPEG at 15 fps, and may be CPU intensive.
 - RTSP connection and authentication errors are currently available through `ffmpeg` diagnostics rather than structured renderer status.
 - The Settings form does not expose HTTPS or preserve URL query parameters and fragments.
+- The built-in keyboard cannot disable Steam's global keyboard overlay; it only protects the Settings inputs from native keyboard insertion while enabled.
 - The one-row Settings layout needs verification at the 960x640 minimum window size.
 - Automated tests, linting, installers, packaging, and release automation are not configured.
