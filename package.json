@@ -1,0 +1,31 @@
+{
+  "name": "steamdeck_robot_monitor",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "start": "npm run build && npm run electron",
+    "dev": "vite",
+    "build": "vite build",
+    "electron": "electron .",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "concurrently": "^10.0.4",
+    "cross-env": "^10.1.0",
+    "electron": "^43.2.0",
+    "vite": "^8.2.0",
+    "wait-on": "^9.1.0"
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.28.0",
+    "bootstrap": "^5.3.8",
+    "vue": "^3.5.40",
+    "vue-router": "^4.6.4"
+  }
+}
