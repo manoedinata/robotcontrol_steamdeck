@@ -1,14 +1,16 @@
 <script setup>
 import { ref, watch } from 'vue'
-import { Camera, Save } from '@lucide/vue'
+import { Camera, Gauge, Save } from '@lucide/vue'
 import { useSettings } from '../composables/useSettings'
 
-const { cameraUrl, saveSettings } = useSettings()
+const { cameraUrl, maxYVelocity, maxThetaVelocity, saveSettings } = useSettings()
 
 const streamType = ref('http')
 const sourceIp = ref('')
 const port = ref('')
 const subpath = ref('')
+const maxY = ref(maxYVelocity.value)
+const maxTheta = ref(maxThetaVelocity.value)
 const settingsState = ref('idle')
 const settingsMessage = ref('')
 
@@ -37,6 +39,14 @@ watch(cameraUrl, (nextUrl) => {
   populateCameraFields(nextUrl)
 }, { immediate: true })
 
+watch(maxYVelocity, (next) => {
+  maxY.value = next
+}, { immediate: true })
+
+watch(maxThetaVelocity, (next) => {
+  maxTheta.value = next
+}, { immediate: true })
+
 async function saveCameraSettings() {
   settingsState.value = 'saving'
   settingsMessage.value = ''
@@ -45,9 +55,13 @@ async function saveCameraSettings() {
     const path = subpath.value.trim().replace(/^\/+/, '')
     const cameraUrl = `${streamType.value}://${sourceIp.value.trim()}:${port.value}${path ? `/${path}` : ''}`
 
-    await saveSettings({ cameraUrl })
+    await saveSettings({
+      cameraUrl,
+      maxYVelocity: Number.parseFloat(maxY.value),
+      maxThetaVelocity: Number.parseFloat(maxTheta.value),
+    })
     settingsState.value = 'saved'
-    settingsMessage.value = 'Camera settings saved.'
+    settingsMessage.value = 'Settings saved.'
   } catch (error) {
     settingsState.value = 'error'
     settingsMessage.value = 'Settings could not be saved.'
@@ -118,6 +132,48 @@ async function saveCameraSettings() {
             type="text"
             placeholder="video"
             autocomplete="off"
+          />
+        </div>
+      </div>
+
+      <div class="settings-panel-heading settings-panel-heading-divided">
+        <Gauge :size="20" aria-hidden="true" />
+        <div>
+          <h2>Robot controls</h2>
+          <p>Set the maximum velocity for each axis. Joystick output scales to these limits.</p>
+        </div>
+      </div>
+
+      <div class="velocity-settings-row">
+        <div class="settings-field">
+          <label for="max-y-velocity">Max Y-velocity <span>(linear)</span></label>
+          <input
+            id="max-y-velocity"
+            v-model="maxY"
+            class="form-control"
+            type="number"
+            inputmode="decimal"
+            min="0.1"
+            max="100"
+            step="0.1"
+            placeholder="10"
+            required
+          />
+        </div>
+
+        <div class="settings-field">
+          <label for="max-theta-velocity">Max Theta-velocity <span>(angular)</span></label>
+          <input
+            id="max-theta-velocity"
+            v-model="maxTheta"
+            class="form-control"
+            type="number"
+            inputmode="decimal"
+            min="0.1"
+            max="100"
+            step="0.1"
+            placeholder="10"
+            required
           />
         </div>
       </div>

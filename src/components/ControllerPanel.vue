@@ -2,20 +2,24 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Gamepad2 } from '@lucide/vue'
 import Joystick from './Joystick.vue'
+import { useSettings } from '../composables/useSettings'
 
 // Differential-drive controller. The left stick vertical axis drives Y
 // velocity (up is positive), the right stick horizontal axis drives theta
-// velocity (right is positive). Both outputs are normalized and capped to
-// -10..+10. Hardware gamepad input is polled each frame and applies a dead
-// zone; pointer/touch input goes through the joystick components directly.
+// velocity (right is positive). Outputs are normalized and capped to the
+// configurable per-axis limits from Settings. Hardware gamepad input is polled
+// each frame and applies a dead zone; pointer/touch input goes through the
+// joystick components directly.
+const { maxYVelocity, maxThetaVelocity } = useSettings()
+
 const leftStickY = ref(0)
 const rightStickX = ref(0)
 const draggedStick = ref(null)
 const gamepadName = ref('')
 let animationFrame
 
-const yVelocity = computed(() => -leftStickY.value * 10)
-const thetaVelocity = computed(() => rightStickX.value * 10)
+const yVelocity = computed(() => -leftStickY.value * maxYVelocity.value)
+const thetaVelocity = computed(() => rightStickX.value * maxThetaVelocity.value)
 
 function formatVelocity(value) {
   const rounded = Math.round(value * 10) / 10

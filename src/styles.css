@@ -543,9 +543,20 @@ textarea {
     font-size: 0.825rem;
 }
 
+.settings-panel-heading-divided {
+    border-top: 1px solid #dee2e6;
+}
+
 .camera-settings-row {
     display: grid;
     grid-template-columns: 132px minmax(210px, 1.4fr) 120px minmax(180px, 1fr);
+    gap: 14px;
+    padding: 18px;
+}
+
+.velocity-settings-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
     gap: 14px;
     padding: 18px;
 }

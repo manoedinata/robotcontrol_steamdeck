@@ -1,14 +1,27 @@
 import { readonly, ref } from 'vue'
 
+// Default velocity cap; mirrors the main-process default so the renderer shows
+// a sensible value before settings load and if the bridge is unavailable.
+const DEFAULT_MAX_VELOCITY = 10
+
 // Shared reactive settings state. A single module-level instance keeps the
-// camera URL in sync across every view without prop drilling.
+// camera URL and velocity limits in sync across every view without prop
+// drilling.
 const cameraUrl = ref('')
+const maxYVelocity = ref(DEFAULT_MAX_VELOCITY)
+const maxThetaVelocity = ref(DEFAULT_MAX_VELOCITY)
 let loaded = false
+
+function applySettings(settings) {
+    cameraUrl.value = settings?.cameraUrl ?? ''
+    maxYVelocity.value = settings?.maxYVelocity ?? DEFAULT_MAX_VELOCITY
+    maxThetaVelocity.value = settings?.maxThetaVelocity ?? DEFAULT_MAX_VELOCITY
+}
 
 async function loadSettings() {
     try {
         const settings = await window.electronAPI?.loadSettings()
-        cameraUrl.value = settings?.cameraUrl ?? ''
+        applySettings(settings)
     } catch (error) {
         console.error(error)
     } finally {
@@ -18,8 +31,8 @@ async function loadSettings() {
 
 async function saveSettings(nextSettings) {
     const saved = await window.electronAPI?.saveSettings(nextSettings)
-    cameraUrl.value = saved?.cameraUrl ?? nextSettings.cameraUrl?.trim() ?? ''
-    return cameraUrl.value
+    applySettings(saved ?? nextSettings)
+    return saved
 }
 
 export function useSettings() {
@@ -31,6 +44,8 @@ export function useSettings() {
 
     return {
         cameraUrl: readonly(cameraUrl),
+        maxYVelocity: readonly(maxYVelocity),
+        maxThetaVelocity: readonly(maxThetaVelocity),
         saveSettings,
         reloadSettings: loadSettings,
     }
