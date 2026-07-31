@@ -1,13 +1,9 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Camera, Unplug } from '@lucide/vue'
+import { useSettings } from '../composables/useSettings'
 
-const props = defineProps({
-  cameraUrl: {
-    type: String,
-    default: '',
-  },
-})
+const { cameraUrl } = useSettings()
 
 const cameraSource = ref('')
 const cameraState = ref('idle')
@@ -36,8 +32,8 @@ function formatVelocity(value) {
   return Object.is(rounded, -0) ? '0.0' : rounded.toFixed(1)
 }
 
-function connectCamera(cameraUrl) {
-  const nextSource = cameraUrl.trim()
+function connectCamera(nextUrl) {
+  const nextSource = nextUrl.trim()
   cameraError.value = null
 
   if (!nextSource) {
@@ -68,7 +64,7 @@ function handleCameraError(event) {
   cameraState.value = 'error'
   cameraError.value = detail
   console.error('[camera] Stream failed', {
-    requestedUrl: props.cameraUrl,
+    requestedUrl: cameraUrl.value,
     currentSrc: image.currentSrc,
     complete: image.complete,
     naturalWidth: image.naturalWidth,
@@ -134,7 +130,7 @@ function updateGamepad() {
   animationFrame = requestAnimationFrame(updateGamepad)
 }
 
-watch(() => props.cameraUrl, connectCamera, { immediate: true })
+watch(cameraUrl, connectCamera, { immediate: true })
 
 onMounted(() => {
   animationFrame = requestAnimationFrame(updateGamepad)

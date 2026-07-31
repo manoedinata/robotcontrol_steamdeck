@@ -1,22 +1,16 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { Camera, Save } from '@lucide/vue'
+import { useSettings } from '../composables/useSettings'
 
-const props = defineProps({
-  cameraUrl: {
-    type: String,
-    default: '',
-  },
-})
+const { cameraUrl, saveSettings } = useSettings()
 
-const emit = defineEmits(['saved'])
-
-const cameraUrlDraft = ref(props.cameraUrl)
+const cameraUrlDraft = ref(cameraUrl.value)
 const settingsState = ref('idle')
 const settingsMessage = ref('')
 
-watch(() => props.cameraUrl, (cameraUrl) => {
-  cameraUrlDraft.value = cameraUrl
+watch(cameraUrl, (nextUrl) => {
+  cameraUrlDraft.value = nextUrl
 })
 
 async function saveCameraSettings() {
@@ -24,10 +18,7 @@ async function saveCameraSettings() {
   settingsMessage.value = ''
 
   try {
-    const settings = await window.electronAPI?.saveSettings({ cameraUrl: cameraUrlDraft.value })
-    const cameraUrl = settings?.cameraUrl ?? cameraUrlDraft.value.trim()
-    cameraUrlDraft.value = cameraUrl
-    emit('saved', cameraUrl)
+    await saveSettings({ cameraUrl: cameraUrlDraft.value })
     settingsState.value = 'saved'
     settingsMessage.value = 'Camera settings saved.'
   } catch (error) {
