@@ -49,6 +49,10 @@ function createWindow() {
         },
     })
 
+    win.webContents.on('did-finish-load', () => {
+        win.webContents.setZoomFactor(1.2)
+    })
+
     const devServerUrl = process.env.VITE_DEV_SERVER_URL
 
     if (devServerUrl) {
