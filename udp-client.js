@@ -2,7 +2,8 @@ const { createSocket } = require('node:dgram')
 
 const HEADER_SIZE = 3
 const VELOCITY_COUNT = 2
-const PACKET_SIZE = HEADER_SIZE + (VELOCITY_COUNT * Int32Array.BYTES_PER_ELEMENT)
+const PACKET_SIZE = HEADER_SIZE + (VELOCITY_COUNT * Float32Array.BYTES_PER_ELEMENT)
+const MAX_FLOAT32 = 3.4028234663852886e38
 
 function packVelocityPacket(header, velocity) {
     if (typeof header !== 'string' || !/^[\x00-\x7f]{3}$/.test(header)) {
@@ -11,14 +12,14 @@ function packVelocityPacket(header, velocity) {
     if (!Array.isArray(velocity) || velocity.length !== VELOCITY_COUNT) {
         throw new TypeError('UDP packet velocity must be an array containing Y and theta.')
     }
-    if (!velocity.every((value) => Number.isInteger(value) && value >= -0x80000000 && value <= 0x7fffffff)) {
-        throw new RangeError('UDP packet velocities must be signed 32-bit integers.')
+    if (!velocity.every((value) => Number.isFinite(value) && Math.abs(value) <= MAX_FLOAT32)) {
+        throw new RangeError('UDP packet velocities must be finite 32-bit floating-point values.')
     }
 
     const packet = Buffer.allocUnsafe(PACKET_SIZE)
     packet.write(header, 0, HEADER_SIZE, 'ascii')
-    packet.writeInt32LE(velocity[0], HEADER_SIZE)
-    packet.writeInt32LE(velocity[1], HEADER_SIZE + Int32Array.BYTES_PER_ELEMENT)
+    packet.writeFloatLE(velocity[0], HEADER_SIZE)
+    packet.writeFloatLE(velocity[1], HEADER_SIZE + Float32Array.BYTES_PER_ELEMENT)
     return packet
 }
 
@@ -36,6 +37,7 @@ class UdpClient {
                     reject(error)
                     return
                 }
+
                 resolve()
             })
         })
@@ -46,4 +48,4 @@ class UdpClient {
     }
 }
 
-module.exports = { UdpClient }
+module.exports = { UdpClient, packVelocityPacket }

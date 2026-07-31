@@ -6,14 +6,14 @@ This repository is a Steam Deck-oriented Electron and Vue application for viewin
 
 The target viewport is 1280x800. The primary runtime environment is SteamOS Gaming Mode.
 
-The main process can send packed Y/theta velocity datagrams over UDP, but the controller output is not yet connected to a destination or transmission loop. Do not describe the application as a complete robot control client until that integration is implemented.
+While the Home controller panel is active, the application sends packed Y/theta velocity datagrams every 100 ms to the configured UDP destination. It does not integrate directly with ROS or other robot middleware.
 
 ## Architecture
 
 - `main.js`: Electron main process, BrowserWindow creation, IPC handlers, settings filesystem access, and RTSP transcoder lifecycle.
 - `preload.js`: narrow context bridge exposed as `window.electronAPI`.
 - `rtsp-transcoder.js`: one-source RTSP/TCP to MJPEG relay using bundled `ffmpeg`, bound to a tokenized loopback URL.
-- `udp-client.js`: validates and packs a 3-byte ASCII header plus two little-endian signed 32-bit velocities into an 11-byte UDP datagram.
+- `udp-client.js`: validates and packs a 3-byte ASCII header plus two little-endian IEEE-754 `float32` velocities into an 11-byte UDP datagram.
 - `src/App.vue`: persistent sidebar shell and Exit action.
 - `src/router/index.js`: eagerly imported Home and Settings routes using hash history. Hash history is required for production `file://` loading.
 - `src/views/HomeView.vue`: thin composition shell that renders `CameraFeed` and `ControllerPanel` inside the Home layout.
@@ -49,7 +49,7 @@ Do not access Node.js, Electron, or the filesystem directly from Vue code. Add n
 
 Keep application lifecycle and settings filesystem ownership in the main process. Do not broaden `window.electronAPI` with generic IPC, filesystem, or shell access.
 
-The UDP preload contract is `sendUdpMessage(host, port, header, velocity)`, where `header` is exactly three ASCII characters and `velocity` is `[yVelocity, thetaVelocity]`. The main process validates the host and port; `udp-client.js` validates and serializes both signed 32-bit integers. Keep the packet packed with Y at byte offset `3`, theta at byte offset `7`, and little-endian byte order unless the receiver protocol changes explicitly. Close the UDP socket during application shutdown.
+The UDP preload contract is `sendUdpMessage(host, port, header, velocity)`, where `header` is exactly three ASCII characters and `velocity` is `[yVelocity, thetaVelocity]`. The main process validates the host and port; `udp-client.js` validates and serializes two finite IEEE-754 `float32` values. Keep the packet packed with Y at byte offset `3`, theta at byte offset `7`, and little-endian byte order unless the receiver protocol changes explicitly. Close the UDP socket during application shutdown.
 
 ### Settings
 
@@ -60,13 +60,19 @@ The current persisted contract is:
   "cameraUrl": "http://192.168.1.20:8080/video",
   "maxYVelocity": 10,
   "maxThetaVelocity": 10,
+  "udpHost": "192.168.1.30",
+  "udpPort": 5000,
   "useOnScreenKeyboard": true
 }
 ```
 
-`SettingsView.vue` presents protocol, IP, port, and subpath separately, then assembles one `cameraUrl`. It also exposes `maxYVelocity` and `maxThetaVelocity` as separate numeric fields. `useSettings.js` keeps the URL and both limits reactive across views. Preserve compatibility with existing `settings.json` files when changing this schema.
+`SettingsView.vue` presents protocol, IP, port, and subpath separately, then assembles one `cameraUrl`. It also exposes `maxYVelocity`, `maxThetaVelocity`, `udpHost`, and `udpPort`. `useSettings.js` keeps these values reactive across views. Preserve compatibility with existing `settings.json` files when changing this schema.
 
 `maxYVelocity` and `maxThetaVelocity` are the per-axis velocity caps (default `10`). `useSettings.js` owns these defaults and applies them when stored keys are missing. The main process persists and returns the Settings IPC payload unchanged; validation constraints are expressed by the Settings form before it sends the payload.
+
+`udpHost` defaults to an empty string and `udpPort` defaults to `0` for existing settings files, disabling transmission until a valid destination is saved. `ControllerPanel.vue` sends header `ITS` and `[yVelocity, thetaVelocity]` every 100 ms while mounted. Do not overlap sends, and retain the final zero-velocity command on unmount, including when a regular send is still in flight.
+
+UDP destination fields are optional so users can save unrelated settings while transmission is disabled. The built-in keyboard's hostname layout must support letters, digits, dots, and hyphens. During application shutdown, the main process sends `[0, 0]` with header `ITS` to the last successfully used destination before closing the UDP socket.
 
 `useOnScreenKeyboard` defaults to `true` in `useSettings.js` for existing files where it is missing. When enabled, Settings inputs must remain read-only with `inputmode="none"` and open `OnScreenKeyboard.vue`; this prevents Steam keyboard events from modifying native fields. Disabling it restores native editing for physical keyboards. The app cannot and must not claim to disable Steam's global `Steam + X` overlay. Preserve Done-as-commit and Cancel-without-change semantics.
 
@@ -152,7 +158,7 @@ There are currently no automated test or lint scripts. Do not report tests or li
 
 ## Known Gaps
 
-- The packed UDP sender is not yet connected to controller output, destination settings, or a transmission loop.
+- UDP is connectionless, so delivery and receiver health are not acknowledged by this application.
 - RTSP is supported through the main-process MJPEG relay; Chromium still cannot render `rtsp://` directly.
 - Camera credentials are not represented by the Settings form, although manually persisted URL credentials can be passed to `ffmpeg`.
 - RTSP transcoding supports one source, outputs MJPEG at 15 fps, and may be CPU intensive.

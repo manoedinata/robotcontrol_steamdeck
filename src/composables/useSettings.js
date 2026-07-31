@@ -10,6 +10,8 @@ const DEFAULT_MAX_VELOCITY = 10
 const cameraUrl = ref('')
 const maxYVelocity = ref(DEFAULT_MAX_VELOCITY)
 const maxThetaVelocity = ref(DEFAULT_MAX_VELOCITY)
+const udpHost = ref('')
+const udpPort = ref(0)
 const useOnScreenKeyboard = ref(true)
 let loaded = false
 
@@ -17,6 +19,8 @@ function applySettings(settings) {
     cameraUrl.value = settings?.cameraUrl ?? ''
     maxYVelocity.value = settings?.maxYVelocity ?? DEFAULT_MAX_VELOCITY
     maxThetaVelocity.value = settings?.maxThetaVelocity ?? DEFAULT_MAX_VELOCITY
+    udpHost.value = settings?.udpHost ?? ''
+    udpPort.value = settings?.udpPort ?? 0
     useOnScreenKeyboard.value = settings?.useOnScreenKeyboard ?? true
 }
 
@@ -48,6 +52,8 @@ export function useSettings() {
         cameraUrl: readonly(cameraUrl),
         maxYVelocity: readonly(maxYVelocity),
         maxThetaVelocity: readonly(maxThetaVelocity),
+        udpHost: readonly(udpHost),
+        udpPort: readonly(udpPort),
         useOnScreenKeyboard: readonly(useOnScreenKeyboard),
         saveSettings,
         reloadSettings: loadSettings,

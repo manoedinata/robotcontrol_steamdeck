@@ -2,7 +2,7 @@
 
 A Steam Deck-oriented Electron application for viewing a robot camera and visualizing differential-drive inputs. The interface targets the Deck's 1280x800 display and combines an IP camera feed with live velocity values derived from hardware or on-screen joysticks.
 
-> **Project status:** this repository implements the local monitor and input UI. It calculates Y and theta velocity values and provides a packed UDP sender in the Electron main process, but controller output is not yet connected to a destination or transmission loop.
+> **Project status:** this repository implements the local monitor and input UI. It continuously sends Y and theta velocity commands to a configured UDP destination while the Home controller panel is active. It does not integrate directly with ROS or other robot middleware.
 
 - [Steam Deck Robot Monitor](#steam-deck-robot-monitor)
   - [What It Does](#what-it-does)
@@ -31,8 +31,8 @@ A Steam Deck-oriented Electron application for viewing a robot camera and visual
 - Lets the maximum Y and theta velocities be set independently from the Settings page.
 - Provides a built-in Settings keyboard that avoids duplicate Steam keyboard input.
 - Supports pointer and touch dragging for both on-screen joystick controls.
-- Stores the camera source, velocity limits, and keyboard preference in `settings.json` beside the launcher.
-- Provides a restricted Electron bridge for sending packed Y/theta velocity datagrams over UDP.
+- Stores the camera source, velocity limits, UDP destination, and keyboard preference in `settings.json` beside the launcher.
+- Sends packed Y/theta velocity datagrams to the configured UDP destination every 100 ms.
 - Runs as a frameless Electron application with Home and Settings routes plus an in-app Exit action.
 - Uses a layout sized to fit the Steam Deck display without scrolling.
 
@@ -121,6 +121,13 @@ Open **Settings** and provide:
 - **Max Y-velocity:** linear cap applied to the left stick, `0.1` to `100` (default `10`)
 - **Max Theta-velocity:** angular cap applied to the right stick, `0.1` to `100` (default `10`)
 
+**UDP destination**
+
+- **Target host:** optional robot UDP server IP address or hostname
+- **Target port:** optional robot UDP server port, `1` to `65535`
+
+Leaving either UDP destination field empty disables transmission, preserving compatibility with settings files created before UDP support was added.
+
 **Text input**
 
 - **On-screen keyboard:** opens a field-specific built-in keyboard for Settings values (enabled by default)
@@ -132,6 +139,8 @@ The form assembles the camera fields into one URL and saves it alongside the vel
   "cameraUrl": "http://192.168.1.20:8080/video",
   "maxYVelocity": 10,
   "maxThetaVelocity": 10,
+  "udpHost": "192.168.1.30",
+  "udpPort": 5000,
   "useOnScreenKeyboard": true
 }
 ```
@@ -175,15 +184,17 @@ A `0.12` dead zone is applied to hardware gamepad values before they are normali
 
 ### UDP Packet Format
 
-`window.electronAPI.sendUdpMessage(host, port, header, velocity)` sends one fixed-size, 11-byte UDP datagram. `header` must be exactly three ASCII characters and `velocity` must be `[yVelocity, thetaVelocity]`, with both values supplied as signed 32-bit integers.
+While the Home controller panel is mounted and a valid destination is configured, it calls `window.electronAPI.sendUdpMessage(host, port, 'ITS', [yVelocity, thetaVelocity])` every 100 ms. It sends one final zero-velocity command when the panel unmounts. The main process also sends a zero command to the last active destination before closing the UDP socket during application shutdown.
 
-| Offset | Size | Encoding                      | Value          |
-| ------ | ---- | ----------------------------- | -------------- |
-| `0`    | 3    | ASCII bytes                   | Header         |
-| `3`    | 4    | Signed `int32`, little-endian | Y velocity     |
-| `7`    | 4    | Signed `int32`, little-endian | Theta velocity |
+Each call sends one fixed-size, 11-byte UDP datagram. The header must be exactly three ASCII characters and velocity is `[yVelocity, thetaVelocity]`, encoded as two IEEE-754 32-bit floating-point values.
 
-The receiver must use the same packed layout and little-endian byte order. The Electron main process validates the host, UDP port, header, array shape, and integer ranges before transmission. The current controller UI does not invoke this sender automatically.
+| Offset | Size | Encoding                          | Value          |
+| ------ | ---- | --------------------------------- | -------------- |
+| `0`    | 3    | ASCII bytes                       | Header         |
+| `3`    | 4    | IEEE-754 `float32`, little-endian | Y velocity     |
+| `7`    | 4    | IEEE-754 `float32`, little-endian | Theta velocity |
+
+The receiver must use the same packed layout and little-endian byte order. The Electron main process validates the host and UDP port, while the UDP client validates the header, array shape, finite values, and `float32` range before transmission. Sends are not overlapped if a previous request is still pending.
 
 ## Architecture
 
@@ -194,7 +205,7 @@ The receiver must use the same packed layout and little-endian byte order. The E
 ├── rtsp-transcoder.js         Loopback RTSP-to-MJPEG ffmpeg relay
 ├── udp-client.js              Packed Y/theta UDP datagram sender
 ├── launch.sh                  Steam Gaming Mode production launcher
-├── settings.json              Persisted local camera URL
+├── settings.json              Persisted camera, controls, and UDP settings
 ├── index.html                 Renderer entry and Content Security Policy
 ├── vite.config.js             Vue/Vite production configuration
 └── src
@@ -243,7 +254,7 @@ Keep filesystem access, transcoder processes, and application lifecycle operatio
 
 ## Current Limitations
 
-- Controller velocity values are not yet connected to the UDP sender, a configured destination, or a transmission loop.
+- UDP delivery is connectionless; the application cannot confirm that the robot received a datagram.
 - RTSP transcoding is limited to one source at 15 fps and uses CPU-intensive MJPEG output.
 - RTSP startup and authentication failures depend on `ffmpeg` diagnostics and are not surfaced as structured UI errors.
 - Camera authentication is not represented in the Settings form.

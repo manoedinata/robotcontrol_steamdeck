@@ -10,13 +10,17 @@ import { useSettings } from '../composables/useSettings'
 // configurable per-axis limits from Settings. Hardware gamepad input is polled
 // each frame and applies a dead zone; pointer/touch input goes through the
 // joystick components directly.
-const { maxYVelocity, maxThetaVelocity } = useSettings()
+const { maxYVelocity, maxThetaVelocity, udpHost, udpPort } = useSettings()
 
 const leftStickY = ref(0)
 const rightStickX = ref(0)
 const draggedStick = ref(null)
 const gamepadName = ref('')
 let animationFrame
+let sendTimer
+let sendInFlight = false
+let sendZeroAfterFlight = false
+let lastSendError = ''
 
 const yVelocity = computed(() => -leftStickY.value * maxYVelocity.value)
 const thetaVelocity = computed(() => rightStickX.value * maxThetaVelocity.value)
@@ -29,6 +33,40 @@ function formatVelocity(value) {
 function applyDeadZone(value, threshold = 0.12) {
   if (Math.abs(value) < threshold) return 0
   return Math.sign(value) * ((Math.abs(value) - threshold) / (1 - threshold))
+}
+
+function hasUdpDestination() {
+  return udpHost.value.trim().length > 0
+    && Number.isInteger(udpPort.value)
+    && udpPort.value >= 1
+    && udpPort.value <= 65535
+}
+
+async function sendVelocity(y = yVelocity.value, theta = thetaVelocity.value) {
+  if (!hasUdpDestination() || sendInFlight || !window.electronAPI?.sendUdpMessage) return
+
+  sendInFlight = true
+  try {
+    await window.electronAPI.sendUdpMessage(
+      udpHost.value.trim(),
+      udpPort.value,
+      'ITS',
+      [y, theta],
+    )
+    lastSendError = ''
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (message !== lastSendError) {
+      console.error('Failed to send UDP velocity:', error)
+      lastSendError = message
+    }
+  } finally {
+    sendInFlight = false
+    if (sendZeroAfterFlight) {
+      sendZeroAfterFlight = false
+      sendVelocity(0, 0)
+    }
+  }
 }
 
 function updateGamepad() {
@@ -58,10 +96,17 @@ function updateGamepad() {
 
 onMounted(() => {
   animationFrame = requestAnimationFrame(updateGamepad)
+  sendTimer = window.setInterval(sendVelocity, 100)
 })
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(animationFrame)
+  window.clearInterval(sendTimer)
+  if (sendInFlight) {
+    sendZeroAfterFlight = true
+  } else {
+    sendVelocity(0, 0)
+  }
 })
 </script>
 

@@ -61,10 +61,17 @@ const rows = computed(() => {
     ]
   }
 
+  if (props.layout === 'hostname') {
+    return [
+      ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+      ...letterRows,
+    ]
+  }
+
   return letterRows
 })
 
-const isTextLayout = computed(() => props.layout === 'text')
+const isTextLayout = computed(() => ['text', 'hostname'].includes(props.layout))
 
 function appendKey(key) {
   if (draft.value.length >= props.maxLength) return
