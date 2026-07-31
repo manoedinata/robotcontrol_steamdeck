@@ -4,6 +4,23 @@ A Steam Deck-oriented Electron application for viewing a robot camera and visual
 
 > **Project status:** this repository currently implements the local monitor and input UI. It calculates Y and theta velocity values, but it does not send commands to a robot, ROS, or another middleware transport.
 
+- [Steam Deck Robot Monitor](#steam-deck-robot-monitor)
+  - [What It Does](#what-it-does)
+  - [Stack](#stack)
+  - [Requirements](#requirements)
+  - [Quick Start](#quick-start)
+  - [Commands](#commands)
+  - [Steam Deck Launch](#steam-deck-launch)
+  - [Camera Configuration](#camera-configuration)
+    - [Supported Camera Streams](#supported-camera-streams)
+  - [Controls](#controls)
+  - [Architecture](#architecture)
+    - [Electron Security Boundary](#electron-security-boundary)
+    - [Renderer Data Flow](#renderer-data-flow)
+  - [Current Limitations](#current-limitations)
+  - [Contributing](#contributing)
+
+
 ## What It Does
 
 - Displays HTTP snapshots, HTTP MJPEG streams, and RTSP camera streams.
@@ -49,13 +66,13 @@ Vite listens on `http://127.0.0.1:5173`. Electron waits for that URL and then lo
 
 ## Commands
 
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Run Vite and Electron together for development |
-| `npm run build` | Build the renderer into `dist/` |
+| Command            | Purpose                                          |
+| ------------------ | ------------------------------------------------ |
+| `npm run dev`      | Run Vite and Electron together for development   |
+| `npm run build`    | Build the renderer into `dist/`                  |
 | `npm run electron` | Launch Electron using the existing `dist/` build |
-| `npm run start` | Build the renderer, then launch Electron |
-| `npm run preview` | Preview the production renderer in a browser |
+| `npm run start`    | Build the renderer, then launch Electron         |
+| `npm run preview`  | Preview the production renderer in a browser     |
 
 The browser preview is useful for layout work, but Electron-only operations such as loading, saving, and quitting depend on `window.electronAPI`. Use Electron to verify the complete workflow.
 
@@ -131,11 +148,11 @@ Camera lifecycle and failure details are logged to the Electron renderer console
 
 ## Controls
 
-| Input | Robot value |
-| --- | --- |
-| Left stick up | Positive Y velocity, up to the configured max Y-velocity |
-| Left stick down | Negative Y velocity, down to the negative max Y-velocity |
-| Right stick left | Negative theta velocity, down to the negative max theta-velocity |
+| Input             | Robot value                                                      |
+| ----------------- | ---------------------------------------------------------------- |
+| Left stick up     | Positive Y velocity, up to the configured max Y-velocity         |
+| Left stick down   | Negative Y velocity, down to the negative max Y-velocity         |
+| Right stick left  | Negative theta velocity, down to the negative max theta-velocity |
 | Right stick right | Positive theta velocity, up to the configured max theta-velocity |
 
 Both limits default to `10` and are set independently on the Settings page. Stick output is normalized to `-1..+1` and then scaled by the matching limit.
