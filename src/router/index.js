@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import HomeView from '../views/HomeView.vue'
+import SettingsView from '../views/SettingsView.vue'
 
 const routes = [
     {
@@ -11,8 +12,7 @@ const routes = [
     {
         path: '/settings',
         name: 'settings',
-        // Lazy-loaded so the settings view is split into its own chunk.
-        component: () => import('../views/SettingsView.vue'),
+        component: SettingsView,
         meta: { title: 'Settings' },
     },
 ]
