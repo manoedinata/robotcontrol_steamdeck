@@ -118,7 +118,7 @@ function createWindow() {
     })
 
     win.webContents.on('did-finish-load', () => {
-        win.webContents.setZoomFactor(1.2)
+        win.webContents.setZoomFactor(1.25)
     })
 
     win.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
