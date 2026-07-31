@@ -256,7 +256,22 @@ textarea {
     font-weight: 700;
     text-transform: uppercase;
     border-radius: 4px;
-    background: #b02a37;
+}
+
+.live-indicator.connected {
+    background: #198754;
+}
+
+.live-indicator.loading {
+    background: #ffc107;
+}
+
+.live-indicator.error {
+    background: #dc3545;
+}
+
+.live-indicator.idle {
+    background: #6c757d;
 }
 
 .connection-status {

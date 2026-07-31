@@ -153,15 +153,23 @@ onBeforeUnmount(() => {
           @error="handleCameraError"
         />
         <div v-if="cameraState !== 'connected'" class="camera-message">
+            <!-- Error: Unplug icon, else Camera icon -->
           <Camera v-if="cameraState !== 'error'" :size="34" aria-hidden="true" />
           <Unplug v-else :size="34" aria-hidden="true" />
+
           <strong v-if="cameraState === 'loading'">Connecting to camera...</strong>
           <strong v-else-if="cameraState === 'error'">Camera feed error</strong>
           <strong v-else>Camera not connected</strong>
+
           <span v-if="cameraState === 'error'">{{ cameraError }}</span>
           <span v-else-if="cameraState === 'idle'">Set the camera URL in Settings to start the feed.</span>
         </div>
-        <span v-if="cameraState === 'connected'" class="live-indicator">Live</span>
+        <span :class="`live-indicator ${cameraState}`">
+            <span v-if="cameraState === 'connected'">Connected</span>
+            <span v-else-if="cameraState === 'loading'">Connecting...</span>
+            <span v-else-if="cameraState === 'error'">Error</span>
+            <span v-else>Disconnected</span>
+        </span>
       </div>
     </section>
 

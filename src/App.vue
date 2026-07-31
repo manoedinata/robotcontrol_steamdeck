@@ -15,9 +15,12 @@ function quitApp() {
   <div class="app-shell">
     <aside class="sidebar border-end" aria-label="Primary navigation">
       <RouterLink class="sidebar-brand" :to="{ name: 'home' }" aria-label="Robot Monitor home">
-        <div class="brand-mark" aria-hidden="true">
+
+        <!-- in case mau pake logo -->
+        <!-- <div class="brand-mark" aria-hidden="true">
           <Bot :size="22" />
-        </div>
+        </div> -->
+
         <div>
           <span class="brand-title">Robot Control</span>
           <span class="brand-subtitle">Steam Deck</span>
