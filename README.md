@@ -1,19 +1,19 @@
 # Steam Deck Robot Monitor
 
-A compact Electron application for monitoring and controlling a differential-drive robot from a Steam Deck. The interface is designed around the Deck's 1280x800 display and combines an IP camera feed with live gamepad-driven velocity controls.
+A Steam Deck-oriented Electron application for viewing a robot camera and visualizing differential-drive inputs. The interface targets the Deck's 1280x800 display and combines an IP camera feed with live velocity values derived from hardware or on-screen joysticks.
+
+> **Project status:** this repository currently implements the local monitor and input UI. It calculates Y and theta velocity values, but it does not send commands to a robot, ROS, or another middleware transport.
 
 ## What It Does
 
 - Displays an HTTP image or MJPEG camera stream.
-- Reads the Steam Deck controls through the browser Gamepad API.
+- Reads Steam Deck or compatible controller input through the browser Gamepad API.
 - Maps the left stick vertical axis to linear Y velocity from `-10` to `+10`.
 - Maps the right stick horizontal axis to angular theta velocity from `-10` to `+10`.
 - Supports pointer and touch dragging for both on-screen joystick controls.
 - Stores the camera source in `settings.json` beside the launcher.
-- Runs as a frameless Electron application with an in-app Exit button.
+- Runs as a frameless Electron application with Home and Settings routes plus an in-app Exit action.
 - Uses a layout sized to fit the Steam Deck display without scrolling.
-
-This repository currently provides the monitor UI and normalized velocity values. It does not yet transmit velocity commands to a robot controller.
 
 ## Stack
 
@@ -26,39 +26,35 @@ This repository currently provides the monitor UI and normalized velocity values
 
 ## Requirements
 
-- Linux or another Electron-supported desktop OS
-- Node.js and npm
-- A camera endpoint reachable from the device
-- A gamepad exposed through the browser Gamepad API for hardware controls
+- Node.js `20.19+` or `22.12+`, and npm (required by Vite 8)
+- Linux or another Electron-supported desktop operating system
+- An HTTP snapshot or MJPEG endpoint reachable from the device
+- A browser-visible gamepad for hardware input; pointer and touch controls also work
 
 The application was built primarily for SteamOS and Steam Deck Gaming Mode.
 
-## Installation
+## Quick Start
 
-Install the JavaScript dependencies:
+Install dependencies, start Vite, wait for it to become available, and launch Electron:
 
 ```bash
 npm install
-```
-
-## Development
-
-Start Vite and Electron together:
-
-```bash
 npm run dev
 ```
 
 Vite listens on `http://127.0.0.1:5173`. Electron waits for that URL and then loads it through `VITE_DEV_SERVER_URL`.
 
-Other useful commands:
+## Commands
 
-```bash
-npm run build      # Build the renderer into dist/
-npm run electron   # Launch Electron using the existing dist/ build
-npm run start      # Build, then launch Electron
-npm run preview    # Preview the production Vite build in a browser
-```
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Run Vite and Electron together for development |
+| `npm run build` | Build the renderer into `dist/` |
+| `npm run electron` | Launch Electron using the existing `dist/` build |
+| `npm run start` | Build the renderer, then launch Electron |
+| `npm run preview` | Preview the production renderer in a browser |
+
+The browser preview is useful for layout work, but Electron-only operations such as loading, saving, and quitting depend on `window.electronAPI`. Use Electron to verify the complete workflow.
 
 There is currently no automated test or lint script. Run `npm run build` as the minimum validation after changes.
 
@@ -104,7 +100,9 @@ The form assembles these fields into one URL and saves it in `settings.json`:
 }
 ```
 
-The file is read and written by the Electron main process. Writes use a temporary file and rename operation to reduce the chance of a partially written settings file.
+The Electron main process owns the file. The Vue views share its current value through `useSettings.js`; writes use a temporary file followed by rename to reduce the chance of a partially written settings file.
+
+The current Settings form exposes HTTP and RTSP and reconstructs the URL from protocol, host, port, and path. It does not preserve query parameters or fragments. If a camera URL needs HTTPS or query-string credentials/options, the current form must be extended before it can safely edit that URL.
 
 ### Supported Camera Streams
 
@@ -113,7 +111,7 @@ The Home view renders the camera with an HTML `<img>` element. Directly supporte
 - HTTP or HTTPS snapshots
 - HTTP or HTTPS MJPEG streams
 
-Although RTSP can be selected and saved, Chromium cannot display an `rtsp://` URL directly in an `<img>` element. RTSP cameras require an external relay or transcoder that exposes the stream as MJPEG, HLS, WebRTC, or another Chromium-compatible format. No relay is included in this repository yet.
+Although RTSP can be selected and saved, Chromium cannot display an `rtsp://` URL directly in an `<img>` element. RTSP cameras require an external relay or transcoder that exposes a browser-compatible stream. The current `<img>` renderer supports snapshots and MJPEG; adding HLS or WebRTC would also require an appropriate renderer. No relay is included in this repository.
 
 Camera lifecycle and failure details are logged to the Electron renderer console with the `[camera]` prefix.
 
@@ -131,7 +129,7 @@ The Gamepad API mapping currently reads:
 - Left stick Y from `axes[1]`
 - Right stick X from `axes[2]`
 
-A `0.12` dead zone is applied before values are normalized. Mouse and touch interaction use the same constrained axes. Sideways translation is intentionally not represented because the target is a differential-drive robot.
+A `0.12` dead zone is applied to hardware gamepad values before they are normalized. Mouse and touch interaction use the same constrained axes but do not apply that dead zone. Sideways translation is intentionally not represented because the target is a differential-drive robot.
 
 ## Architecture
 
@@ -150,7 +148,7 @@ A `0.12` dead zone is applied before values are normalized. Mouse and touch inte
     ├── composables
     │   └── useSettings.js     Shared reactive settings state
     ├── router
-    │   └── index.js           Hash-based Home and Settings routes
+    │   └── index.js           Eager Home/Settings routes using hash history
     └── views
         ├── HomeView.vue       Camera, gamepad polling, and joystick UI
         └── SettingsView.vue   Camera source form and persistence
@@ -171,13 +169,22 @@ The renderer runs with:
 
 Keep filesystem access and application lifecycle operations in the main process. Do not expose Node.js or Electron modules directly to Vue components.
 
+### Renderer Data Flow
+
+- `App.vue` owns the persistent shell and renders routed pages through `RouterView`.
+- `HomeView.vue` and `SettingsView.vue` are route-level components, not manually toggled page components.
+- `useSettings.js` owns one module-level reactive camera URL shared across routes.
+- Vue code requests persistence through the preload bridge; only the Electron main process reads or writes `settings.json`.
+- Hash history is intentional because production loads `dist/index.html` from `file://` without an HTTP server.
+
 ## Current Limitations
 
 - Velocity values are visualized but are not sent to a robot transport or middleware.
 - RTSP playback needs an external browser-compatible relay.
 - Camera authentication is not represented in the Settings form.
+- The Settings form does not expose HTTPS or preserve URL query parameters and fragments.
 - Gamepad axis indices assume a conventional Steam Deck/gamepad mapping.
-- There are no automated tests, lint rules, or packaged release artifacts yet.
+- There are no automated tests, lint rules, installers, or packaged release artifacts yet.
 
 ## Contributing
 
