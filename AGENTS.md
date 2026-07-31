@@ -10,8 +10,9 @@ The application does not currently send velocity commands to a robot, ROS, or an
 
 ## Architecture
 
-- `main.js`: Electron main process, BrowserWindow creation, IPC handlers, and settings filesystem access.
+- `main.js`: Electron main process, BrowserWindow creation, IPC handlers, settings filesystem access, and RTSP transcoder lifecycle.
 - `preload.js`: narrow context bridge exposed as `window.electronAPI`.
+- `rtsp-transcoder.js`: one-source RTSP/TCP to MJPEG relay using bundled `ffmpeg`, bound to a tokenized loopback URL.
 - `src/App.vue`: persistent sidebar shell and Exit action.
 - `src/router/index.js`: eagerly imported Home and Settings routes using hash history. Hash history is required for production `file://` loading.
 - `src/views/HomeView.vue`: thin composition shell that renders `CameraFeed` and `ControllerPanel` inside the Home layout.
@@ -70,7 +71,9 @@ Keep `useSettings.js` as the single shared renderer source of truth unless appli
 
 ### Camera
 
-`CameraFeed.vue` currently uses `<img>` so HTTP/HTTPS snapshots and MJPEG streams work without an additional player. Do not claim that direct RTSP playback works: Chromium cannot render `rtsp://` in `<img>`. RTSP support requires a relay or transcoder. HLS or WebRTC output would also require a corresponding browser renderer rather than the current `<img>` implementation.
+`CameraFeed.vue` uses `<img>` so HTTP/HTTPS snapshots and MJPEG streams work directly. Chromium cannot render `rtsp://` in `<img>`; RTSP sources are resolved through the Electron main process and `rtsp-transcoder.js`. The relay runs bundled `ffmpeg` over RTSP/TCP, removes audio, scales within 1280x800, limits output to 15 fps, and serves MJPEG from a tokenized random port bound only to `127.0.0.1`.
+
+Keep RTSP process ownership in the main process. Permit only HTTP, HTTPS, and RTSP camera protocols; do not expose process arguments, generic process spawning, or a network-accessible relay through the preload bridge. Preserve one active source, terminate the child process on source changes and application quit, and avoid logging camera URLs because they may contain credentials. HLS or WebRTC output would require a corresponding browser renderer rather than the current `<img>` implementation.
 
 The Content Security Policy in `index.html` must continue to permit required external camera image sources. Keep camera diagnostic logs under the `[camera]` prefix.
 
@@ -142,8 +145,10 @@ There are currently no automated test or lint scripts. Do not report tests or li
 ## Known Gaps
 
 - Velocity commands are not sent to robot middleware or a network endpoint.
-- RTSP can be persisted but is not directly playable by the current renderer.
-- Camera credentials are unsupported.
+- RTSP is supported through the main-process MJPEG relay; Chromium still cannot render `rtsp://` directly.
+- Camera credentials are not represented by the Settings form, although manually persisted URL credentials can be passed to `ffmpeg`.
+- RTSP transcoding supports one source, outputs MJPEG at 15 fps, and may be CPU intensive.
+- RTSP connection and authentication errors are currently available through `ffmpeg` diagnostics rather than structured renderer status.
 - The Settings form does not expose HTTPS or preserve URL query parameters and fragments.
 - The one-row Settings layout needs verification at the 960x640 minimum window size.
 - Automated tests, linting, installers, packaging, and release automation are not configured.

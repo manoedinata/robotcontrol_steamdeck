@@ -6,7 +6,8 @@ A Steam Deck-oriented Electron application for viewing a robot camera and visual
 
 ## What It Does
 
-- Displays an HTTP image or MJPEG camera stream.
+- Displays HTTP snapshots, HTTP MJPEG streams, and RTSP camera streams.
+- Transcodes RTSP to a loopback-only MJPEG stream with bundled `ffmpeg`.
 - Reads Steam Deck or compatible controller input through the browser Gamepad API.
 - Maps the left stick vertical axis to linear Y velocity, capped at a configurable limit.
 - Maps the right stick horizontal axis to angular theta velocity, capped at a configurable limit.
@@ -24,12 +25,13 @@ A Steam Deck-oriented Electron application for viewing a robot camera and visual
 - Vite
 - Bootstrap 5
 - Lucide icons
+- ffmpeg-static
 
 ## Requirements
 
 - Node.js `20.19+` or `22.12+`, and npm (required by Vite 8)
 - Linux or another Electron-supported desktop operating system
-- An HTTP snapshot or MJPEG endpoint reachable from the device
+- An HTTP snapshot, MJPEG, or RTSP endpoint reachable from the device
 - A browser-visible gamepad for hardware input; pointer and touch controls also work
 
 The application was built primarily for SteamOS and Steam Deck Gaming Mode.
@@ -116,12 +118,14 @@ The current Settings form exposes HTTP and RTSP and reconstructs the URL from pr
 
 ### Supported Camera Streams
 
-The Home view renders the camera with an HTML `<img>` element. Directly supported sources are therefore:
+The Home view renders the camera with an HTML `<img>` element. HTTP sources are loaded directly:
 
 - HTTP or HTTPS snapshots
 - HTTP or HTTPS MJPEG streams
 
-Although RTSP can be selected and saved, Chromium cannot display an `rtsp://` URL directly in an `<img>` element. RTSP cameras require an external relay or transcoder that exposes a browser-compatible stream. The current `<img>` renderer supports snapshots and MJPEG; adding HLS or WebRTC would also require an appropriate renderer. No relay is included in this repository.
+For an RTSP source, the renderer asks the Electron main process to start the bundled `ffmpeg` binary. It connects to the camera over RTSP/TCP, removes audio, scales video to fit within 1280x800, limits output to 15 fps, and encodes JPEG frames. A Node.js HTTP server bound to a random `127.0.0.1` port exposes those frames as a tokenized MJPEG stream for the existing `<img>` renderer.
+
+Only one RTSP source runs at a time. Changing the camera URL stops the previous transcoder, and quitting Electron terminates it. The loopback relay accepts only its generated stream path and is not exposed to the local network. RTSP credentials can be present in the persisted URL, but the Settings form still does not provide credential fields or preserve arbitrary URL options.
 
 Camera lifecycle and failure details are logged to the Electron renderer console with the `[camera]` prefix.
 
@@ -149,6 +153,7 @@ A `0.12` dead zone is applied to hardware gamepad values before they are normali
 .
 ├── main.js                    Electron main process and settings IPC
 ├── preload.js                 Restricted renderer bridge
+├── rtsp-transcoder.js         Loopback RTSP-to-MJPEG ffmpeg relay
 ├── launch.sh                  Steam Gaming Mode production launcher
 ├── settings.json              Persisted local camera URL
 ├── index.html                 Renderer entry and Content Security Policy
@@ -177,13 +182,14 @@ The renderer runs with:
 - `contextIsolation: true`
 - `nodeIntegration: false`
 
-`preload.js` exposes only three operations through `window.electronAPI`:
+`preload.js` exposes only four operations through `window.electronAPI`:
 
 - `quitApp()`
 - `loadSettings()`
 - `saveSettings(settings)`
+- `resolveCameraStream(cameraUrl)`
 
-Keep filesystem access and application lifecycle operations in the main process. Do not expose Node.js or Electron modules directly to Vue components.
+Keep filesystem access, transcoder processes, and application lifecycle operations in the main process. Do not expose Node.js or Electron modules directly to Vue components.
 
 ### Renderer Data Flow
 
@@ -197,7 +203,8 @@ Keep filesystem access and application lifecycle operations in the main process.
 ## Current Limitations
 
 - Velocity values are visualized but are not sent to a robot transport or middleware.
-- RTSP playback needs an external browser-compatible relay.
+- RTSP transcoding is limited to one source at 15 fps and uses CPU-intensive MJPEG output.
+- RTSP startup and authentication failures depend on `ffmpeg` diagnostics and are not surfaced as structured UI errors.
 - Camera authentication is not represented in the Settings form.
 - The Settings form does not expose HTTPS or preserve URL query parameters and fragments.
 - Gamepad axis indices assume a conventional Steam Deck/gamepad mapping.

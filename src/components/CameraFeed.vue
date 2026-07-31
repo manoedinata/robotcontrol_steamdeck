@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { onUnmounted, ref, watch } from 'vue'
 import { Camera, Unplug } from '@lucide/vue'
 import { useSettings } from '../composables/useSettings'
 
@@ -11,27 +11,43 @@ const { cameraUrl } = useSettings()
 const cameraSource = ref('')
 const cameraState = ref('idle')
 const cameraError = ref(null)
+let connectionRequest = 0
 
-function connectCamera(nextUrl) {
+async function connectCamera(nextUrl) {
+  const request = ++connectionRequest
   const nextSource = nextUrl.trim()
   cameraError.value = null
 
   if (!nextSource) {
     cameraSource.value = ''
     cameraState.value = 'idle'
+    window.electronAPI?.resolveCameraStream?.('')
     return
   }
 
   cameraState.value = 'loading'
-  cameraSource.value = nextSource
-  console.info('[camera] Loading stream:', nextSource)
+  cameraSource.value = ''
+  console.info('[camera] Loading camera stream', { protocol: nextSource.split(':', 1)[0] })
+
+  try {
+    const resolvedSource = window.electronAPI?.resolveCameraStream
+      ? await window.electronAPI.resolveCameraStream(nextSource)
+      : nextSource
+
+    if (request !== connectionRequest) return
+    cameraSource.value = resolvedSource
+  } catch (error) {
+    if (request !== connectionRequest) return
+    cameraState.value = 'error'
+    cameraError.value = error?.message || 'Camera stream could not be started.'
+    console.error('[camera] Stream setup failed:', error)
+  }
 }
 
 function handleCameraReady(event) {
   cameraState.value = 'connected'
   cameraError.value = null
   console.info('[camera] Stream ready', {
-    currentSrc: event.currentTarget.currentSrc,
     width: event.currentTarget.naturalWidth,
     height: event.currentTarget.naturalHeight,
   })
@@ -44,8 +60,7 @@ function handleCameraError(event) {
   cameraState.value = 'error'
   cameraError.value = detail
   console.error('[camera] Stream failed', {
-    requestedUrl: cameraUrl.value,
-    currentSrc: image.currentSrc,
+    protocol: cameraUrl.value.split(':', 1)[0] || 'unknown',
     complete: image.complete,
     naturalWidth: image.naturalWidth,
     naturalHeight: image.naturalHeight,
@@ -53,6 +68,11 @@ function handleCameraError(event) {
 }
 
 watch(cameraUrl, connectCamera, { immediate: true })
+
+onUnmounted(() => {
+  connectionRequest += 1
+  window.electronAPI?.resolveCameraStream?.('')
+})
 </script>
 
 <template>

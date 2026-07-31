@@ -1,8 +1,10 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
+const { RtspTranscoder } = require('./rtsp-transcoder')
 
 const settingsPath = path.join(__dirname, 'settings.json')
+const rtspTranscoder = new RtspTranscoder()
 
 // Velocity limits are configurable per axis. Defaults preserve the historical
 // -10..+10 cap so existing settings.json files behave unchanged.
@@ -60,6 +62,14 @@ async function saveSettings(_event, settings) {
     return nextSettings
 }
 
+async function resolveCameraStream(_event, cameraUrl) {
+    if (typeof cameraUrl !== 'string') {
+        throw new TypeError('Camera URL must be a string.')
+    }
+
+    return rtspTranscoder.resolveStreamUrl(cameraUrl)
+}
+
 function createWindow() {
     const win = new BrowserWindow({
         width: 1280,
@@ -95,8 +105,11 @@ app.whenReady().then(() => {
 
     ipcMain.handle('settings:load', loadSettings)
     ipcMain.handle('settings:save', saveSettings)
+    ipcMain.handle('camera:resolve-stream', resolveCameraStream)
     ipcMain.on('app:quit', () => app.quit())
 })
+
+app.on('before-quit', () => rtspTranscoder.stop())
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
