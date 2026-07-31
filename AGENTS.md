@@ -14,9 +14,12 @@ The application does not currently send velocity commands to a robot, ROS, or an
 - `preload.js`: narrow context bridge exposed as `window.electronAPI`.
 - `src/App.vue`: persistent sidebar shell and Exit action.
 - `src/router/index.js`: eagerly imported Home and Settings routes using hash history. Hash history is required for production `file://` loading.
-- `src/views/HomeView.vue`: camera state, `<img>` rendering, Gamepad API polling, pointer joystick handling, and velocity calculations.
-- `src/views/SettingsView.vue`: camera URL field parsing and assembly.
-- `src/composables/useSettings.js`: module-level reactive settings state shared between routes.
+- `src/views/HomeView.vue`: thin composition shell that renders `CameraFeed` and `ControllerPanel` inside the Home layout.
+- `src/components/CameraFeed.vue`: camera state, `<img>` rendering, and the status overlay/indicator. Consumes `useSettings` directly.
+- `src/components/ControllerPanel.vue`: Gamepad API polling, dead zone, per-axis velocity math, and the joystick/status layout.
+- `src/components/Joystick.vue`: reusable single-axis joystick (`v-model` position, `axis` prop, pointer/touch drag with `drag-start`/`drag-end` events).
+- `src/views/SettingsView.vue`: camera URL field parsing/assembly plus the per-axis velocity-limit fields.
+- `src/composables/useSettings.js`: module-level reactive settings state (camera URL and velocity limits) shared between routes.
 - `src/styles.css`: global layout optimized for a 1280x800 display.
 - `settings.json`: local runtime configuration stored beside `launch.sh`.
 
@@ -49,11 +52,15 @@ The current persisted contract is:
 
 ```json
 {
-  "cameraUrl": "http://192.168.1.20:8080/video"
+  "cameraUrl": "http://192.168.1.20:8080/video",
+  "maxYVelocity": 10,
+  "maxThetaVelocity": 10
 }
 ```
 
-`SettingsView.vue` presents protocol, IP, port, and subpath separately, then assembles one `cameraUrl`. `useSettings.js` keeps that URL reactive across views. Preserve compatibility with existing `settings.json` files when changing this schema.
+`SettingsView.vue` presents protocol, IP, port, and subpath separately, then assembles one `cameraUrl`. It also exposes `maxYVelocity` and `maxThetaVelocity` as separate numeric fields. `useSettings.js` keeps the URL and both limits reactive across views. Preserve compatibility with existing `settings.json` files when changing this schema.
+
+`maxYVelocity` and `maxThetaVelocity` are the per-axis velocity caps (default `10`). The main process validates them in `normalizeMaxVelocity`: non-finite, non-positive, or missing values fall back to `10`, and valid values are clamped to `0.1`–`100`. Existing `settings.json` files without these keys must keep loading with the `10` default. Always validate renderer-provided limits in the main process; do not trust the renderer to clamp.
 
 The current form offers HTTP and RTSP only. Its parser does not preserve URL query parameters or fragments. Account for that limitation when changing URL handling; do not silently claim full arbitrary-URL editing or HTTPS form support.
 
@@ -63,7 +70,7 @@ Keep `useSettings.js` as the single shared renderer source of truth unless appli
 
 ### Camera
 
-`HomeView.vue` currently uses `<img>` so HTTP/HTTPS snapshots and MJPEG streams work without an additional player. Do not claim that direct RTSP playback works: Chromium cannot render `rtsp://` in `<img>`. RTSP support requires a relay or transcoder. HLS or WebRTC output would also require a corresponding browser renderer rather than the current `<img>` implementation.
+`CameraFeed.vue` currently uses `<img>` so HTTP/HTTPS snapshots and MJPEG streams work without an additional player. Do not claim that direct RTSP playback works: Chromium cannot render `rtsp://` in `<img>`. RTSP support requires a relay or transcoder. HLS or WebRTC output would also require a corresponding browser renderer rather than the current `<img>` implementation.
 
 The Content Security Policy in `index.html` must continue to permit required external camera image sources. Keep camera diagnostic logs under the `[camera]` prefix.
 
@@ -75,7 +82,8 @@ The application models a differential-drive robot:
 - Up is positive and down is negative.
 - Right stick horizontal axis (`axes[2]`) controls theta velocity.
 - Left is negative and right is positive.
-- Both outputs are normalized and capped at `-10` through `+10`.
+- Each stick is normalized to `-1..+1`, then scaled by its per-axis limit (`maxYVelocity` / `maxThetaVelocity`, default `10`). Output is capped at the negative and positive limit.
+- `ControllerPanel.vue` reads the limits from `useSettings.js`, so velocity readouts update reactively when Settings change.
 - A `0.12` dead zone is applied to hardware gamepad input; pointer and touch input currently have no dead zone.
 - Sideways translation is intentionally absent.
 
@@ -129,6 +137,7 @@ There are currently no automated test or lint scripts. Do not report tests or li
 - Do not overwrite a user's local camera URL in `settings.json` while performing unrelated work.
 - Run `npm run build` after renderer, Electron, configuration, or documentation-adjacent command changes.
 - Keep changes focused; do not introduce a state library, second UI framework, or stream player without a concrete requirement.
+- On any major change (new feature, architecture shift, settings-schema change, control/behavior change), update both `README.md` and this `AGENTS.md` in the same change so the docs stay in sync with the code.
 
 ## Known Gaps
 

@@ -8,10 +8,11 @@ A Steam Deck-oriented Electron application for viewing a robot camera and visual
 
 - Displays an HTTP image or MJPEG camera stream.
 - Reads Steam Deck or compatible controller input through the browser Gamepad API.
-- Maps the left stick vertical axis to linear Y velocity from `-10` to `+10`.
-- Maps the right stick horizontal axis to angular theta velocity from `-10` to `+10`.
+- Maps the left stick vertical axis to linear Y velocity, capped at a configurable limit.
+- Maps the right stick horizontal axis to angular theta velocity, capped at a configurable limit.
+- Lets the maximum Y and theta velocities be set independently from the Settings page.
 - Supports pointer and touch dragging for both on-screen joystick controls.
-- Stores the camera source in `settings.json` beside the launcher.
+- Stores the camera source and velocity limits in `settings.json` beside the launcher.
 - Runs as a frameless Electron application with Home and Settings routes plus an in-app Exit action.
 - Uses a layout sized to fit the Steam Deck display without scrolling.
 
@@ -87,20 +88,29 @@ chmod +x launch.sh
 
 Open **Settings** and provide:
 
+**Camera feed**
+
 - **Stream type:** HTTP or RTSP
 - **Source IP:** for example, `192.168.1.20`
 - **Port:** for example, `8080`
 - **Subpath:** optional, for example, `/video`
 
-The form assembles these fields into one URL and saves it in `settings.json`:
+**Robot controls**
+
+- **Max Y-velocity:** linear cap applied to the left stick, `0.1` to `100` (default `10`)
+- **Max Theta-velocity:** angular cap applied to the right stick, `0.1` to `100` (default `10`)
+
+The form assembles the camera fields into one URL and saves it alongside the velocity limits in `settings.json`:
 
 ```json
 {
-  "cameraUrl": "http://192.168.1.20:8080/video"
+  "cameraUrl": "http://192.168.1.20:8080/video",
+  "maxYVelocity": 10,
+  "maxThetaVelocity": 10
 }
 ```
 
-The Electron main process owns the file. The Vue views share its current value through `useSettings.js`; writes use a temporary file followed by rename to reduce the chance of a partially written settings file.
+The Electron main process owns the file and validates the velocity limits (finite, positive, clamped to `0.1`–`100`, defaulting to `10`) on both load and save. The Vue views share the current values through `useSettings.js`; writes use a temporary file followed by rename to reduce the chance of a partially written settings file. Existing `settings.json` files without the velocity keys keep working and fall back to the `10` default.
 
 The current Settings form exposes HTTP and RTSP and reconstructs the URL from protocol, host, port, and path. It does not preserve query parameters or fragments. If a camera URL needs HTTPS or query-string credentials/options, the current form must be extended before it can safely edit that URL.
 
@@ -119,10 +129,12 @@ Camera lifecycle and failure details are logged to the Electron renderer console
 
 | Input | Robot value |
 | --- | --- |
-| Left stick up | Positive Y velocity, up to `+10` |
-| Left stick down | Negative Y velocity, down to `-10` |
-| Right stick left | Negative theta velocity, down to `-10` |
-| Right stick right | Positive theta velocity, up to `+10` |
+| Left stick up | Positive Y velocity, up to the configured max Y-velocity |
+| Left stick down | Negative Y velocity, down to the negative max Y-velocity |
+| Right stick left | Negative theta velocity, down to the negative max theta-velocity |
+| Right stick right | Positive theta velocity, up to the configured max theta-velocity |
+
+Both limits default to `10` and are set independently on the Settings page. Stick output is normalized to `-1..+1` and then scaled by the matching limit.
 
 The Gamepad API mapping currently reads:
 
@@ -145,13 +157,17 @@ A `0.12` dead zone is applied to hardware gamepad values before they are normali
     ├── App.vue                Sidebar shell and application exit action
     ├── main.js                Vue, Bootstrap, and router initialization
     ├── styles.css             Steam Deck-oriented application styles
+    ├── components
+    │   ├── CameraFeed.vue     Camera state, <img> rendering, and status overlay
+    │   ├── ControllerPanel.vue Gamepad polling, velocity math, and joystick layout
+    │   └── Joystick.vue       Reusable single-axis joystick with pointer/touch drag
     ├── composables
-    │   └── useSettings.js     Shared reactive settings state
+    │   └── useSettings.js     Shared reactive settings state (camera URL + velocity limits)
     ├── router
     │   └── index.js           Eager Home/Settings routes using hash history
     └── views
-        ├── HomeView.vue       Camera, gamepad polling, and joystick UI
-        └── SettingsView.vue   Camera source form and persistence
+        ├── HomeView.vue       Composition shell rendering CameraFeed and ControllerPanel
+        └── SettingsView.vue   Camera source and velocity-limit form and persistence
 ```
 
 ### Electron Security Boundary
@@ -173,7 +189,8 @@ Keep filesystem access and application lifecycle operations in the main process.
 
 - `App.vue` owns the persistent shell and renders routed pages through `RouterView`.
 - `HomeView.vue` and `SettingsView.vue` are route-level components, not manually toggled page components.
-- `useSettings.js` owns one module-level reactive camera URL shared across routes.
+- `HomeView.vue` is a thin composition shell: `CameraFeed.vue` owns camera state and rendering, while `ControllerPanel.vue` owns gamepad polling, velocity math, and composes two `Joystick.vue` instances.
+- `useSettings.js` owns one module-level reactive store shared across routes: the camera URL plus the per-axis velocity limits. `ControllerPanel.vue` reads the limits to scale its output.
 - Vue code requests persistence through the preload bridge; only the Electron main process reads or writes `settings.json`.
 - Hash history is intentional because production loads `dist/index.html` from `file://` without an HTTP server.
 
