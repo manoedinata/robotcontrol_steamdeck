@@ -71,7 +71,7 @@ Keep `useSettings.js` as the single shared renderer source of truth unless appli
 
 ### Camera
 
-`CameraFeed.vue` uses `<img>` so HTTP/HTTPS snapshots and MJPEG streams work directly. Chromium cannot render `rtsp://` in `<img>`; RTSP sources are resolved through the Electron main process and `rtsp-transcoder.js`. The relay runs bundled `ffmpeg` over RTSP/TCP, removes audio, scales within 1280x800, limits output to 15 fps, and serves MJPEG from a tokenized random port bound only to `127.0.0.1`.
+`CameraFeed.vue` uses `<img>` so HTTP/HTTPS snapshots and MJPEG streams work directly. Chromium cannot render `rtsp://` in `<img>`; RTSP sources are resolved through the Electron main process and `rtsp-transcoder.js`. The relay runs bundled `ffmpeg` over RTSP/TCP, removes audio, scales within 1280x800 using `fast_bilinear`, limits output to 15 fps, uses two encoder threads, and serves JPEG quality `7` as MJPEG from a tokenized random port bound only to `127.0.0.1`. Low-latency input flags minimize buffering and probe delay.
 
 Keep RTSP process ownership in the main process. Permit only HTTP, HTTPS, and RTSP camera protocols; do not expose process arguments, generic process spawning, or a network-accessible relay through the preload bridge. Preserve one active source, terminate the child process on source changes and application quit, and avoid logging camera URLs because they may contain credentials. HLS or WebRTC output would require a corresponding browser renderer rather than the current `<img>` implementation.
 

@@ -123,7 +123,7 @@ The Home view renders the camera with an HTML `<img>` element. HTTP sources are 
 - HTTP or HTTPS snapshots
 - HTTP or HTTPS MJPEG streams
 
-For an RTSP source, the renderer asks the Electron main process to start the bundled `ffmpeg` binary. It connects to the camera over RTSP/TCP, removes audio, scales video to fit within 1280x800, limits output to 15 fps, and encodes JPEG frames. A Node.js HTTP server bound to a random `127.0.0.1` port exposes those frames as a tokenized MJPEG stream for the existing `<img>` renderer.
+For an RTSP source, the renderer asks the Electron main process to start the bundled `ffmpeg` binary. It connects to the camera over RTSP/TCP, removes audio, scales video to fit within 1280x800, limits output to 15 fps, and encodes JPEG frames. The transcoder uses low-latency input flags, a fast bilinear scaler, two encoder threads, and JPEG quality `7` to reduce CPU use and end-to-end delay. A Node.js HTTP server bound to a random `127.0.0.1` port exposes those frames as a tokenized MJPEG stream for the existing `<img>` renderer.
 
 Only one RTSP source runs at a time. Changing the camera URL stops the previous transcoder, and quitting Electron terminates it. The loopback relay accepts only its generated stream path and is not exposed to the local network. RTSP credentials can be present in the persisted URL, but the Settings form still does not provide credential fields or preserve arbitrary URL options.
 

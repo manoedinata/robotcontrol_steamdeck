@@ -1,5 +1,5 @@
 {
-  "cameraUrl": "http://10.7.101.221:8080/video",
+  "cameraUrl": "rtsp://10.110.197.7:8080/h264.sdp",
   "maxYVelocity": 20,
   "maxThetaVelocity": 10
 }
