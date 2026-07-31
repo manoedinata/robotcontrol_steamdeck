@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Gamepad2 } from '@lucide/vue'
 import Joystick from './Joystick.vue'
+import { useGamepad } from '../composables/useGamepad'
 import { useSettings } from '../composables/useSettings'
 
 // Differential-drive controller. The left stick vertical axis drives Y
@@ -11,12 +12,13 @@ import { useSettings } from '../composables/useSettings'
 // each frame and applies a dead zone; pointer/touch input goes through the
 // joystick components directly.
 const { maxYVelocity, maxThetaVelocity, udpHost, udpPort } = useSettings()
+const { acquire: acquireGamepad, axes: gamepadAxes, gamepadName } = useGamepad()
 
 const leftStickY = ref(0)
 const rightStickX = ref(0)
 const draggedStick = ref(null)
-const gamepadName = ref('')
 let animationFrame
+let releaseGamepad
 let sendTimer
 let sendInFlight = false
 let sendZeroAfterFlight = false
@@ -70,19 +72,14 @@ async function sendVelocity(y = yVelocity.value, theta = thetaVelocity.value) {
 }
 
 function updateGamepad() {
-  const gamepad = Array.from(navigator.getGamepads?.() ?? []).find(Boolean)
-
-  if (gamepad) {
-    gamepadName.value = gamepad.id
-
+  if (gamepadName.value) {
     if (draggedStick.value !== 'left') {
-      leftStickY.value = applyDeadZone(gamepad.axes[1] ?? 0)
+      leftStickY.value = applyDeadZone(gamepadAxes.value[1] ?? 0)
     }
     if (draggedStick.value !== 'right') {
-      rightStickX.value = applyDeadZone(gamepad.axes[2] ?? 0)
+      rightStickX.value = applyDeadZone(gamepadAxes.value[2] ?? 0)
     }
   } else {
-    gamepadName.value = ''
     if (draggedStick.value !== 'left') {
       leftStickY.value = 0
     }
@@ -95,12 +92,14 @@ function updateGamepad() {
 }
 
 onMounted(() => {
+  releaseGamepad = acquireGamepad()
   animationFrame = requestAnimationFrame(updateGamepad)
   sendTimer = window.setInterval(sendVelocity, 100)
 })
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(animationFrame)
+  releaseGamepad?.()
   window.clearInterval(sendTimer)
   if (sendInFlight) {
     sendZeroAfterFlight = true
@@ -114,13 +113,8 @@ onBeforeUnmount(() => {
   <section class="joystick-section">
     <div class="joysticks-grid">
       <div class="joystick-column">
-        <Joystick
-          v-model="leftStickY"
-          axis="vertical"
-          label="Left joystick"
-          @drag-start="draggedStick = 'left'"
-          @drag-end="draggedStick = null"
-        />
+        <Joystick v-model="leftStickY" axis="vertical" label="Left joystick" @drag-start="draggedStick = 'left'"
+          @drag-end="draggedStick = null" />
         <p class="joystick-readout">
           Y-velocity:
           <strong>{{ formatVelocity(yVelocity) }}</strong>
@@ -138,13 +132,8 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="joystick-column">
-        <Joystick
-          v-model="rightStickX"
-          axis="horizontal"
-          label="Right joystick"
-          @drag-start="draggedStick = 'right'"
-          @drag-end="draggedStick = null"
-        />
+        <Joystick v-model="rightStickX" axis="horizontal" label="Right joystick" @drag-start="draggedStick = 'right'"
+          @drag-end="draggedStick = null" />
         <p class="joystick-readout">
           Theta-velocity:
           <strong>{{ formatVelocity(thetaVelocity) }}</strong>

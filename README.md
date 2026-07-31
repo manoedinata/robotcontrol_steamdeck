@@ -26,6 +26,7 @@ A Steam Deck-oriented Electron application for viewing a robot camera and visual
 - Displays HTTP snapshots, HTTP MJPEG streams, and RTSP camera streams.
 - Transcodes RTSP to a loopback-only MJPEG stream with bundled `ffmpeg`.
 - Reads Steam Deck or compatible controller input through the browser Gamepad API.
+- Supports complete Steam Deck gamepad navigation for the sidebar, Settings form, and built-in keyboard.
 - Maps the left stick vertical axis to linear Y velocity, capped at a configurable limit.
 - Maps the right stick horizontal axis to angular theta velocity, capped at a configurable limit.
 - Lets the maximum Y and theta velocities be set independently from the Settings page.
@@ -166,6 +167,24 @@ Camera lifecycle and failure details are logged to the Electron renderer console
 
 ## Controls
 
+### Interface navigation
+
+| Input         | Action                                                                |
+| ------------- | --------------------------------------------------------------------- |
+| D-pad up/down | Select Home, Settings, or Exit in the sidebar                         |
+| A             | Enter Settings, activate the focused control, or press a keyboard key |
+| B             | Return from Settings to the sidebar, or cancel the built-in keyboard  |
+| D-pad         | Move between Settings controls or built-in keyboard keys              |
+| Left stick    | Move between built-in keyboard keys                                   |
+
+The active route starts as the sidebar selection. Highlighting Exit does not change the current route; press **A** to quit. Pressing **A** on Settings moves focus into the first form control. D-pad directions then move spatially between form controls and keep the focused control visible as the Settings page scrolls. **A** opens an input, toggles a switch, presses a button, or advances a select option. Press **B** to return focus to the Settings sidebar item.
+
+When the built-in keyboard is open, it takes control priority. D-pad and left-stick directions move between character and command keys, **A** presses the focused key, and **B** cancels without committing the draft. Closing the keyboard restores focus to its originating Settings field, and saving restores focus to the Save button, so subsequent D-pad input remains in Settings. Held directions repeat after a short delay. Mouse, touch, and physical keyboard input remain supported.
+
+Left-stick navigation is limited to the keyboard modal. On Home, both analog sticks retain their robot-control behavior and do not navigate the interface. D-pad up/down can still switch between Home and Settings.
+
+### Robot controls
+
 | Input             | Robot value                                                      |
 | ----------------- | ---------------------------------------------------------------- |
 | Left stick up     | Positive Y velocity, up to the configured max Y-velocity         |
@@ -218,6 +237,7 @@ The receiver must use the same packed layout and little-endian byte order. The E
     │   ├── Joystick.vue       Reusable single-axis joystick with pointer/touch drag
     │   └── OnScreenKeyboard.vue Built-in Settings keyboard with tailored layouts
     ├── composables
+    │   ├── useGamepad.js      Shared Gamepad API polling and prioritized UI actions
     │   └── useSettings.js     Shared reactive settings state and persistence interface
     ├── router
     │   └── index.js           Eager Home/Settings routes using hash history
@@ -248,6 +268,7 @@ Keep filesystem access, transcoder processes, and application lifecycle operatio
 - `App.vue` owns the persistent shell and renders routed pages through `RouterView`.
 - `HomeView.vue` and `SettingsView.vue` are route-level components, not manually toggled page components.
 - `HomeView.vue` is a thin composition shell: `CameraFeed.vue` owns camera state and rendering, while `ControllerPanel.vue` owns gamepad polling, velocity math, and composes two `Joystick.vue` instances.
+- `useGamepad.js` owns the single Gamepad API polling loop. Prioritized handlers route D-pad, left-stick, A, and B actions to the keyboard modal, Settings form, or sidebar while `ControllerPanel.vue` consumes the same reactive axes for robot velocity.
 - `useSettings.js` owns one module-level reactive store shared across routes: the camera URL, per-axis velocity limits, and keyboard preference. `ControllerPanel.vue` reads the limits to scale its output.
 - Vue code requests persistence through the preload bridge; only the Electron main process reads or writes `settings.json`.
 - Hash history is intentional because production loads `dist/index.html` from `file://` without an HTTP server.

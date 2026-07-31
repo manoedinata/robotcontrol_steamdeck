@@ -23,6 +23,7 @@ While the Home controller panel is active, the application sends packed Y/theta 
 - `src/components/OnScreenKeyboard.vue`: modal Settings keyboard with IP, integer, decimal, and text layouts plus commit/cancel behavior.
 - `src/views/SettingsView.vue`: camera URL field parsing/assembly, per-axis velocity-limit fields, and the keyboard preference toggle.
 - `src/composables/useSettings.js`: module-level reactive settings state (camera URL, velocity limits, and keyboard preference) shared between routes.
+- `src/composables/useGamepad.js`: shared Gamepad API polling, reactive axes/controller identity, held-direction repeat, and prioritized UI action dispatch.
 - `src/styles.css`: global layout optimized for a 1280x800 display.
 - `settings.json`: local runtime configuration stored beside `launch.sh`.
 
@@ -104,6 +105,19 @@ The application models a differential-drive robot:
 - Sideways translation is intentionally absent.
 
 Pointer and touch controls must follow the same axis constraints as hardware input. Do not add X translation without an explicit product requirement.
+
+### Gamepad Navigation
+
+`useGamepad.js` is the single renderer polling owner for Steam Deck and compatible gamepads. `ControllerPanel.vue` consumes its reactive axes so Home robot control and interface navigation do not create competing Gamepad API loops.
+
+- Standard button mapping is A at button `0`, B at button `1`, and D-pad up/down/left/right at buttons `12` through `15`.
+- D-pad up/down selects Home, Settings, or Exit in the persistent sidebar. Highlighting Exit preserves the current route, and A activates Exit. A on Settings enters its first form control.
+- While a Settings control has focus, D-pad directions move spatially between controls, A activates the focused control, and B returns focus to the Settings sidebar item.
+- While `OnScreenKeyboard.vue` is open, it has the highest input priority. D-pad and left-stick axes `0`/`1` select keys, A activates a key, and B cancels the draft.
+- Closing the on-screen keyboard restores focus to its originating Settings control. Completing a Settings save restores focus to the Save button so D-pad input remains owned by Settings.
+- Held directional input repeats only after an initial delay. Left-stick navigation uses a `0.55` threshold.
+- Left-stick navigation must remain keyboard-modal-only. On Home, the left and right sticks retain their robot velocity behavior; interface navigation must not consume or suppress those axes.
+- Maintain visible focus styles and scroll focused Settings controls into view.
 
 ### UI Layout
 

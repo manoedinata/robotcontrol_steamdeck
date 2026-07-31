@@ -1,6 +1,9 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ArrowBigUp, Check, Delete, Trash2, X } from '@lucide/vue'
+import { useGamepad } from '../composables/useGamepad'
+
+const { registerHandler } = useGamepad()
 
 const props = defineProps({
   layout: {
@@ -26,6 +29,7 @@ const emit = defineEmits(['cancel', 'done'])
 const keyboard = ref(null)
 const draft = ref(props.value)
 const shifted = ref(false)
+let unregisterGamepadHandler
 
 const letterRows = [
   ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
@@ -98,24 +102,72 @@ function handleWindowKeydown(event) {
   }
 }
 
+function focusKeyInDirection(direction) {
+  const buttons = [...keyboard.value.querySelectorAll('button:not(:disabled)')]
+  const current = document.activeElement
+  if (!buttons.includes(current)) {
+    buttons[0]?.focus()
+    return
+  }
+
+  const currentRect = current.getBoundingClientRect()
+  const currentX = currentRect.left + currentRect.width / 2
+  const currentY = currentRect.top + currentRect.height / 2
+  const candidates = buttons.filter((button) => {
+    if (button === current) return false
+    const rect = button.getBoundingClientRect()
+    const x = rect.left + rect.width / 2
+    const y = rect.top + rect.height / 2
+    if (direction === 'up') return y < currentY - 4
+    if (direction === 'down') return y > currentY + 4
+    if (direction === 'left') return x < currentX - 4
+    return x > currentX + 4
+  })
+
+  const next = candidates.sort((a, b) => {
+    const score = (button) => {
+      const rect = button.getBoundingClientRect()
+      const x = rect.left + rect.width / 2
+      const y = rect.top + rect.height / 2
+      const primary = ['up', 'down'].includes(direction) ? Math.abs(y - currentY) : Math.abs(x - currentX)
+      const secondary = ['up', 'down'].includes(direction) ? Math.abs(x - currentX) : Math.abs(y - currentY)
+      return primary + secondary * 2
+    }
+    return score(a) - score(b)
+  })[0]
+
+  next?.focus()
+}
+
+function handleGamepadNavigation(action) {
+  const direction = action.replace('stick-', '')
+  if (['up', 'down', 'left', 'right'].includes(direction)) {
+    focusKeyInDirection(direction)
+  } else if (action === 'activate') {
+    document.activeElement?.click()
+  } else if (action === 'cancel') {
+    emit('cancel')
+  }
+  return true
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', handleWindowKeydown)
   await nextTick()
-  keyboard.value?.querySelector('button')?.focus()
+  keyboard.value?.querySelector('[data-osk-key]')?.focus()
+  unregisterGamepadHandler = registerHandler(handleGamepadNavigation, 100)
 })
 
-onBeforeUnmount(() => window.removeEventListener('keydown', handleWindowKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleWindowKeydown)
+  unregisterGamepadHandler?.()
+})
 </script>
 
 <template>
   <div class="osk-backdrop" role="presentation" @pointerdown.self="emit('cancel')">
-    <section
-      ref="keyboard"
-      class="osk-panel"
-      role="dialog"
-      aria-modal="true"
-      :aria-labelledby="`${title.replaceAll(' ', '-').toLowerCase()}-keyboard-title`"
-    >
+    <section ref="keyboard" class="osk-panel" role="dialog" aria-modal="true"
+      :aria-labelledby="`${title.replaceAll(' ', '-').toLowerCase()}-keyboard-title`">
       <header class="osk-header">
         <h2 :id="`${title.replaceAll(' ', '-').toLowerCase()}-keyboard-title`">{{ title }}</h2>
         <button class="icon-button" type="button" title="Cancel" aria-label="Cancel input" @click="emit('cancel')">
@@ -132,13 +184,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleWindowKeydown)
       <div class="osk-body" :class="{ 'osk-body-numeric': !isTextLayout }">
         <div class="osk-key-rows">
           <div v-for="(row, rowIndex) in rows" :key="rowIndex" class="osk-key-row">
-            <button
-              v-for="key in row"
-              :key="key"
-              class="osk-key"
-              type="button"
-              @click="appendKey(key)"
-            >
+            <button v-for="key in row" :key="key" class="osk-key" type="button" data-osk-key @click="appendKey(key)">
               {{ shifted && /^[a-z]$/.test(key) ? key.toUpperCase() : key }}
             </button>
           </div>
@@ -148,7 +194,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleWindowKeydown)
               <ArrowBigUp :size="20" aria-hidden="true" />
               Shift
             </button>
-            <button v-for="key in ['/', '-', '_', '.', ':']" :key="key" class="osk-key" type="button" @click="appendKey(key)">
+            <button v-for="key in ['/', '-', '_', '.', ':']" :key="key" class="osk-key" type="button"
+              @click="appendKey(key)">
               {{ key }}
             </button>
           </div>
