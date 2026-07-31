@@ -2,11 +2,16 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const { RtspTranscoder } = require('./rtsp-transcoder')
-const { UdpClient } = require('./udp-client')
+const { UdpClient, packVelocityPacket } = require('./udp-client')
 
 const settingsPath = path.join(__dirname, 'settings.json')
+const UDP_SEND_INTERVAL_MS = 20
 const rtspTranscoder = new RtspTranscoder()
 const udpClient = new UdpClient()
+let latestUdpCommand = null
+let udpSendTimer = null
+let udpSendInFlight = false
+let lastUdpSendError = ''
 
 async function loadSettings() {
     try {
@@ -36,7 +41,7 @@ async function resolveCameraStream(_event, cameraUrl) {
     return rtspTranscoder.resolveStreamUrl(cameraUrl)
 }
 
-async function sendUdpMessage(_event, host, port, header, velocity) {
+function validateUdpDestination(host, port) {
     if (
         typeof host !== 'string'
         || host.trim().length === 0
@@ -46,8 +51,55 @@ async function sendUdpMessage(_event, host, port, header, velocity) {
     ) {
         throw new TypeError('Invalid arguments for sending UDP message.')
     }
+}
 
-    await udpClient.sendMessage(host, port, header, velocity)
+async function sendLatestUdpVelocity() {
+    if (!latestUdpCommand || udpSendInFlight) return
+
+    const command = latestUdpCommand
+    udpSendInFlight = true
+    try {
+        await udpClient.sendMessage(command.host, command.port, 'ITS', command.velocity)
+        lastUdpSendError = ''
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (message !== lastUdpSendError) {
+            console.error('Failed to send UDP velocity:', error)
+            lastUdpSendError = message
+        }
+    } finally {
+        udpSendInFlight = false
+    }
+}
+
+function updateUdpVelocity(_event, host, port, velocity) {
+    try {
+        validateUdpDestination(host, port)
+        packVelocityPacket('ITS', velocity)
+    } catch (error) {
+        console.error('Rejected invalid UDP velocity update:', error)
+        stopUdpVelocity()
+        return
+    }
+
+    latestUdpCommand = {
+        host: host.trim(),
+        port,
+        velocity: [...velocity],
+    }
+
+    if (!udpSendTimer) {
+        udpSendTimer = setInterval(sendLatestUdpVelocity, UDP_SEND_INTERVAL_MS)
+    }
+}
+
+function stopUdpVelocity() {
+    latestUdpCommand = null
+    lastUdpSendError = ''
+    if (udpSendTimer) {
+        clearInterval(udpSendTimer)
+        udpSendTimer = null
+    }
 }
 
 function createWindow() {
@@ -68,6 +120,14 @@ function createWindow() {
     win.webContents.on('did-finish-load', () => {
         win.webContents.setZoomFactor(1.2)
     })
+
+    win.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+        if (isMainFrame && !isInPlace) {
+            stopUdpVelocity()
+        }
+    })
+    win.webContents.on('render-process-gone', stopUdpVelocity)
+    win.on('closed', stopUdpVelocity)
 
     const devServerUrl = process.env.VITE_DEV_SERVER_URL
 
@@ -90,11 +150,13 @@ app.whenReady().then(() => {
     ipcMain.handle('settings:load', loadSettings)
     ipcMain.handle('settings:save', saveSettings)
     ipcMain.handle('camera:resolve-stream', resolveCameraStream)
-    ipcMain.handle('udp:send-message', sendUdpMessage)
+    ipcMain.on('udp:update-velocity', updateUdpVelocity)
+    ipcMain.on('udp:stop-velocity', stopUdpVelocity)
     ipcMain.on('app:quit', () => app.quit())
 })
 
 app.on('before-quit', () => {
+    stopUdpVelocity()
     rtspTranscoder.stop()
     udpClient.close()
 })

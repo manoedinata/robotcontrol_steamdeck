@@ -6,11 +6,11 @@ This repository is a Steam Deck-oriented Electron and Vue application for viewin
 
 The target viewport is 1280x800. The primary runtime environment is SteamOS Gaming Mode.
 
-While the Home controller panel is active, the application sends packed Y/theta velocity datagrams every 100 ms to the configured UDP destination. It does not integrate directly with ROS or other robot middleware.
+While the Home controller panel is active, the Electron main process sends packed Y/theta velocity datagrams at 50 Hz (every 20 ms) to the configured UDP destination. It does not integrate directly with ROS or other robot middleware.
 
 ## Architecture
 
-- `main.js`: Electron main process, BrowserWindow creation, IPC handlers, settings filesystem access, and RTSP transcoder lifecycle.
+- `main.js`: Electron main process, BrowserWindow creation, IPC handlers, settings filesystem access, RTSP transcoder lifecycle, and the 50 Hz latest-command UDP scheduler.
 - `preload.js`: narrow context bridge exposed as `window.electronAPI`.
 - `rtsp-transcoder.js`: one-source RTSP/TCP to MJPEG relay using bundled `ffmpeg`, bound to a tokenized loopback URL.
 - `udp-client.js`: validates and packs a 3-byte ASCII header plus two little-endian IEEE-754 `float32` velocities into an 11-byte UDP datagram.
@@ -53,7 +53,7 @@ Do not access Node.js, Electron, or the filesystem directly from Vue code. Add n
 
 Keep application lifecycle and settings filesystem ownership in the main process. Do not broaden `window.electronAPI` with generic IPC, filesystem, or shell access.
 
-The UDP preload contract is `sendUdpMessage(host, port, header, velocity)`, where `header` is exactly three ASCII characters and `velocity` is `[yVelocity, thetaVelocity]`. The main process validates the host and port; `udp-client.js` validates and serializes two finite IEEE-754 `float32` values. Keep the packet packed with Y at byte offset `3`, theta at byte offset `7`, and little-endian byte order unless the receiver protocol changes explicitly. Close the UDP socket during application shutdown.
+The UDP preload contract is `updateUdpVelocity(host, port, velocity)` plus `stopUdpVelocity()`, where velocity is `[yVelocity, thetaVelocity]`. `ControllerPanel.vue` publishes only the latest reactive state. The main process validates updates, retains the latest command, and sends it every 20 ms with fixed header `ITS`. Invalid updates, full renderer navigation, renderer termination, and window close must clear the scheduler so a stale command cannot continue. `udp-client.js` validates and serializes two finite IEEE-754 `float32` values. Keep the packet packed with Y at byte offset `3`, theta at byte offset `7`, and little-endian byte order unless the receiver protocol changes explicitly. Do not overlap sends. Close the UDP socket during application shutdown.
 
 ### Settings
 
@@ -74,7 +74,7 @@ The current persisted contract is:
 
 `maxYVelocity` and `maxThetaVelocity` are the per-axis velocity caps (default `10`). `useSettings.js` owns these defaults and applies them when stored keys are missing. The main process persists and returns the Settings IPC payload unchanged; validation constraints are expressed by the Settings form before it sends the payload.
 
-`udpHost` defaults to an empty string and `udpPort` defaults to `0` for existing settings files, disabling transmission until a valid destination is saved. `ControllerPanel.vue` sends header `ITS` and `[yVelocity, thetaVelocity]` every 100 ms while mounted. Do not overlap sends. When Home unmounts, stop the send timer without issuing a special final zero-velocity command.
+`udpHost` defaults to an empty string and `udpPort` defaults to `0` for existing settings files, disabling transmission until a valid destination is saved. `ControllerPanel.vue` publishes updated destination and velocity state while mounted. The main process sends the latest state with header `ITS` every 20 ms. When Home unmounts, stop the main-process timer without issuing a special final zero-velocity command.
 
 UDP destination fields are optional so users can save unrelated settings while transmission is disabled. The built-in keyboard's hostname layout must support letters, digits, dots, and hyphens. During application shutdown, close the UDP socket without sending a final stop datagram. The receiving STM32 owns motion fail-safe behavior and must stop the wheels when its UDP receive-timeout watchdog expires.
 

@@ -36,7 +36,7 @@ A Steam Deck-oriented Electron application for viewing a robot camera and visual
 - Provides a built-in Settings keyboard that avoids duplicate Steam keyboard input.
 - Supports pointer and touch dragging for both on-screen joystick controls.
 - Stores the camera source, velocity limits, UDP destination, and keyboard preference in `settings.json` beside the launcher.
-- Sends packed Y/theta velocity datagrams to the configured UDP destination every 100 ms.
+- Sends packed Y/theta velocity datagrams to the configured UDP destination at 50 Hz (every 20 ms).
 - Runs as a frameless Electron application with Home and Settings routes plus an in-app Exit action.
 - Uses a layout sized to fit the Steam Deck display without scrolling.
 
@@ -206,9 +206,11 @@ A `0.12` dead zone is applied to hardware gamepad values before they are normali
 
 ### UDP Packet Format
 
-While the Home controller panel is mounted and a valid destination is configured, it calls `window.electronAPI.sendUdpMessage(host, port, 'ITS', [yVelocity, thetaVelocity])` every 100 ms. Leaving Home or quitting the application stops transmission without sending a special final zero-velocity command. The receiving STM32 must use a UDP receive-timeout watchdog that stops the wheels when command datagrams cease.
+While the Home controller panel is mounted and a valid destination is configured, it publishes the latest `[yVelocity, thetaVelocity]` state through `window.electronAPI.updateUdpVelocity(host, port, velocity)`. The Electron main process retains that latest command and sends it with header `ITS` at 50 Hz (every 20 ms). This keeps periodic scheduling and UDP socket work outside the renderer. A slow send is never overlapped; the next timer tick uses the most recently published state.
 
-Each call sends one fixed-size, 11-byte UDP datagram. The header must be exactly three ASCII characters and velocity is `[yVelocity, thetaVelocity]`, encoded as two IEEE-754 32-bit floating-point values.
+Leaving Home calls `stopUdpVelocity()` and clears the main-process timer. A full renderer navigation, renderer process exit, window close, or application quit also stops the scheduler so a stale command cannot continue after the renderer disappears. None of these paths sends a special final zero-velocity command; the receiving STM32 must use a UDP receive-timeout watchdog that stops the wheels when command datagrams cease.
+
+Each transmission is one fixed-size, 11-byte UDP datagram. The header must be exactly three ASCII characters and velocity is `[yVelocity, thetaVelocity]`, encoded as two IEEE-754 32-bit floating-point values.
 
 | Offset | Size | Encoding                          | Value          |
 | ------ | ---- | --------------------------------- | -------------- |
@@ -260,13 +262,14 @@ The renderer runs with:
 - `contextIsolation: true`
 - `nodeIntegration: false`
 
-`preload.js` exposes only five operations through `window.electronAPI`:
+`preload.js` exposes only six operations through `window.electronAPI`:
 
 - `quitApp()`
 - `loadSettings()`
 - `saveSettings(settings)`
 - `resolveCameraStream(cameraUrl)`
-- `sendUdpMessage(host, port, header, velocity)`
+- `updateUdpVelocity(host, port, velocity)`
+- `stopUdpVelocity()`
 
 Keep filesystem access, transcoder processes, and application lifecycle operations in the main process. Do not expose Node.js or Electron modules directly to Vue components.
 
@@ -278,6 +281,7 @@ Keep filesystem access, transcoder processes, and application lifecycle operatio
 - `useGamepad.js` owns the single Gamepad API polling loop. Prioritized handlers route D-pad, left-stick, A, and B actions to the keyboard modal, Settings form, or sidebar while `ControllerPanel.vue` consumes the same reactive axes for robot velocity.
 - `useSettingsGamepadNavigation.js` and `useOnScreenKeyboardNavigation.js` own their respective focus and activation lifecycles. Both use `spatialFocus.js` for directional DOM focus selection, keeping navigation mechanics out of the Settings and keyboard components.
 - `useSettings.js` owns one module-level reactive store shared across routes: the camera URL, per-axis velocity limits, and keyboard preference. `ControllerPanel.vue` reads the limits to scale its output.
+- `ControllerPanel.vue` publishes only changed destination/velocity state. The Electron main process owns the 20 ms UDP timer and repeatedly sends the latest state without overlapping socket sends.
 - Vue code requests persistence through the preload bridge; only the Electron main process reads or writes `settings.json`.
 - Hash history is intentional because production loads `dist/index.html` from `file://` without an HTTP server.
 

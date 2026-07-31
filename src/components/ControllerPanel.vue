@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Gamepad2 } from '@lucide/vue'
 import Joystick from './Joystick.vue'
 import { useGamepad } from '../composables/useGamepad'
@@ -19,9 +19,6 @@ const rightStickX = ref(0)
 const draggedStick = ref(null)
 let animationFrame
 let releaseGamepad
-let sendTimer
-let sendInFlight = false
-let lastSendError = ''
 
 const yVelocity = computed(() => -leftStickY.value * maxYVelocity.value)
 const thetaVelocity = computed(() => rightStickX.value * maxThetaVelocity.value)
@@ -43,28 +40,20 @@ function hasUdpDestination() {
     && udpPort.value <= 65535
 }
 
-async function sendVelocity(y = yVelocity.value, theta = thetaVelocity.value) {
-  if (!hasUdpDestination() || sendInFlight || !window.electronAPI?.sendUdpMessage) return
-
-  sendInFlight = true
-  try {
-    await window.electronAPI.sendUdpMessage(
-      udpHost.value.trim(),
-      udpPort.value,
-      'ITS',
-      [y, theta],
-    )
-    lastSendError = ''
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (message !== lastSendError) {
-      console.error('Failed to send UDP velocity:', error)
-      lastSendError = message
-    }
-  } finally {
-    sendInFlight = false
+function publishVelocity() {
+  if (!hasUdpDestination()) {
+    window.electronAPI?.stopUdpVelocity?.()
+    return
   }
+
+  window.electronAPI?.updateUdpVelocity?.(
+    udpHost.value.trim(),
+    udpPort.value,
+    [yVelocity.value, thetaVelocity.value],
+  )
 }
+
+watch([yVelocity, thetaVelocity, udpHost, udpPort], publishVelocity, { immediate: true })
 
 function updateGamepad() {
   if (gamepadName.value) {
@@ -89,13 +78,12 @@ function updateGamepad() {
 onMounted(() => {
   releaseGamepad = acquireGamepad()
   animationFrame = requestAnimationFrame(updateGamepad)
-  sendTimer = window.setInterval(sendVelocity, 20)
 })
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(animationFrame)
   releaseGamepad?.()
-  window.clearInterval(sendTimer)
+  window.electronAPI?.stopUdpVelocity?.()
 })
 </script>
 
