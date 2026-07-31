@@ -63,36 +63,40 @@ onBeforeUnmount(() => {
 <template>
   <section class="joystick-section">
     <div class="joysticks-grid">
-      <Joystick
-        v-model="leftStickY"
-        axis="vertical"
-        label="Left joystick"
-        @drag-start="draggedStick = 'left'"
-        @drag-end="draggedStick = null"
-      />
+      <div class="joystick-column">
+        <Joystick
+          v-model="leftStickY"
+          axis="vertical"
+          label="Left joystick"
+          @drag-start="draggedStick = 'left'"
+          @drag-end="draggedStick = null"
+        />
+        <p class="joystick-readout">
+          Y-velocity:
+          <strong>{{ formatVelocity(yVelocity) }}</strong>
+        </p>
+      </div>
 
       <div class="joystick-center-card">
         <p>
           Joystick status:
           {{ gamepadName || 'Not connected' }}
         </p>
-        <p>
-          Y-velocity:
-          <strong>{{ formatVelocity(yVelocity) }}</strong>
-        </p>
-        <p>
+      </div>
+
+      <div class="joystick-column">
+        <Joystick
+          v-model="rightStickX"
+          axis="horizontal"
+          label="Right joystick"
+          @drag-start="draggedStick = 'right'"
+          @drag-end="draggedStick = null"
+        />
+        <p class="joystick-readout">
           Theta-velocity:
           <strong>{{ formatVelocity(thetaVelocity) }}</strong>
         </p>
       </div>
-
-      <Joystick
-        v-model="rightStickX"
-        axis="horizontal"
-        label="Right joystick"
-        @drag-start="draggedStick = 'right'"
-        @drag-end="draggedStick = null"
-      />
     </div>
   </section>
 </template>

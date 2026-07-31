@@ -147,7 +147,7 @@ textarea {
 .home-layout {
     height: 100%;
     display: grid;
-    grid-template-rows: minmax(0, 1fr) 198px;
+    grid-template-rows: minmax(0, 1fr) 236px;
     gap: 12px;
 }
 
@@ -295,9 +295,31 @@ textarea {
     display: grid;
     grid-template-columns: 180px minmax(180px, 1fr) 180px;
     gap: 32px;
-    align-items: center;
+    align-items: start;
     justify-items: center;
     padding: 8px 48px;
+}
+
+.joystick-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.joystick-readout {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    color: #687078;
+    font-size: 0.875rem;
+}
+
+.joystick-readout strong {
+    color: #20252b;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-weight: 700;
 }
 
 .joystick-control {
