@@ -1,8 +1,8 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
-const { RtspTranscoder } = require('./rtsp-transcoder')
-const { UdpClient, packVelocityPacket } = require('./udp-client')
+const { RtspTranscoder } = require('./electron-components/rtsp-transcoder')
+const { UdpClient, packVelocityPacket } = require('./electron-components/udp-client')
 
 const settingsPath = path.join(__dirname, 'settings.json')
 const UDP_SEND_INTERVAL_MS = 20
@@ -89,6 +89,8 @@ function stopUdpVelocity() {
     }
 }
 
+// ================================= //
+
 function createWindow() {
     const win = new BrowserWindow({
         width: 1280,
@@ -98,7 +100,7 @@ function createWindow() {
         frame: false,
         backgroundColor: '#f4f6f8',
         webPreferences: {
-            preload: path.join(__dirname, 'preload.js'),
+            preload: path.join(__dirname, 'electron-components', 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
         },
@@ -153,3 +155,4 @@ app.on('window-all-closed', () => {
         app.quit()
     }
 })
+preload.js

@@ -1,3 +1,6 @@
+// Example of a simple UDP server that listens for packets with a specific header
+// and size, and logs the received velocity data along with the time interval between packets.
+
 const { createSocket } = require('dgram');
 
 const server = createSocket('udp4');
