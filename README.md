@@ -61,24 +61,25 @@ The application was built primarily for SteamOS and Steam Deck Gaming Mode.
 
 ## Quick Start
 
-Install dependencies, start Vite, wait for it to become available, and launch Electron:
+Install dependencies, start the local UDP diagnostic receiver and Vite, wait for Vite to become available, and launch Electron:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Vite listens on `http://127.0.0.1:5173`. Electron waits for that URL and then loads it through `VITE_DEV_SERVER_URL`.
+Vite listens on `http://127.0.0.1:5173`. Electron waits for that URL and then loads it through `VITE_DEV_SERVER_URL`. The diagnostic receiver listens on `0.0.0.0:41234`; set the Settings UDP destination to the Deck's address and port `41234` when you want to inspect packet values and timing locally.
 
 ## Commands
 
-| Command            | Purpose                                          |
-| ------------------ | ------------------------------------------------ |
-| `npm run dev`      | Run Vite and Electron together for development   |
-| `npm run build`    | Build the renderer into `dist/`                  |
-| `npm run electron` | Launch Electron using the existing `dist/` build |
-| `npm run start`    | Build the renderer, then launch Electron         |
-| `npm run preview`  | Preview the production renderer in a browser     |
+| Command            | Purpose                                           |
+| ------------------ | ------------------------------------------------- |
+| `npm run dev`      | Run the UDP receiver, Vite, and Electron together |
+| `npm run build`    | Build the renderer into `dist/`                   |
+| `npm run electron` | Launch Electron using the existing `dist/` build  |
+| `npm run start`    | Build the renderer, then launch Electron          |
+| `npm run preview`  | Preview the production renderer in a browser      |
+| `npm run udp`      | Run only the UDP packet diagnostic receiver       |
 
 The browser preview is useful for layout work, but Electron-only operations such as loading, saving, and quitting depend on `window.electronAPI`. Use Electron to verify the complete workflow.
 
@@ -218,16 +219,20 @@ Each transmission is one fixed-size, 11-byte UDP datagram. The header must be ex
 | `3`    | 4    | IEEE-754 `float32`, little-endian | Y velocity     |
 | `7`    | 4    | IEEE-754 `float32`, little-endian | Theta velocity |
 
-The receiver must use the same packed layout and little-endian byte order. The Electron main process validates the host and UDP port, while the UDP client validates the header, array shape, finite values, and `float32` range before transmission. Sends are not overlapped if a previous request is still pending.
+The receiver must use the same packed layout and little-endian byte order. `electron-components/udp-client.js` validates the destination, header, array shape, finite values, and `float32` range before transmission. Sends are not overlapped if a previous request is still pending.
+
+`udp-server.js` is a development diagnostic receiver, not part of the robot control path. It listens on UDP port `41234`, rejects packets that are not exactly 11 bytes or do not begin with `ITS`, decodes both velocities, and reports the monotonic interval between valid packets in milliseconds. `npm run dev` starts it automatically; only one process can bind that port at a time.
 
 ## Architecture
 
 ```text
 .
 ├── main.js                    Electron main process and settings IPC
-├── preload.js                 Restricted renderer bridge
-├── rtsp-transcoder.js         Loopback RTSP-to-MJPEG ffmpeg relay
-├── udp-client.js              Packed Y/theta UDP datagram sender
+├── electron-components
+│   ├── preload.js             Restricted renderer bridge
+│   ├── rtsp-transcoder.js     Loopback RTSP-to-MJPEG ffmpeg relay
+│   └── udp-client.js          Packed Y/theta UDP datagram sender
+├── udp-server.js              Development UDP decoder and interval diagnostic
 ├── launch.sh                  Steam Gaming Mode production launcher
 ├── settings.json              Persisted camera, controls, and UDP settings
 ├── index.html                 Renderer entry and Content Security Policy
@@ -262,7 +267,7 @@ The renderer runs with:
 - `contextIsolation: true`
 - `nodeIntegration: false`
 
-`preload.js` exposes only six operations through `window.electronAPI`:
+`electron-components/preload.js` exposes only six operations through `window.electronAPI`:
 
 - `quitApp()`
 - `loadSettings()`

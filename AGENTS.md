@@ -11,9 +11,10 @@ While the Home controller panel is active, the Electron main process sends packe
 ## Architecture
 
 - `main.js`: Electron main process, BrowserWindow creation, IPC handlers, settings filesystem access, RTSP transcoder lifecycle, and the 50 Hz latest-command UDP scheduler.
-- `preload.js`: narrow context bridge exposed as `window.electronAPI`.
-- `rtsp-transcoder.js`: one-source RTSP/TCP to MJPEG relay using bundled `ffmpeg`, bound to a tokenized loopback URL.
-- `udp-client.js`: validates and packs a 3-byte ASCII header plus two little-endian IEEE-754 `float32` velocities into an 11-byte UDP datagram.
+- `electron-components/preload.js`: narrow context bridge exposed as `window.electronAPI`.
+- `electron-components/rtsp-transcoder.js`: one-source RTSP/TCP to MJPEG relay using bundled `ffmpeg`, bound to a tokenized loopback URL.
+- `electron-components/udp-client.js`: validates the UDP destination and packs a 3-byte ASCII header plus two little-endian IEEE-754 `float32` velocities into an 11-byte UDP datagram.
+- `udp-server.js`: development-only UDP receiver that validates `ITS` packets, decodes both velocities, and reports the monotonic interval between valid packets.
 - `src/App.vue`: persistent sidebar shell and Exit action.
 - `src/router/index.js`: eagerly imported Home and Settings routes using hash history. Hash history is required for production `file://` loading.
 - `src/views/HomeView.vue`: thin composition shell that renders `CameraFeed` and `ControllerPanel` inside the Home layout.
@@ -32,10 +33,11 @@ While the Home controller panel is active, the Electron main process sends packe
 
 ### Runtime Modes
 
-- `npm run dev`: runs Vite on `127.0.0.1:5173`, waits for it, and launches Electron with `VITE_DEV_SERVER_URL`.
+- `npm run dev`: runs the UDP diagnostic receiver, runs Vite on `127.0.0.1:5173`, waits for Vite, and launches Electron with `VITE_DEV_SERVER_URL`.
 - `npm run build`: produces the renderer in `dist/`.
 - `npm run electron`: launches Electron against an existing `dist/index.html`.
 - `npm run start`: builds and then launches Electron.
+- `npm run udp`: runs only `udp-server.js`, which binds `0.0.0.0:41234`.
 - `launch.sh`: launches Electron's native binary for Steam Gaming Mode and requires installed dependencies plus an existing build.
 
 Browser preview is suitable for renderer layout checks, but settings persistence and the Exit action require the Electron preload bridge.
@@ -49,11 +51,11 @@ Keep these BrowserWindow settings:
 - `contextIsolation: true`
 - `nodeIntegration: false`
 
-Do not access Node.js, Electron, or the filesystem directly from Vue code. Add narrowly scoped IPC methods in `main.js` and expose only those methods through `preload.js`. Validate renderer-provided IPC payloads in the main process unless a specific IPC contract, such as settings persistence, intentionally accepts renderer-owned structured data unchanged.
+Do not access Node.js, Electron, or the filesystem directly from Vue code. Add narrowly scoped IPC methods in `main.js` and expose only those methods through `electron-components/preload.js`. Validate renderer-provided IPC payloads at the main-process boundary unless a specific IPC contract, such as settings persistence, intentionally accepts renderer-owned structured data unchanged.
 
 Keep application lifecycle and settings filesystem ownership in the main process. Do not broaden `window.electronAPI` with generic IPC, filesystem, or shell access.
 
-The UDP preload contract is `updateUdpVelocity(host, port, velocity)` plus `stopUdpVelocity()`, where velocity is `[yVelocity, thetaVelocity]`. `ControllerPanel.vue` publishes only the latest reactive state. The main process validates updates, retains the latest command, and sends it every 20 ms with fixed header `ITS`. Invalid updates, full renderer navigation, renderer termination, and window close must clear the scheduler so a stale command cannot continue. `udp-client.js` validates and serializes two finite IEEE-754 `float32` values. Keep the packet packed with Y at byte offset `3`, theta at byte offset `7`, and little-endian byte order unless the receiver protocol changes explicitly. Do not overlap sends. Close the UDP socket during application shutdown.
+The UDP preload contract is `updateUdpVelocity(host, port, velocity)` plus `stopUdpVelocity()`, where velocity is `[yVelocity, thetaVelocity]`. `ControllerPanel.vue` publishes only the latest reactive state. The main process retains the latest command and sends it every 20 ms with fixed header `ITS`; `electron-components/udp-client.js` validates the destination and serializes two finite IEEE-754 `float32` values before each send. Full renderer navigation, renderer termination, window close, and an explicit stop must clear the scheduler so a stale command cannot continue. Keep the packet packed with Y at byte offset `3`, theta at byte offset `7`, and little-endian byte order unless the receiver protocol changes explicitly. Do not overlap sends. Close the UDP socket during application shutdown.
 
 ### Settings
 
@@ -88,7 +90,7 @@ Keep `useSettings.js` as the single shared renderer source of truth unless appli
 
 ### Camera
 
-`CameraFeed.vue` uses `<img>` so HTTP/HTTPS snapshots and MJPEG streams work directly. Chromium cannot render `rtsp://` in `<img>`; RTSP sources are resolved through the Electron main process and `rtsp-transcoder.js`. The relay runs bundled `ffmpeg` over RTSP/TCP, removes audio, scales within 1280x800 using `fast_bilinear`, limits output to 15 fps, uses two encoder threads, and serves JPEG quality `7` as MJPEG from a tokenized random port bound only to `127.0.0.1`. Low-latency input flags minimize buffering and probe delay.
+`CameraFeed.vue` uses `<img>` so HTTP/HTTPS snapshots and MJPEG streams work directly. Chromium cannot render `rtsp://` in `<img>`; RTSP sources are resolved through the Electron main process and `electron-components/rtsp-transcoder.js`. The relay runs bundled `ffmpeg` over RTSP/TCP, removes audio, scales within 1280x800 using `fast_bilinear`, limits output to 15 fps, uses two encoder threads, and serves JPEG quality `7` as MJPEG from a tokenized random port bound only to `127.0.0.1`. Low-latency input flags minimize buffering and probe delay.
 
 Keep RTSP process ownership in the main process. Permit only HTTP, HTTPS, and RTSP camera protocols; do not expose process arguments, generic process spawning, or a network-accessible relay through the preload bridge. Preserve one active source, terminate the child process on source changes and application quit, and avoid logging camera URLs because they may contain credentials. HLS or WebRTC output would require a corresponding browser renderer rather than the current `<img>` implementation.
 
@@ -159,6 +161,8 @@ npm run start
 - Camera and gamepad behavior should be verified interactively in Electron on target hardware when practical.
 
 There are currently no automated test or lint scripts. Do not report tests or lint as passing unless those scripts are added and executed.
+
+`udp-server.js` is only a packet-format and timing diagnostic. It is started by `npm run dev`, accepts only exact 11-byte `ITS` packets, and excludes malformed packets from interval calculations. It does not acknowledge delivery, emulate the STM32 watchdog, or participate in production `npm run start`/`launch.sh` execution.
 
 ## Change Guidance
 
