@@ -41,18 +41,6 @@ async function resolveCameraStream(_event, cameraUrl) {
     return rtspTranscoder.resolveStreamUrl(cameraUrl)
 }
 
-function validateUdpDestination(host, port) {
-    if (
-        typeof host !== 'string'
-        || host.trim().length === 0
-        || !Number.isInteger(port)
-        || port < 1
-        || port > 65535
-    ) {
-        throw new TypeError('Invalid arguments for sending UDP message.')
-    }
-}
-
 async function sendLatestUdpVelocity() {
     if (!latestUdpCommand || udpSendInFlight) return
 
@@ -74,7 +62,6 @@ async function sendLatestUdpVelocity() {
 
 function updateUdpVelocity(_event, host, port, velocity) {
     try {
-        validateUdpDestination(host, port)
         packVelocityPacket('ITS', velocity)
     } catch (error) {
         console.error('Rejected invalid UDP velocity update:', error)

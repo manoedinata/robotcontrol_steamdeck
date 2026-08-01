@@ -28,7 +28,21 @@ class UdpClient {
         this.client = createSocket('udp4')
     }
 
+    verifyDestination(host, port) {
+        if (
+            typeof host !== 'string'
+            || host.trim().length === 0
+            || !Number.isInteger(port)
+            || port < 1
+            || port > 65535
+        ) {
+            throw new TypeError('Invalid arguments for sending UDP message.')
+        }
+    }
+
     sendMessage(host, port, header, velocity) {
+        this.verifyDestination(host, port)
+
         const packet = packVelocityPacket(header, velocity)
 
         return new Promise((resolve, reject) => {
