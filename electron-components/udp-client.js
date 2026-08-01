@@ -62,4 +62,4 @@ class UdpClient {
     }
 }
 
-module.exports = { UdpClient, packVelocityPacket }
+module.exports = { UdpClient }

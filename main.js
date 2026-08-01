@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const { RtspTranscoder } = require('./electron-components/rtsp-transcoder')
-const { UdpClient, packVelocityPacket } = require('./electron-components/udp-client')
+const { UdpClient } = require('./electron-components/udp-client')
 
 const settingsPath = path.join(__dirname, 'settings.json')
 const UDP_SEND_INTERVAL_MS = 20
@@ -61,14 +61,6 @@ async function sendLatestUdpVelocity() {
 }
 
 function updateUdpVelocity(_event, host, port, velocity) {
-    try {
-        packVelocityPacket('ITS', velocity)
-    } catch (error) {
-        console.error('Rejected invalid UDP velocity update:', error)
-        stopUdpVelocity()
-        return
-    }
-
     latestUdpCommand = {
         host: host.trim(),
         port,
@@ -155,4 +147,3 @@ app.on('window-all-closed', () => {
         app.quit()
     }
 })
-preload.js
