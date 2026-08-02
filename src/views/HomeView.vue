@@ -1,12 +1,12 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { BatteryMedium, Gamepad2, LoaderCircle } from '@lucide/vue'
+import { BatteryMedium, Camera, ChevronsLeftRightEllipsis, Gamepad2, LoaderCircle } from '@lucide/vue'
 import CameraFeed from '../components/CameraFeed.vue'
 import ControllerPanel from '../components/ControllerPanel.vue'
 import { useGamepad } from '../composables/useGamepad'
 import { useSettings } from '../composables/useSettings'
 
-const { cameraUrl } = useSettings()
+const { cameraUrl, udpHost } = useSettings()
 const { gamepadName } = useGamepad()
 const cameraState = ref('idle')
 const batteryLevel = ref(null)
@@ -23,6 +23,8 @@ const deviceAddress = computed(() => {
     return '--'
   }
 })
+
+const udpAddress = computed(() => udpHost.value?.trim() || '--')
 
 const statusLabel = computed(() => {
   if (cameraState.value === 'connected') return 'Connected'
@@ -54,11 +56,21 @@ onBeforeUnmount(() => removeBatteryListener?.())
 
     <div class="telemetry-bar" aria-label="Device telemetry">
       <div class="connection-telemetry" :title="statusLabel">
-        <LoaderCircle v-if="cameraState === 'loading'" class="connection-spinner" :size="14" aria-hidden="true" />
-        <span v-else class="connection-dot" :class="cameraState" aria-hidden="true"></span>
+        <Camera :size="20" aria-hidden="true" />
         <span class="telemetry-ip">{{ deviceAddress }}</span>
         <span class="visually-hidden">Camera {{ statusLabel }}</span>
+        <LoaderCircle v-if="cameraState === 'loading'" class="connection-spinner" :size="14" aria-hidden="true" />
+        <span v-else class="connection-dot" :class="cameraState" aria-hidden="true"></span>
       </div>
+
+      <div class="telemetry-divider" aria-hidden="true"></div>
+
+      <div class="connection-telemetry" title="UDP destination host">
+        <ChevronsLeftRightEllipsis :size="20" aria-hidden="true" />
+        <span class="telemetry-ip">{{ udpAddress }}</span>
+        <span class="visually-hidden">UDP host {{ udpAddress }}</span>
+      </div>
+
     </div>
 
     <div class="battery-telemetry" title="Robot battery level" aria-label="Robot battery level">

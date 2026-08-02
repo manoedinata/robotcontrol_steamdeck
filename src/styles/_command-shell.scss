@@ -191,6 +191,12 @@ body {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
+.telemetry-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--hud-border);
+}
+
 .battery-telemetry {
     top: 20px;
     right: 20px;
