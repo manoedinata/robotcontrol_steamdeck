@@ -10,7 +10,7 @@ const app = express();
 
 // Prefer the ffmpeg binary bundled with the project (ffmpeg-static). Allow an
 // override via FFMPEG_PATH for a system ffmpeg if you need one.
-const FFMPEG_PATH = process.env.FFMPEG_PATH || ffmpegStatic || '/usr/lib/jellyfin-ffmpeg/ffmpeg ' || 'ffmpeg';
+const FFMPEG_PATH = '/usr/lib/jellyfin-ffmpeg/ffmpeg' || 'ffmpeg' || process.env.FFMPEG_PATH || ffmpegStatic;
 
 const PORT = Number(process.env.PORT) || 8080;
 
@@ -19,10 +19,29 @@ const PORT = Number(process.env.PORT) || 8080;
 // real camera instead.
 const CAMERA_DEVICE = process.env.CAMERA_DEVICE || '';
 
-// Build the ffmpeg input arguments for either a real device or a test source.
-function buildInputArgs() {
+// Capture geometry for a real device. Most UVC webcams support MJPEG natively
+// at these values; adjust with CAMERA_SIZE / CAMERA_FRAMERATE if yours differs.
+const CAMERA_SIZE = process.env.CAMERA_SIZE || '640x480';
+const CAMERA_FRAMERATE = process.env.CAMERA_FRAMERATE || '30';
+
+// Build the full ffmpeg argument list for either a real device or a test source.
+function buildFfmpegArgs() {
     if (CAMERA_DEVICE) {
-        return ['-f', 'v4l2', '-i', CAMERA_DEVICE];
+        // Ask the webcam for its native MJPEG stream and copy it straight
+        // through. Re-encoding raw YUYV to MJPEG on the CPU is the usual cause
+        // of lag, so avoiding the transcode keeps the feed smooth.
+        return [
+            '-fflags', 'nobuffer',
+            '-flags', 'low_delay',
+            '-f', 'v4l2',
+            '-input_format', 'mjpeg',
+            '-video_size', CAMERA_SIZE,
+            '-framerate', CAMERA_FRAMERATE,
+            '-i', CAMERA_DEVICE,
+            '-c:v', 'copy',
+            '-f', 'mpjpeg',
+            'pipe:1',
+        ];
     }
 
     // lavfi testsrc2 produces a moving test pattern with a running timer,
@@ -31,6 +50,10 @@ function buildInputArgs() {
         '-re',
         '-f', 'lavfi',
         '-i', 'testsrc2=size=1280x720:rate=15',
+        '-c:v', 'mjpeg',
+        '-q:v', '5',
+        '-f', 'mpjpeg',
+        'pipe:1',
     ];
 }
 
@@ -51,14 +74,8 @@ app.get('/video', (req, res) => {
         'Content-Type': 'multipart/x-mixed-replace; boundary=ffmpeg'
     });
 
-    // Spawn FFmpeg to encode the selected input as an MJPEG multipart stream.
-    const ffmpeg = spawn(FFMPEG_PATH, [
-        ...buildInputArgs(),
-        '-c:v', 'mjpeg',
-        '-q:v', '5',
-        '-f', 'mpjpeg',
-        'pipe:1'
-    ]);
+    // Spawn FFmpeg to serve the selected input as an MJPEG multipart stream.
+    const ffmpeg = spawn(FFMPEG_PATH, buildFfmpegArgs());
 
     // Pipe stdout directly to the HTTP response.
     ffmpeg.stdout.pipe(res);
