@@ -21,7 +21,7 @@ const CAMERA_DEVICE = process.env.CAMERA_DEVICE || '';
 
 // Capture geometry for a real device. Most UVC webcams support MJPEG natively
 // at these values; adjust with CAMERA_SIZE / CAMERA_FRAMERATE if yours differs.
-const CAMERA_SIZE = process.env.CAMERA_SIZE || '640x480';
+const CAMERA_SIZE = process.env.CAMERA_SIZE || '640x360';
 const CAMERA_FRAMERATE = process.env.CAMERA_FRAMERATE || '30';
 
 // Build the full ffmpeg argument list for either a real device or a test source.
