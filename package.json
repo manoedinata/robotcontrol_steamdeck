@@ -5,7 +5,8 @@
   "main": "main.js",
   "scripts": {
     "start": "npm run build && npm run electron",
-    "dev": "concurrently --kill-others-on-fail \"npm run udp\" \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 npm run electron\"",
+    "dev": "concurrently --kill-others-on-fail \"npm run udp\" \"npm run camera\" \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 npm run electron\"",
+    "dev:hardware": "concurrently --kill-others-on-fail \"npm run udp\" \"npm run camera\"",
     "build": "vite build",
     "electron": "electron .",
     "preview": "vite preview",
