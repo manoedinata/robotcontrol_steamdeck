@@ -40,13 +40,17 @@ The browser preview is useful for layout work. Settings persistence and quitting
 
 It uses the bundled `ffmpeg-static` binary and, by default, generates a synthetic moving test pattern (`testsrc2`, 1280x720 at 15 fps), so no webcam is required. Point the app's Settings camera source at HTTP with the host running this server, port `8080`, and subpath `/video`.
 
+When `CAMERA_DEVICE` is set, the server requests the webcam's native MJPEG stream and copies it through without re-encoding (`-c:v copy`). This avoids the CPU-bound raw-to-MJPEG transcode that causes laggy playback. The device must support MJPEG at the requested size and framerate; check with `ffmpeg -f v4l2 -list_formats all -i /dev/video0`.
+
 Optional environment variables:
 
-| Variable        | Purpose                                                      |
-| --------------- | ------------------------------------------------------------ |
-| `PORT`          | Change the listen port (default `8080`)                      |
-| `CAMERA_DEVICE` | Stream a real v4l2 device instead, for example `/dev/video0` |
-| `FFMPEG_PATH`   | Use a system `ffmpeg` binary instead of the bundled one      |
+| Variable           | Purpose                                                          |
+| ------------------ | ---------------------------------------------------------------- |
+| `PORT`             | Change the listen port (default `8080`)                          |
+| `CAMERA_DEVICE`    | Stream a real v4l2 device instead, for example `/dev/video0`     |
+| `CAMERA_SIZE`      | Device capture size when streaming a device (default `1280x720`) |
+| `CAMERA_FRAMERATE` | Device capture framerate when streaming a device (default `30`)  |
+| `FFMPEG_PATH`      | Use a system `ffmpeg` binary instead of the bundled one          |
 
 This helper is not part of `npm run dev`, `npm run start`, or `launch.sh`.
 
