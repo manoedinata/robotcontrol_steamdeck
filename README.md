@@ -22,6 +22,8 @@ npm run dev
 
 `npm run dev` starts the UDP diagnostic receiver, Vite, and Electron. Build and launch the production renderer with `npm run start`, or use `./launch.sh` for Steam Gaming Mode after `npm run build`.
 
+To test the camera pipeline without hardware, `npm run camera` serves a synthetic MJPEG stream at `http://localhost:8080/video`. See [Setup and launch](docs/setup.md#mock-camera-server) for details.
+
 ## Documentation
 
 - [Setup and launch](docs/setup.md)

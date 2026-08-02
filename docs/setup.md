@@ -30,8 +30,25 @@ Vite listens on `http://127.0.0.1:5173`. The diagnostic UDP receiver listens on 
 | `npm run start`    | Build the renderer, then launch Electron          |
 | `npm run preview`  | Preview the production renderer in a browser      |
 | `npm run udp`      | Run only the UDP packet diagnostic receiver       |
+| `npm run camera`   | Run a mock HTTP/MJPEG camera server for testing   |
 
 The browser preview is useful for layout work. Settings persistence and quitting require Electron's preload bridge. There is currently no automated test or lint script; `npm run build` is the minimum validation command.
+
+## Mock Camera Server
+
+`npm run camera` runs `camera-server.js`, a development-only helper that mimics a robot IP camera by serving an MJPEG stream over HTTP at `http://localhost:8080/video`. This lets you exercise the camera pipeline without real hardware or an RTSP source.
+
+It uses the bundled `ffmpeg-static` binary and, by default, generates a synthetic moving test pattern (`testsrc2`, 1280x720 at 15 fps), so no webcam is required. Point the app's Settings camera source at HTTP with the host running this server, port `8080`, and subpath `/video`.
+
+Optional environment variables:
+
+| Variable        | Purpose                                                      |
+| --------------- | ------------------------------------------------------------ |
+| `PORT`          | Change the listen port (default `8080`)                      |
+| `CAMERA_DEVICE` | Stream a real v4l2 device instead, for example `/dev/video0` |
+| `FFMPEG_PATH`   | Use a system `ffmpeg` binary instead of the bundled one      |
+
+This helper is not part of `npm run dev`, `npm run start`, or `launch.sh`.
 
 ## Steam Deck Gaming Mode
 
