@@ -1,12 +1,18 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
+const { HttpCameraRelay } = require('./electron-components/http-camera-relay')
 const { RtspTranscoder } = require('./electron-components/rtsp-transcoder')
 const { UdpClient } = require('./electron-components/udp-client')
 
 const settingsPath = path.join(__dirname, 'settings.json')
 const UDP_SEND_INTERVAL_MS = 20
-const rtspTranscoder = new RtspTranscoder()
+const CAMERA_FPS_WINDOW_MS = 1000
+const CAMERA_FPS_PUBLISH_INTERVAL_MS = 500
+let cameraFrameTimestamps = []
+const recordCameraFrame = () => cameraFrameTimestamps.push(Date.now())
+const httpCameraRelay = new HttpCameraRelay(recordCameraFrame)
+const rtspTranscoder = new RtspTranscoder(recordCameraFrame)
 const udpClient = new UdpClient()
 let latestUdpCommand = null
 let udpSendTimer = null
@@ -46,7 +52,42 @@ async function resolveCameraStream(_event, cameraUrl) {
         throw new TypeError('Camera URL must be a string.')
     }
 
-    return rtspTranscoder.resolveStreamUrl(cameraUrl)
+    const sourceUrl = cameraUrl.trim()
+    cameraFrameTimestamps = []
+
+    if (!sourceUrl) {
+        httpCameraRelay.stop()
+        rtspTranscoder.stop()
+        return ''
+    }
+
+    let protocol
+    try {
+        protocol = new URL(sourceUrl).protocol
+    } catch {
+        throw new Error('Camera URL is invalid.')
+    }
+
+    if (protocol === 'rtsp:') {
+        httpCameraRelay.stop()
+        return rtspTranscoder.resolveStreamUrl(sourceUrl)
+    }
+    if (protocol === 'http:' || protocol === 'https:') {
+        rtspTranscoder.stop()
+        return httpCameraRelay.resolveStreamUrl(sourceUrl)
+    }
+    throw new Error('Camera URL must use HTTP, HTTPS, or RTSP.')
+}
+
+function publishCameraFps() {
+    const cutoff = Date.now() - CAMERA_FPS_WINDOW_MS
+    cameraFrameTimestamps = cameraFrameTimestamps.filter((timestamp) => timestamp > cutoff)
+
+    for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+            window.webContents.send('camera:fps', cameraFrameTimestamps.length)
+        }
+    }
 }
 
 async function sendLatestUdpVelocity() {
@@ -129,6 +170,8 @@ function createWindow() {
 
 app.whenReady().then(() => {
     createWindow()
+    const cameraFpsTimer = setInterval(publishCameraFps, CAMERA_FPS_PUBLISH_INTERVAL_MS)
+    cameraFpsTimer.unref()
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
@@ -146,6 +189,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
     stopUdpVelocity()
+    httpCameraRelay.stop()
     rtspTranscoder.stop()
     udpClient.close()
 })

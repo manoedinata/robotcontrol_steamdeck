@@ -8,7 +8,8 @@ const JPEG_START = Buffer.from([0xff, 0xd8])
 const JPEG_END = Buffer.from([0xff, 0xd9])
 
 class RtspTranscoder {
-    constructor() {
+    constructor(onFrame) {
+        this.onFrame = onFrame
         this.sourceUrl = ''
         this.token = ''
         this.server = null
@@ -184,6 +185,7 @@ class RtspTranscoder {
     }
 
     broadcastFrame(frame) {
+        this.onFrame?.()
         const header = Buffer.from(
             `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`,
         )

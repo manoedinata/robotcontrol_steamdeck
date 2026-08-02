@@ -12,6 +12,7 @@ While the command shell is active, the Electron main process sends packed Y/thet
 
 - `main.js`: Electron main process, BrowserWindow creation, IPC handlers, settings filesystem access, RTSP transcoder lifecycle, and the 50 Hz latest-command UDP scheduler.
 - `electron-components/preload.js`: narrow context bridge exposed as `window.electronAPI`.
+- `electron-components/http-camera-relay.js`: one-source HTTP/HTTPS camera passthrough relay bound to a tokenized loopback URL; forwards image bytes unchanged and counts complete JPEG frames.
 - `electron-components/rtsp-transcoder.js`: one-source RTSP/TCP to MJPEG relay using bundled `ffmpeg`, bound to a tokenized loopback URL.
 - `electron-components/udp-client.js`: validates and sends 11-byte velocity commands, receives validated 7-byte battery replies, and publishes battery updates in the main process.
 - `udp-server.js`: development-only UDP peer that validates `ITS` commands, decodes both velocities, reports packet timing, and replies with the current Linux system battery percentage.
@@ -94,9 +95,11 @@ Keep `useSettings.js` as the single shared renderer source of truth unless appli
 
 ### Camera
 
-`CameraFeed.vue` uses `<img>` so HTTP/HTTPS snapshots and MJPEG streams work directly. Chromium cannot render `rtsp://` in `<img>`; RTSP sources are resolved through the Electron main process and `electron-components/rtsp-transcoder.js`. The relay runs bundled `ffmpeg` over RTSP/TCP, removes audio, scales within 1280x800 using `fast_bilinear`, limits output to 15 fps, uses two encoder threads, and serves JPEG quality `7` as MJPEG from a tokenized random port bound only to `127.0.0.1`. Low-latency input flags minimize buffering and probe delay.
+`CameraFeed.vue` uses `<img>` for HTTP/HTTPS snapshots and MJPEG streams. HTTP/HTTPS sources pass through `electron-components/http-camera-relay.js`, which preserves the upstream bytes and content type while counting complete JPEG frames. Chromium cannot render `rtsp://` in `<img>`; RTSP sources are resolved through the Electron main process and `electron-components/rtsp-transcoder.js`. The RTSP relay runs bundled `ffmpeg` over RTSP/TCP, removes audio, scales within 1280x800 using `fast_bilinear`, limits output to 15 fps, uses two encoder threads, and serves JPEG quality `7` as MJPEG from a tokenized random port bound only to `127.0.0.1`. Low-latency input flags minimize buffering and probe delay.
 
-Keep RTSP process ownership in the main process. Permit only HTTP, HTTPS, and RTSP camera protocols; do not expose process arguments, generic process spawning, or a network-accessible relay through the preload bridge. Preserve one active source, terminate the child process on source changes and application quit, and avoid logging camera URLs because they may contain credentials. HLS or WebRTC output would require a corresponding browser renderer rather than the current `<img>` implementation.
+Both relays report complete JPEG frames to the main process. The main process publishes the number received during the trailing one-second window every 500 ms through the narrow `onCameraFps(callback)` preload subscription. The camera HUD displays this as `FPS: <fps>` beneath the camera address. A snapshot produces one frame and then naturally returns to `0 FPS`; the value is stream throughput, not display refresh rate.
+
+Keep camera relay and RTSP process ownership in the main process. Permit only HTTP, HTTPS, and RTSP camera protocols; do not expose process arguments, generic process spawning, or a network-accessible relay through the preload bridge. Preserve one active source, close upstream requests and terminate the child process on source changes and application quit, and avoid logging camera URLs because they may contain credentials. HLS or WebRTC output would require a corresponding browser renderer rather than the current `<img>` implementation.
 
 The Content Security Policy in `index.html` must continue to permit required external camera image sources. Keep camera diagnostic logs under the `[camera]` prefix.
 

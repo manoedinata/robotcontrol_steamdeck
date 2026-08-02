@@ -9,8 +9,10 @@ import { useSettings } from '../composables/useSettings'
 const { cameraUrl, udpHost } = useSettings()
 const { gamepadName } = useGamepad()
 const cameraState = ref('idle')
+const cameraFps = ref(0)
 const batteryLevel = ref(null)
 let removeBatteryListener
+let removeCameraFpsListener
 
 const gamepadStatusLabel = computed(() => gamepadName.value
   ? 'Connected'
@@ -33,6 +35,9 @@ const statusLabel = computed(() => {
 })
 
 onMounted(() => {
+  removeCameraFpsListener = window.electronAPI?.onCameraFps?.((fps) => {
+    if (Number.isInteger(fps) && fps >= 0) cameraFps.value = fps
+  })
   removeBatteryListener = window.electronAPI?.onUdpBatteryPercentage?.((percentage) => {
     if (Number.isInteger(percentage) && percentage >= 0 && percentage <= 100) {
       batteryLevel.value = percentage
@@ -40,7 +45,10 @@ onMounted(() => {
   })
 })
 
-onBeforeUnmount(() => removeBatteryListener?.())
+onBeforeUnmount(() => {
+  removeCameraFpsListener?.()
+  removeBatteryListener?.()
+})
 </script>
 
 <template>
@@ -55,12 +63,15 @@ onBeforeUnmount(() => removeBatteryListener?.())
     </header>
 
     <div class="telemetry-bar" aria-label="Device telemetry">
-      <div class="connection-telemetry" :title="statusLabel">
-        <Camera :size="20" aria-hidden="true" />
-        <span class="telemetry-ip">{{ deviceAddress }}</span>
-        <span class="visually-hidden">Camera {{ statusLabel }}</span>
-        <LoaderCircle v-if="cameraState === 'loading'" class="connection-spinner" :size="14" aria-hidden="true" />
-        <span v-else class="connection-dot" :class="cameraState" aria-hidden="true"></span>
+      <div class="camera-telemetry" :title="statusLabel">
+        <div class="connection-telemetry">
+          <Camera :size="20" aria-hidden="true" />
+          <span class="telemetry-ip">{{ deviceAddress }}</span>
+          <span class="visually-hidden">Camera {{ statusLabel }}</span>
+          <LoaderCircle v-if="cameraState === 'loading'" class="connection-spinner" :size="14" aria-hidden="true" />
+          <span v-else class="connection-dot" :class="cameraState" aria-hidden="true"></span>
+        </div>
+        <small class="camera-fps">FPS: {{ cameraFps }}</small>
       </div>
 
       <div class="telemetry-divider" aria-hidden="true"></div>

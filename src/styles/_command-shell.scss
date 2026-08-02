@@ -160,6 +160,21 @@ body {
     font-weight: 650;
 }
 
+.camera-telemetry {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.camera-fps {
+    color: #c3cbce;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.62rem;
+    font-weight: 600;
+    line-height: 1;
+}
+
 .connection-dot {
     width: 9px;
     height: 9px;

@@ -5,6 +5,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     loadSettings: () => ipcRenderer.invoke('settings:load'),
     saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
     resolveCameraStream: (cameraUrl) => ipcRenderer.invoke('camera:resolve-stream', cameraUrl),
+    onCameraFps: (callback) => {
+        const listener = (_event, fps) => callback(fps)
+        ipcRenderer.on('camera:fps', listener)
+        return () => ipcRenderer.removeListener('camera:fps', listener)
+    },
     updateUdpVelocity: (host, port, velocity) => (
         ipcRenderer.send('udp:update-velocity', host, port, velocity)
     ),

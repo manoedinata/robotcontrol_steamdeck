@@ -2,12 +2,13 @@
 
 A Steam Deck-oriented Electron and Vue command station for viewing a robot camera and controlling a differential-drive robot. The camera feed remains the primary surface while compact telemetry, on-screen joysticks, gamepad navigation, and a right-side Settings drawer stay available at the Deck's 1280x800 target viewport.
 
-The application supports HTTP snapshots/MJPEG streams and RTSP sources, translating RTSP through a loopback-only `ffmpeg` relay. It maps the left stick to linear Y velocity and the right stick to angular theta velocity, then sends the latest command to a configured UDP destination at 50 Hz. It does not integrate directly with ROS or other robot middleware.
+The application supports HTTP snapshots/MJPEG streams and RTSP sources. HTTP/HTTPS camera bytes pass unchanged through a loopback-only relay for frame counting, while RTSP is translated through a loopback-only `ffmpeg` relay. It maps the left stick to linear Y velocity and the right stick to angular theta velocity, then sends the latest command to a configured UDP destination at 50 Hz. It does not integrate directly with ROS or other robot middleware.
 
 ## Features
 
 - Camera-first, frameless Electron UI for SteamOS Gaming Mode
 - HTTP, MJPEG, and RTSP camera support
+- Rolling camera FPS telemetry based on complete JPEG frames received
 - Configurable Y/theta velocity limits with pointer, touch, and gamepad controls
 - Full Steam Deck navigation for the shell, Settings drawer, and built-in keyboard
 - Validated UDP velocity packets and battery telemetry
