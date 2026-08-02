@@ -1,8 +1,8 @@
 # Steam Deck Robot Monitor
 
-A Steam Deck-oriented Electron application for viewing a robot camera and visualizing differential-drive inputs. The interface targets the Deck's 1280x800 display and combines an IP camera feed with live velocity values derived from hardware or on-screen joysticks.
+A Steam Deck-oriented Electron application for viewing a robot camera and visualizing differential-drive inputs. The interface targets the Deck's 1280x800 display as a camera-first command station, with a full-screen feed, compact telemetry, and floating controls.
 
-> **Project status:** this repository implements the local monitor and input UI. It continuously sends Y and theta velocity commands to a configured UDP destination while the Home controller panel is active. It does not integrate directly with ROS or other robot middleware.
+> **Project status:** this repository implements the local monitor and input UI. It continuously sends Y and theta velocity commands to a configured UDP destination while the command shell is active. It does not integrate directly with ROS or other robot middleware.
 
 - [Steam Deck Robot Monitor](#steam-deck-robot-monitor)
   - [What It Does](#what-it-does)
@@ -29,22 +29,21 @@ A Steam Deck-oriented Electron application for viewing a robot camera and visual
 - Displays HTTP snapshots, HTTP MJPEG streams, and RTSP camera streams.
 - Transcodes RTSP to a loopback-only MJPEG stream with bundled `ffmpeg`.
 - Reads Steam Deck or compatible controller input through the browser Gamepad API.
-- Supports complete Steam Deck gamepad navigation for the sidebar, Settings form, and built-in keyboard.
+- Supports complete Steam Deck gamepad navigation for the floating shell actions, Settings drawer, and built-in keyboard.
 - Maps the left stick vertical axis to linear Y velocity, capped at a configurable limit.
 - Maps the right stick horizontal axis to angular theta velocity, capped at a configurable limit.
-- Lets the maximum Y and theta velocities be set independently from the Settings page.
+- Lets the maximum Y and theta velocities be set independently from a right-side Settings drawer.
 - Provides a built-in Settings keyboard that avoids duplicate Steam keyboard input.
 - Supports pointer and touch dragging for both on-screen joystick controls.
 - Stores the camera source, velocity limits, UDP destination, and keyboard preference in `settings.json` beside the launcher.
 - Sends packed Y/theta velocity datagrams to the configured UDP destination at 50 Hz (every 20 ms).
-- Runs as a frameless Electron application with Home and Settings routes plus an in-app Exit action.
+- Runs as a frameless Electron application with a persistent camera/control shell, sliding Settings drawer, and in-app Exit action.
 - Uses a layout sized to fit the Steam Deck display without scrolling.
 
 ## Stack
 
 - Electron
 - Vue 3 with the Composition API
-- Vue Router using hash history
 - Vite
 - Bootstrap 5
 - Lucide icons
@@ -112,7 +111,7 @@ chmod +x launch.sh
 
 ## Camera Configuration
 
-Open **Settings** and provide:
+Use the floating gear button to open the right-side **Settings** drawer and provide:
 
 **Camera feed**
 
@@ -173,19 +172,19 @@ Camera lifecycle and failure details are logged to the Electron renderer console
 
 ### Interface navigation
 
-| Input         | Action                                                                |
-| ------------- | --------------------------------------------------------------------- |
-| D-pad up/down | Select Home, Settings, or Exit in the sidebar                         |
-| A             | Enter Settings, activate the focused control, or press a keyboard key |
-| B             | Return from Settings to the sidebar, or cancel the built-in keyboard  |
-| D-pad         | Move between Settings controls or built-in keyboard keys              |
-| Left stick    | Move between built-in keyboard keys                                   |
+| Input      | Action                                                               |
+| ---------- | -------------------------------------------------------------------- |
+| D-pad      | Select a floating Settings or Exit action, or move within Settings   |
+| A          | Open Settings, activate the focused control, or press a keyboard key |
+| B          | Close the Settings drawer, or cancel the built-in keyboard           |
+| D-pad      | Move between Settings controls or built-in keyboard keys             |
+| Left stick | Move between built-in keyboard keys                                  |
 
-The active route starts as the sidebar selection. Highlighting Exit does not change the current route; press **A** to quit. Pressing **A** on Settings moves focus into the first form control. D-pad directions then move spatially between form controls and keep the focused control visible as the Settings page scrolls. **A** opens an input, toggles a switch, presses a button, or advances a select option. Press **B** to return focus to the Settings sidebar item.
+The camera and robot controller remain mounted while Settings is open, so opening the drawer does not interrupt the feed or the main-process UDP scheduler. D-pad directions move spatially between drawer controls and keep the focused control visible while the drawer scrolls. **A** opens an input, toggles a switch, presses a button, or advances a select option. Press **B** to close the drawer and restore focus to the floating Settings button.
 
 When the built-in keyboard is open, it takes control priority. D-pad and left-stick directions move between character and command keys, **A** presses the focused key, and **B** cancels without committing the draft. Closing the keyboard restores focus to its originating Settings field, and saving restores focus to the Save button, so subsequent D-pad input remains in Settings. Held directions repeat after a short delay. Mouse, touch, and physical keyboard input remain supported.
 
-Left-stick navigation is limited to the keyboard modal. On Home, both analog sticks retain their robot-control behavior and do not navigate the interface. D-pad up/down can still switch between Home and Settings.
+Left-stick navigation is limited to the keyboard modal. In the camera shell, both analog sticks retain their robot-control behavior and do not navigate the interface.
 
 ### Robot controls
 
@@ -196,7 +195,7 @@ Left-stick navigation is limited to the keyboard modal. On Home, both analog sti
 | Right stick left  | Negative theta velocity, down to the negative max theta-velocity |
 | Right stick right | Positive theta velocity, up to the configured max theta-velocity |
 
-Both limits default to `10` and are set independently on the Settings page. Stick output is normalized to `-1..+1` and then scaled by the matching limit.
+Both limits default to `10` and are set independently in the Settings drawer. Stick output is normalized to `-1..+1` and then scaled by the matching limit.
 
 The Gamepad API mapping currently reads:
 
@@ -207,7 +206,7 @@ A `0.12` dead zone is applied to hardware gamepad values before they are normali
 
 ### UDP Packet Format
 
-While the Home controller panel is mounted and a valid destination is configured, it publishes the latest `[yVelocity, thetaVelocity]` state through `window.electronAPI.updateUdpVelocity(host, port, velocity)`. The Electron main process retains that latest command and sends it with header `ITS` at 50 Hz (every 20 ms). This keeps periodic scheduling and UDP socket work outside the renderer. A slow send is never overlapped; the next timer tick uses the most recently published state.
+While the persistent controller panel is mounted and a valid destination is configured, it publishes the latest `[yVelocity, thetaVelocity]` state through `window.electronAPI.updateUdpVelocity(host, port, velocity)`. The Electron main process retains that latest command and sends it with header `ITS` at 50 Hz (every 20 ms). This keeps periodic scheduling and UDP socket work outside the renderer. A slow send is never overlapped; the next timer tick uses the most recently published state.
 
 Leaving Home calls `stopUdpVelocity()` and clears the main-process timer. A full renderer navigation, renderer process exit, window close, or application quit also stops the scheduler so a stale command cannot continue after the renderer disappears. None of these paths sends a special final zero-velocity command; the receiving STM32 must use a UDP receive-timeout watchdog that stops the wheels when command datagrams cease.
 
@@ -238,26 +237,25 @@ The receiver must use the same packed layout and little-endian byte order. `elec
 ├── index.html                 Renderer entry and Content Security Policy
 ├── vite.config.js             Vue/Vite production configuration
 └── src
-    ├── App.vue                Sidebar shell and application exit action
-    ├── main.js                Vue, Bootstrap, and router initialization
+    ├── App.vue                Persistent command shell, Settings and Exit actions
+    ├── main.js                Vue and Bootstrap initialization
     ├── styles.css             Steam Deck-oriented application styles
     ├── components
-    │   ├── CameraFeed.vue     Camera state, <img> rendering, and status overlay
+    │   ├── CameraFeed.vue     Camera state, <img> rendering, and status events
     │   ├── ControllerPanel.vue Gamepad polling, velocity math, and joystick layout
     │   ├── Joystick.vue       Reusable single-axis joystick with pointer/touch drag
-    │   └── OnScreenKeyboard.vue Built-in Settings keyboard with tailored layouts
+    │   ├── OnScreenKeyboard.vue Built-in Settings keyboard with tailored layouts
+    │   └── SettingsShell.vue  Sliding right-side Settings drawer shell
     ├── composables
     │   ├── useGamepad.js      Shared Gamepad API polling and prioritized UI actions
     │   ├── useOnScreenKeyboardNavigation.js Keyboard-modal controller navigation
     │   ├── useSettingsGamepadNavigation.js Settings form controller navigation
     │   └── useSettings.js     Shared reactive settings state and persistence interface
-    ├── router
-    │   └── index.js           Eager Home/Settings routes using hash history
     ├── utils
     │   └── spatialFocus.js    Shared geometry-based directional focus selection
     └── views
-        ├── HomeView.vue       Composition shell rendering CameraFeed and ControllerPanel
-        └── SettingsView.vue   Camera source and velocity-limit form and persistence
+        ├── HomeView.vue       Full-screen camera, telemetry HUD, and controls
+        └── SettingsView.vue   Drawer content for camera, UDP, and control settings
 ```
 
 ### Electron Security Boundary
@@ -280,15 +278,14 @@ Keep filesystem access, transcoder processes, and application lifecycle operatio
 
 ### Renderer Data Flow
 
-- `App.vue` owns the persistent shell and renders routed pages through `RouterView`.
-- `HomeView.vue` and `SettingsView.vue` are route-level components, not manually toggled page components.
-- `HomeView.vue` is a thin composition shell: `CameraFeed.vue` owns camera state and rendering, while `ControllerPanel.vue` owns gamepad polling, velocity math, and composes two `Joystick.vue` instances.
-- `useGamepad.js` owns the single Gamepad API polling loop. Prioritized handlers route D-pad, left-stick, A, and B actions to the keyboard modal, Settings form, or sidebar while `ControllerPanel.vue` consumes the same reactive axes for robot velocity.
+- `App.vue` owns the persistent command shell and toggles `SettingsShell.vue` without unmounting the camera or controller.
+- `HomeView.vue` composes the full-screen `CameraFeed.vue`, floating telemetry HUD, and `ControllerPanel.vue`. Camera connection state is emitted to the HUD; battery is currently a placeholder and the displayed device IP falls back to a placeholder when no camera source is configured.
+- `SettingsShell.vue` owns the modal right drawer while `SettingsView.vue` retains the settings form and persistence behavior.
+- `useGamepad.js` owns the single Gamepad API polling loop. Prioritized handlers route D-pad, left-stick, A, and B actions to the keyboard modal, Settings drawer, or floating shell actions while `ControllerPanel.vue` consumes the same reactive axes for robot velocity.
 - `useSettingsGamepadNavigation.js` and `useOnScreenKeyboardNavigation.js` own their respective focus and activation lifecycles. Both use `spatialFocus.js` for directional DOM focus selection, keeping navigation mechanics out of the Settings and keyboard components.
-- `useSettings.js` owns one module-level reactive store shared across routes: the camera URL, per-axis velocity limits, and keyboard preference. `ControllerPanel.vue` reads the limits to scale its output.
+- `useSettings.js` owns one module-level reactive store shared across the shell and drawer: the camera URL, per-axis velocity limits, and keyboard preference. `ControllerPanel.vue` reads the limits to scale its output.
 - `ControllerPanel.vue` publishes only changed destination/velocity state. The Electron main process owns the 20 ms UDP timer and repeatedly sends the latest state without overlapping socket sends.
 - Vue code requests persistence through the preload bridge; only the Electron main process reads or writes `settings.json`.
-- Hash history is intentional because production loads `dist/index.html` from `file://` without an HTTP server.
 
 ## Current Limitations
 

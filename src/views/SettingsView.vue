@@ -5,6 +5,8 @@ import OnScreenKeyboard from '../components/OnScreenKeyboard.vue'
 import { useSettingsGamepadNavigation } from '../composables/useSettingsGamepadNavigation'
 import { useSettings } from '../composables/useSettings'
 
+const emit = defineEmits(['close'])
+
 const {
   cameraUrl,
   maxYVelocity,
@@ -28,7 +30,7 @@ const activeKeyboard = ref(null)
 const settingsState = ref('idle')
 const settingsMessage = ref('')
 let keyboardReturnControl = null
-const { focusSaveControl } = useSettingsGamepadNavigation(activeKeyboard)
+const { focusSaveControl } = useSettingsGamepadNavigation(activeKeyboard, () => emit('close'))
 
 const keyboardFields = {
   sourceIp: { label: 'Source IP', layout: 'ip', maxLength: 253 },
@@ -36,7 +38,7 @@ const keyboardFields = {
   subpath: { label: 'Stream subpath', layout: 'text', maxLength: 256 },
   maxY: { label: 'Max Y-velocity', layout: 'decimal', maxLength: 5 },
   maxTheta: { label: 'Max Theta-velocity', layout: 'decimal', maxLength: 5 },
-  targetHost: { label: 'UDP target host', layout: 'ip', maxLength: 253 },
+  targetHost: { label: 'UDP target host', layout: 'hostname', maxLength: 253 },
   targetPort: { label: 'UDP target port', layout: 'integer', maxLength: 5 },
 }
 
@@ -142,11 +144,7 @@ async function saveCameraSettings() {
 </script>
 
 <template>
-  <section id="settings-page" aria-labelledby="settings-heading">
-    <header class="settings-header">
-      <h1 id="settings-heading">Settings</h1>
-    </header>
-
+  <section id="settings-page" aria-label="Settings controls">
     <form class="settings-panel" @submit.prevent="saveCameraSettings">
       <div class="settings-panel-heading">
         <Camera :size="20" aria-hidden="true" />

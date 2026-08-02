@@ -1,6 +1,5 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Gamepad2 } from '@lucide/vue'
 import Joystick from './Joystick.vue'
 import { useGamepad } from '../composables/useGamepad'
 import { useSettings } from '../composables/useSettings'
@@ -94,26 +93,16 @@ onBeforeUnmount(() => {
         <Joystick v-model="leftStickY" axis="vertical" label="Left joystick" @drag-start="draggedStick = 'left'"
           @drag-end="draggedStick = null" />
         <p class="joystick-readout">
-          Y-velocity:
+          <span>Linear</span>
           <strong>{{ formatVelocity(yVelocity) }}</strong>
         </p>
-      </div>
-
-      <div class="joystick-center">
-        <div v-if="!gamepadName" class="controller-empty bg-light">
-          <span class="controller-empty-icon">
-            <Gamepad2 :size="30" aria-hidden="true" />
-          </span>
-          <h4>Controller tidak terdeteksi.</h4>
-          <p>Tekan sembarang tombol pada controller untuk menghubungkan.</p>
-        </div>
       </div>
 
       <div class="joystick-column">
         <Joystick v-model="rightStickX" axis="horizontal" label="Right joystick" @drag-start="draggedStick = 'right'"
           @drag-end="draggedStick = null" />
         <p class="joystick-readout">
-          Theta-velocity:
+          <span>Angular</span>
           <strong>{{ formatVelocity(thetaVelocity) }}</strong>
         </p>
       </div>

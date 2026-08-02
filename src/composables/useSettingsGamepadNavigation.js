@@ -5,7 +5,7 @@ import { focusInDirection, isDirection } from '../utils/spatialFocus'
 const PAGE_SELECTOR = '#settings-page'
 const CONTROL_SELECTOR = `${PAGE_SELECTOR} [data-gamepad-control]:not(:disabled)`
 
-export function useSettingsGamepadNavigation(activeKeyboard) {
+export function useSettingsGamepadNavigation(activeKeyboard, closeSettings = () => { }) {
     const { registerHandler } = useGamepad()
     let unregisterGamepadHandler
 
@@ -38,7 +38,7 @@ export function useSettingsGamepadNavigation(activeKeyboard) {
             return true
         }
         if (action === 'cancel') {
-            document.querySelector('.sidebar [data-route-name="settings"]')?.focus()
+            closeSettings()
             return true
         }
         return false

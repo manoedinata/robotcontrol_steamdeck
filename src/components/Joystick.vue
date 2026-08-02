@@ -70,17 +70,11 @@ function stopDrag(event) {
 
 <template>
   <div class="joystick-control">
-    <div
-      class="joystick-stage"
-      :aria-label="label"
-      @pointerdown="startDrag"
-      @pointermove="moveDrag"
-      @pointerup="stopDrag"
-      @pointercancel="stopDrag"
-    >
-      <span class="axis axis-horizontal"></span>
-      <span class="axis axis-vertical"></span>
+    <div class="joystick-stage" :aria-label="label" @pointerdown="startDrag" @pointermove="moveDrag"
+      @pointerup="stopDrag" @pointercancel="stopDrag">
       <div class="joystick-ring">
+        <span class="axis axis-horizontal"></span>
+        <span class="axis axis-vertical"></span>
         <div class="joystick-puck" :style="puckStyle"></div>
       </div>
     </div>

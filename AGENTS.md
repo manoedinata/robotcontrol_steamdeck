@@ -6,7 +6,7 @@ This repository is a Steam Deck-oriented Electron and Vue application for viewin
 
 The target viewport is 1280x800. The primary runtime environment is SteamOS Gaming Mode.
 
-While the Home controller panel is active, the Electron main process sends packed Y/theta velocity datagrams at 50 Hz (every 20 ms) to the configured UDP destination. It does not integrate directly with ROS or other robot middleware.
+While the command shell is active, the Electron main process sends packed Y/theta velocity datagrams at 50 Hz (every 20 ms) to the configured UDP destination. It does not integrate directly with ROS or other robot middleware.
 
 ## Architecture
 
@@ -15,17 +15,17 @@ While the Home controller panel is active, the Electron main process sends packe
 - `electron-components/rtsp-transcoder.js`: one-source RTSP/TCP to MJPEG relay using bundled `ffmpeg`, bound to a tokenized loopback URL.
 - `electron-components/udp-client.js`: validates the UDP destination and packs a 3-byte ASCII header plus two little-endian IEEE-754 `float32` velocities into an 11-byte UDP datagram.
 - `udp-server.js`: development-only UDP receiver that validates `ITS` packets, decodes both velocities, and reports the monotonic interval between valid packets.
-- `src/App.vue`: persistent sidebar shell and Exit action.
-- `src/router/index.js`: eagerly imported Home and Settings routes using hash history. Hash history is required for production `file://` loading.
-- `src/views/HomeView.vue`: thin composition shell that renders `CameraFeed` and `ControllerPanel` inside the Home layout.
-- `src/components/CameraFeed.vue`: camera state, `<img>` rendering, and the status overlay/indicator. Consumes `useSettings` directly.
+- `src/App.vue`: persistent camera-first command shell, floating Settings/Exit actions, and Settings drawer state.
+- `src/views/HomeView.vue`: full-screen camera composition with connection/IP telemetry, placeholder battery level, and floating controller HUD.
+- `src/components/CameraFeed.vue`: camera state, `<img>` rendering, and status events consumed by the Home telemetry HUD. Consumes `useSettings` directly.
+- `src/components/SettingsShell.vue`: modal shell that slides in from the right and hosts `SettingsView` without unmounting Home.
 - `src/components/ControllerPanel.vue`: Gamepad API polling, dead zone, per-axis velocity math, and the joystick/status layout.
 - `src/components/Joystick.vue`: reusable single-axis joystick (`v-model` position, `axis` prop, pointer/touch drag with `drag-start`/`drag-end` events).
 - `src/components/OnScreenKeyboard.vue`: modal Settings keyboard with IP, integer, decimal, and text layouts plus commit/cancel behavior.
-- `src/views/SettingsView.vue`: camera URL field parsing/assembly, per-axis velocity-limit fields, and the keyboard preference toggle.
-- `src/composables/useSettings.js`: module-level reactive settings state (camera URL, velocity limits, and keyboard preference) shared between routes.
+- `src/views/SettingsView.vue`: drawer content for camera URL parsing/assembly, UDP destination, per-axis velocity limits, and the keyboard preference toggle.
+- `src/composables/useSettings.js`: module-level reactive settings state (camera URL, velocity limits, and keyboard preference) shared between the shell and drawer.
 - `src/composables/useGamepad.js`: shared Gamepad API polling, reactive axes/controller identity, held-direction repeat, and prioritized UI action dispatch.
-- `src/composables/useSettingsGamepadNavigation.js`: Settings form focus movement, control activation, sidebar return, and Save focus restoration.
+- `src/composables/useSettingsGamepadNavigation.js`: Settings form focus movement, control activation, drawer close, and Save focus restoration.
 - `src/composables/useOnScreenKeyboardNavigation.js`: keyboard-modal D-pad/stick navigation, A/B handling, Escape handling, and initial key focus.
 - `src/utils/spatialFocus.js`: shared geometry-based directional focus selection used by Settings and the on-screen keyboard.
 - `src/styles.css`: global layout optimized for a 1280x800 display.
@@ -86,7 +86,7 @@ The current form offers HTTP and RTSP only. Its parser does not preserve URL que
 
 Settings writes use a temporary file followed by `fs.rename`. Retain atomic-style writes for future settings.
 
-Keep `useSettings.js` as the single shared renderer source of truth unless application state becomes complex enough to justify a dedicated store. Route views should consume the composable rather than passing settings through `App.vue` props and events.
+Keep `useSettings.js` as the single shared renderer source of truth unless application state becomes complex enough to justify a dedicated store. Shell and drawer components should consume the composable rather than passing settings through `App.vue` props and events.
 
 ### Camera
 
@@ -116,8 +116,8 @@ Pointer and touch controls must follow the same axis constraints as hardware inp
 `useGamepad.js` is the single renderer polling owner for Steam Deck and compatible gamepads. `ControllerPanel.vue` consumes its reactive axes so Home robot control and interface navigation do not create competing Gamepad API loops.
 
 - Standard button mapping is A at button `0`, B at button `1`, and D-pad up/down/left/right at buttons `12` through `15`.
-- D-pad up/down selects Home, Settings, or Exit in the persistent sidebar. Highlighting Exit preserves the current route, and A activates Exit. A on Settings enters its first form control.
-- While a Settings control has focus, D-pad directions move spatially between controls, A activates the focused control, and B returns focus to the Settings sidebar item.
+- D-pad directions select Settings or Exit in the floating shell actions, and A activates the selected action. Opening Settings focuses its first form control.
+- While a Settings control has focus, D-pad directions move spatially between controls, A activates the focused control, and B closes the drawer and returns focus to the floating Settings action.
 - While `OnScreenKeyboard.vue` is open, it has the highest input priority. D-pad and left-stick axes `0`/`1` select keys, A activates a key, and B cancels the draft.
 - Closing the on-screen keyboard restores focus to its originating Settings control. Completing a Settings save restores focus to the Save button so D-pad input remains owned by Settings.
 - Held directional input repeats only after an initial delay. Left-stick navigation uses a `0.55` threshold.
@@ -128,8 +128,11 @@ Pointer and touch controls must follow the same axis constraints as hardware inp
 
 The application must fit the Steam Deck's 1280x800 viewport without page scrolling. Preserve:
 
-- The persistent vertical sidebar.
-- A flexible camera region above a compact joystick row.
+- A full-screen camera feed as the primary surface.
+- Floating top telemetry for connection state, camera/device IP, and placeholder battery level.
+- Stable translucent joystick controls anchored to the lower corners.
+- Minimal floating Settings and Exit icon actions.
+- A modal Settings shell that slides in from the right and scrolls independently.
 - Stable joystick dimensions and puck travel.
 - Touch- and controller-focusable built-in keyboard keys with stable dimensions.
 - One-row camera settings at the target viewport.
@@ -137,12 +140,11 @@ The application must fit the Steam Deck's 1280x800 viewport without page scrolli
 
 Use existing Bootstrap controls, Lucide icons, and local CSS conventions. Avoid adding a second design system.
 
-### Routing And Views
+### Shell And Views
 
-- Keep route-level screens in `src/views/` and application chrome in `src/App.vue`.
-- Use `RouterLink` and `RouterView`; do not reintroduce manual `v-if` page switching.
-- Keep `createWebHashHistory()` while production is loaded through `BrowserWindow.loadFile()`.
-- Home and Settings are intentionally eager imports so the offline Electron renderer ships as one JavaScript application bundle.
+- Keep the full-screen camera and controller mounted as the persistent operational surface.
+- Treat the Settings drawer as a shell component, not a route or replacement view; opening it must not stop camera or UDP control lifecycles.
+- Keep Settings form content in `src/views/SettingsView.vue` and application chrome/state in `src/App.vue` and `src/components/SettingsShell.vue`.
 
 ## Validation
 
@@ -168,8 +170,7 @@ There are currently no automated test or lint scripts. Do not report tests or li
 
 - Read the current file contents before editing; this repository may contain uncommitted user changes.
 - Keep changes scoped and preserve the existing Vue Composition API style.
-- Prefer shared reactive state in `useSettings.js` over prop drilling between routed views.
-- Keep route history hash-based unless the Electron production loading strategy changes.
+- Prefer shared reactive state in `useSettings.js` over prop drilling between shell and drawer components.
 - Preserve the camera settings JSON contract unless a compatible migration is included.
 - Do not commit generated `dist/` or `node_modules/` content.
 - Do not overwrite a user's local camera URL in `settings.json` while performing unrelated work.

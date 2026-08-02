@@ -3,6 +3,8 @@ import { onUnmounted, ref, watch } from 'vue'
 import { Camera, Unplug } from '@lucide/vue'
 import { useSettings } from '../composables/useSettings'
 
+const emit = defineEmits(['statusChange'])
+
 // Renders the IP camera feed via <img>, which covers HTTP/HTTPS snapshots and
 // MJPEG streams without an extra player. The camera URL comes from shared
 // settings and reconnects reactively. Diagnostic logs use the [camera] prefix.
@@ -68,6 +70,7 @@ function handleCameraError(event) {
 }
 
 watch(cameraUrl, connectCamera, { immediate: true })
+watch(cameraState, (state) => emit('statusChange', state), { immediate: true })
 
 onUnmounted(() => {
   connectionRequest += 1
@@ -78,15 +81,10 @@ onUnmounted(() => {
 <template>
   <section class="camera-section">
     <div class="camera-viewport">
-      <img
-        v-if="cameraSource"
-        :src="cameraSource"
-        alt="Live IP camera feed"
-        @load="handleCameraReady"
-        @error="handleCameraError"
-      />
+      <img v-if="cameraSource" :src="cameraSource" alt="Live IP camera feed" @load="handleCameraReady"
+        @error="handleCameraError" />
       <div v-if="cameraState !== 'connected'" class="camera-message">
-          <!-- Error: Unplug icon, else Camera icon -->
+        <!-- Error: Unplug icon, else Camera icon -->
         <Camera v-if="cameraState !== 'error'" :size="34" aria-hidden="true" />
         <Unplug v-else :size="34" aria-hidden="true" />
 
@@ -97,12 +95,6 @@ onUnmounted(() => {
         <span v-if="cameraState === 'error'">{{ cameraError }}</span>
         <span v-else-if="cameraState === 'idle'">Set the camera URL in Settings to start the feed.</span>
       </div>
-      <span :class="`live-indicator ${cameraState}`">
-          <span v-if="cameraState === 'connected'">Connected</span>
-          <span v-else-if="cameraState === 'loading'">Connecting...</span>
-          <span v-else-if="cameraState === 'error'">Error</span>
-          <span v-else>Disconnected</span>
-      </span>
     </div>
   </section>
 </template>

@@ -1,67 +1,51 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { House, LogOut, Settings } from '@lucide/vue'
+import { LogOut, Settings } from '@lucide/vue'
 import { useGamepad } from './composables/useGamepad'
+import HomeView from './views/HomeView.vue'
+import SettingsShell from './components/SettingsShell.vue'
 
-const route = useRoute()
-const router = useRouter()
 const { registerHandler } = useGamepad()
-const sidebar = ref(null)
+const actionBar = ref(null)
+const settingsOpen = ref(false)
+const settingsButton = ref(null)
 let unregisterGamepadHandler
-
-const navigation = [
-  { label: 'Home', icon: House, to: { name: 'home' } },
-  { label: 'Settings', icon: Settings, to: { name: 'settings' } },
-]
 
 function quitApp() {
   window.electronAPI?.quitApp()
 }
 
-function focusNavigation(routeName = route.name) {
-  const item = sidebar.value?.querySelector(`[data-navigation-key="${routeName}"]`)
-  item?.focus()
+async function openSettings() {
+  settingsOpen.value = true
+  await nextTick()
+  document.querySelector('#settings-page [data-gamepad-control]')?.focus()
 }
 
-async function selectNavigation(offset) {
-  const items = [...sidebar.value.querySelectorAll('[data-navigation-key]')]
-  const focusedIndex = items.indexOf(document.activeElement)
-  const routeIndex = items.findIndex((item) => item.dataset.navigationKey === route.name)
-  const currentIndex = focusedIndex >= 0 ? focusedIndex : Math.max(0, routeIndex)
-  const nextIndex = Math.max(0, Math.min(items.length - 1, currentIndex + offset))
-  const nextItem = items[nextIndex]
-  const nextRoute = nextItem.dataset.routeName
-
-  if (nextRoute && nextRoute !== route.name) await router.push({ name: nextRoute })
+async function closeSettings() {
+  settingsOpen.value = false
   await nextTick()
-  nextItem.focus()
+  settingsButton.value?.focus({ preventScroll: true })
 }
 
 function handleGamepadNavigation(action) {
-  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return false
+  if (settingsOpen.value || document.querySelector('[role="dialog"][aria-modal="true"]')) return false
 
-  const activeElement = document.activeElement
-  const sidebarActive = sidebar.value?.contains(activeElement)
-  const settingsActive = Boolean(activeElement?.closest?.('#settings-page'))
-  if (settingsActive) return false
+  const items = [...(actionBar.value?.querySelectorAll('[data-shell-action]') ?? [])]
+  const focusedIndex = items.indexOf(document.activeElement)
 
-  if (action === 'up' || action === 'down') {
-    selectNavigation(action === 'up' ? -1 : 1)
+  if (action === 'up' || action === 'down' || action === 'left' || action === 'right') {
+    const offset = action === 'up' || action === 'left' ? -1 : 1
+    const currentIndex = focusedIndex >= 0 ? focusedIndex : 0
+    items[Math.max(0, Math.min(items.length - 1, currentIndex + offset))]?.focus()
     return true
   }
 
-  if (action === 'activate' && sidebarActive) {
-    const navigationKey = activeElement.dataset.navigationKey
-    if (navigationKey === 'settings' && route.name === 'settings') {
-      document.querySelector('#settings-page [data-gamepad-control]')?.focus()
-    } else if (navigationKey === 'exit') {
-      activeElement.click()
-    }
+  if (action === 'activate' && focusedIndex >= 0) {
+    document.activeElement.click()
     return true
   }
 
-  return sidebarActive
+  return focusedIndex >= 0
 }
 
 onMounted(() => {
@@ -73,36 +57,21 @@ onBeforeUnmount(() => unregisterGamepadHandler?.())
 
 <template>
   <div class="app-shell">
-    <aside ref="sidebar" class="sidebar border-end" aria-label="Primary navigation">
-      <RouterLink class="sidebar-brand" :to="{ name: 'home' }" aria-label="Robot Monitor home">
-
-        <!-- in case mau pake logo -->
-        <!-- <div class="brand-mark" aria-hidden="true">
-          <Bot :size="22" />
-        </div> -->
-
-        <div>
-          <span class="brand-title">Robot Control</span>
-          <span class="brand-subtitle">Steam Deck</span>
-        </div>
-      </RouterLink>
-
-      <nav class="sidebar-nav">
-        <RouterLink v-for="item in navigation" :key="item.label" class="nav-link" active-class="active" :to="item.to"
-          :data-navigation-key="item.to.name" :data-route-name="item.to.name">
-          <component :is="item.icon" :size="19" aria-hidden="true" />
-          <span>{{ item.label }}</span>
-        </RouterLink>
-      </nav>
-
-      <button class="nav-link exit-button" type="button" data-navigation-key="exit" @click="quitApp">
-        <LogOut :size="19" aria-hidden="true" />
-        <span>Exit</span>
-      </button>
-    </aside>
-
     <main class="content-shell">
-      <RouterView />
+      <HomeView />
     </main>
+
+    <nav ref="actionBar" class="shell-actions" aria-label="Application actions">
+      <button ref="settingsButton" class="floating-icon-button settings-trigger" type="button" title="Settings"
+        aria-label="Open settings" data-shell-action @click="openSettings">
+        <Settings :size="22" aria-hidden="true" />
+      </button>
+      <button class="floating-icon-button exit-trigger" type="button" title="Exit application"
+        aria-label="Exit application" data-shell-action @click="quitApp">
+        <LogOut :size="21" aria-hidden="true" />
+      </button>
+    </nav>
+
+    <SettingsShell v-if="settingsOpen" @close="closeSettings" />
   </div>
 </template>
