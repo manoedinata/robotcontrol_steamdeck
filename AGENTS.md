@@ -18,7 +18,7 @@ While the command shell is active, the Electron main process sends packed Y/thet
 - `camera-server.js`: development-only mock IP camera that serves an MJPEG stream over HTTP at `http://localhost:8080/video`, using bundled `ffmpeg-static` to generate a synthetic test pattern by default or stream a v4l2 device via `CAMERA_DEVICE`. Device streams request the camera's native MJPEG and stream-copy it (no re-encode) to avoid transcode lag; `CAMERA_SIZE` and `CAMERA_FRAMERATE` set the capture geometry.
 - `docs/`: focused user documentation for setup, camera/settings, controls, UDP protocol, architecture, and limitations.
 - `src/App.vue`: persistent camera-first command shell, floating Settings/Exit actions, and Settings drawer state.
-- `src/views/HomeView.vue`: full-screen camera composition with connection/IP telemetry, UDP battery telemetry, and floating controller HUD.
+- `src/views/HomeView.vue`: full-screen camera composition with top-center connection/IP telemetry, a top-right UDP battery chip, and floating controller HUD.
 - `src/components/CameraFeed.vue`: camera state, `<img>` rendering, and status events consumed by the Home telemetry HUD. Consumes `useSettings` directly.
 - `src/components/SettingsShell.vue`: modal shell that slides in from the right and hosts `SettingsView` without unmounting Home.
 - `src/components/ControllerPanel.vue`: Gamepad API polling, dead zone, per-axis velocity math, and the joystick/status layout.
@@ -133,9 +133,10 @@ Pointer and touch controls must follow the same axis constraints as hardware inp
 The application must fit the Steam Deck's 1280x800 viewport without page scrolling. Preserve:
 
 - A full-screen camera feed as the primary surface.
-- Floating top telemetry for connection state, camera/device IP, and UDP battery level.
+- Floating top-center telemetry for connection state and camera/device IP.
+- A separate floating top-right UDP battery level chip.
 - Stable translucent joystick controls anchored to the lower corners.
-- Minimal floating Settings and Exit icon actions.
+- Minimal floating Settings and Exit icon actions stacked vertically on the right edge, with Exit above Settings.
 - A modal Settings shell that slides in from the right and scrolls independently.
 - Stable joystick dimensions and puck travel.
 - Touch- and controller-focusable built-in keyboard keys with stable dimensions.

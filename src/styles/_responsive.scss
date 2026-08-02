@@ -11,6 +11,10 @@
         padding: 0 22px 18px;
     }
 
+    .shell-actions {
+        bottom: 184px;
+    }
+
     .control-mode {
         bottom: 16px;
     }
@@ -19,24 +23,12 @@
 @media (max-width: 720px) {
 
     .hud-brand small,
-    .control-mode,
-    .exit-trigger {
+    .control-mode {
         display: none;
     }
 
     .hud-brand {
         left: 14px;
-    }
-
-    .telemetry-bar {
-        right: 70px;
-        left: auto;
-        transform: none;
-    }
-
-    .telemetry-divider,
-    .battery-telemetry {
-        display: none;
     }
 
     .settings-shell {

@@ -89,6 +89,7 @@ body {
 
 .hud-brand,
 .telemetry-bar,
+.battery-telemetry,
 .control-mode,
 .shell-actions,
 .joystick-section {
@@ -190,10 +191,17 @@ body {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-.telemetry-divider {
-    width: 1px;
-    height: 20px;
-    background: var(--hud-border);
+.battery-telemetry {
+    top: 20px;
+    right: 20px;
+    min-height: 40px;
+    padding: 7px 12px;
+    color: #edf1f3;
+    border: 1px solid var(--hud-border);
+    border-radius: 6px;
+    background: var(--hud-surface);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+    backdrop-filter: blur(12px);
 }
 
 .battery-telemetry svg {
@@ -251,9 +259,12 @@ body {
 }
 
 .shell-actions {
-    top: 18px;
+    top: 68px;
     right: 20px;
+    bottom: 212px;
     display: flex;
+    flex-direction: column;
+    justify-content: center;
     gap: 8px;
 }
 
@@ -362,4 +373,3 @@ body {
     color: #ffffff;
     text-align: right;
 }
-

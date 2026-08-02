@@ -59,11 +59,11 @@ onBeforeUnmount(() => removeBatteryListener?.())
         <span class="telemetry-ip">{{ deviceAddress }}</span>
         <span class="visually-hidden">Camera {{ statusLabel }}</span>
       </div>
-      <div class="telemetry-divider" aria-hidden="true"></div>
-      <div class="battery-telemetry" title="Robot battery level">
-        <BatteryMedium :size="20" aria-hidden="true" />
-        <span>{{ batteryLevel === null ? '--' : `${batteryLevel}%` }}</span>
-      </div>
+    </div>
+
+    <div class="battery-telemetry" title="Robot battery level" aria-label="Robot battery level">
+      <BatteryMedium :size="20" aria-hidden="true" />
+      <span>{{ batteryLevel === null ? '--' : `${batteryLevel}%` }}</span>
     </div>
 
     <div class="control-mode" :class="{ connected: gamepadName }"

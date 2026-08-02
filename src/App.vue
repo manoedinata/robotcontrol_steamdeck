@@ -62,13 +62,13 @@ onBeforeUnmount(() => unregisterGamepadHandler?.())
     </main>
 
     <nav ref="actionBar" class="shell-actions" aria-label="Application actions">
-      <button ref="settingsButton" class="floating-icon-button settings-trigger" type="button" title="Settings"
-        aria-label="Open settings" data-shell-action @click="openSettings">
-        <Settings :size="22" aria-hidden="true" />
-      </button>
       <button class="floating-icon-button exit-trigger" type="button" title="Exit application"
         aria-label="Exit application" data-shell-action @click="quitApp">
         <LogOut :size="21" aria-hidden="true" />
+      </button>
+      <button ref="settingsButton" class="floating-icon-button settings-trigger" type="button" title="Settings"
+        aria-label="Open settings" data-shell-action @click="openSettings">
+        <Settings :size="22" aria-hidden="true" />
       </button>
     </nav>
 
