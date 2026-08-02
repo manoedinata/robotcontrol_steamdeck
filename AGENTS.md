@@ -15,6 +15,7 @@ While the command shell is active, the Electron main process sends packed Y/thet
 - `electron-components/rtsp-transcoder.js`: one-source RTSP/TCP to MJPEG relay using bundled `ffmpeg`, bound to a tokenized loopback URL.
 - `electron-components/udp-client.js`: validates and sends 11-byte velocity commands, receives validated 7-byte battery replies, and publishes battery updates in the main process.
 - `udp-server.js`: development-only UDP peer that validates `ITS` commands, decodes both velocities, reports packet timing, and replies with the current Linux system battery percentage.
+- `docs/`: focused user documentation for setup, camera/settings, controls, UDP protocol, architecture, and limitations.
 - `src/App.vue`: persistent camera-first command shell, floating Settings/Exit actions, and Settings drawer state.
 - `src/views/HomeView.vue`: full-screen camera composition with connection/IP telemetry, UDP battery telemetry, and floating controller HUD.
 - `src/components/CameraFeed.vue`: camera state, `<img>` rendering, and status events consumed by the Home telemetry HUD. Consumes `useSettings` directly.
