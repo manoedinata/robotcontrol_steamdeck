@@ -1,12 +1,71 @@
-// Example of a simple UDP server that listens for packets with a specific header
-// and size, and logs the received velocity data along with the time interval between packets.
+// Development UDP peer: logs velocity commands and replies to each valid sender
+// with the current Linux system battery percentage.
 
-const { createSocket } = require('dgram');
+const { createSocket } = require('node:dgram');
+const fs = require('node:fs/promises');
 
 const server = createSocket('udp4');
 const HEADER = 'ITS';
 const PACKET_SIZE = 11;
+const BATTERY_PACKET_SIZE = 7;
+const BATTERY_CACHE_MS = 1000;
+const POWER_SUPPLY_PATH = '/sys/class/power_supply';
 let previousPacketTime;
+let cachedBatteryPercentage;
+let batteryCacheTime = 0;
+let batteryReadPromise;
+let batteryReadWarningShown = false;
+
+async function readBatteryPercentage() {
+    const now = Date.now();
+    if (cachedBatteryPercentage !== undefined && now - batteryCacheTime < BATTERY_CACHE_MS) {
+        return cachedBatteryPercentage;
+    }
+    if (batteryReadPromise) return batteryReadPromise;
+
+    batteryReadPromise = (async () => {
+        const entries = await fs.readdir(POWER_SUPPLY_PATH, { withFileTypes: true });
+        const batteryEntries = entries.filter((entry) => entry.name.startsWith('BAT'));
+
+        for (const entry of batteryEntries) {
+            try {
+                const capacity = await fs.readFile(`${POWER_SUPPLY_PATH}/${entry.name}/capacity`, 'utf8');
+                const percentage = Number.parseInt(capacity.trim(), 10);
+                if (Number.isInteger(percentage) && percentage >= 0 && percentage <= 100) {
+                    cachedBatteryPercentage = percentage;
+                    batteryCacheTime = Date.now();
+                    return percentage;
+                }
+            } catch {
+                // Try the next battery exposed by the system.
+            }
+        }
+
+        throw new Error('No readable system battery capacity was found.');
+    })();
+
+    try {
+        return await batteryReadPromise;
+    } finally {
+        batteryReadPromise = undefined;
+    }
+}
+
+async function sendBatteryPercentage(rinfo) {
+    try {
+        const batteryPercentage = await readBatteryPercentage();
+        const packet = Buffer.allocUnsafe(BATTERY_PACKET_SIZE);
+        packet.write(HEADER, 0, 3, 'ascii');
+        packet.writeInt32LE(batteryPercentage, 3);
+        server.send(packet, rinfo.port, rinfo.address);
+        batteryReadWarningShown = false;
+    } catch (error) {
+        if (!batteryReadWarningShown) {
+            console.warn(`Unable to send battery percentage: ${error.message}`);
+            batteryReadWarningShown = true;
+        }
+    }
+}
 
 server.on('message', (msg, rinfo) => {
     if (msg.length !== PACKET_SIZE) {
@@ -38,6 +97,8 @@ server.on('message', (msg, rinfo) => {
         + `Y=${yVelocity}, theta=${thetaVelocity}, `
         + `interval=${elapsedMilliseconds === null ? 'first packet' : `${elapsedMilliseconds.toFixed(3)} ms`}`,
     );
+
+    void sendBatteryPercentage(rinfo);
 });
 
 server.on('error', (err) => {

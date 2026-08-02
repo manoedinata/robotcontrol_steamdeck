@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { BatteryMedium, Gamepad2, LoaderCircle } from '@lucide/vue'
 import CameraFeed from '../components/CameraFeed.vue'
 import ControllerPanel from '../components/ControllerPanel.vue'
@@ -9,7 +9,8 @@ import { useSettings } from '../composables/useSettings'
 const { cameraUrl } = useSettings()
 const { gamepadName } = useGamepad()
 const cameraState = ref('idle')
-const batteryLevel = 76
+const batteryLevel = ref(null)
+let removeBatteryListener
 
 const gamepadStatusLabel = computed(() => gamepadName.value
   ? 'Connected'
@@ -17,9 +18,9 @@ const gamepadStatusLabel = computed(() => gamepadName.value
 
 const deviceAddress = computed(() => {
   try {
-    return cameraUrl.value ? new URL(cameraUrl.value).hostname : 'Not set.'
+    return cameraUrl.value ? new URL(cameraUrl.value).hostname : '--'
   } catch {
-    return 'Error getting IP address.'
+    return '--'
   }
 })
 
@@ -28,6 +29,16 @@ const statusLabel = computed(() => {
   if (cameraState.value === 'loading') return 'Reconnecting'
   return 'Disconnected'
 })
+
+onMounted(() => {
+  removeBatteryListener = window.electronAPI?.onUdpBatteryPercentage?.((percentage) => {
+    if (Number.isInteger(percentage) && percentage >= 0 && percentage <= 100) {
+      batteryLevel.value = percentage
+    }
+  })
+})
+
+onBeforeUnmount(() => removeBatteryListener?.())
 </script>
 
 <template>
@@ -49,9 +60,9 @@ const statusLabel = computed(() => {
         <span class="visually-hidden">Camera {{ statusLabel }}</span>
       </div>
       <div class="telemetry-divider" aria-hidden="true"></div>
-      <div class="battery-telemetry" title="Battery level placeholder">
+      <div class="battery-telemetry" title="Robot battery level">
         <BatteryMedium :size="20" aria-hidden="true" />
-        <span>{{ batteryLevel }}%</span>
+        <span>{{ batteryLevel === null ? '--' : `${batteryLevel}%` }}</span>
       </div>
     </div>
 

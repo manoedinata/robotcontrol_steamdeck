@@ -6,17 +6,17 @@ This repository is a Steam Deck-oriented Electron and Vue application for viewin
 
 The target viewport is 1280x800. The primary runtime environment is SteamOS Gaming Mode.
 
-While the command shell is active, the Electron main process sends packed Y/theta velocity datagrams at 50 Hz (every 20 ms) to the configured UDP destination. It does not integrate directly with ROS or other robot middleware.
+While the command shell is active, the Electron main process sends packed Y/theta velocity datagrams at 50 Hz (every 20 ms) to the configured UDP destination and receives battery percentage replies on the same socket. It does not integrate directly with ROS or other robot middleware.
 
 ## Architecture
 
 - `main.js`: Electron main process, BrowserWindow creation, IPC handlers, settings filesystem access, RTSP transcoder lifecycle, and the 50 Hz latest-command UDP scheduler.
 - `electron-components/preload.js`: narrow context bridge exposed as `window.electronAPI`.
 - `electron-components/rtsp-transcoder.js`: one-source RTSP/TCP to MJPEG relay using bundled `ffmpeg`, bound to a tokenized loopback URL.
-- `electron-components/udp-client.js`: validates the UDP destination and packs a 3-byte ASCII header plus two little-endian IEEE-754 `float32` velocities into an 11-byte UDP datagram.
-- `udp-server.js`: development-only UDP receiver that validates `ITS` packets, decodes both velocities, and reports the monotonic interval between valid packets.
+- `electron-components/udp-client.js`: validates and sends 11-byte velocity commands, receives validated 7-byte battery replies, and publishes battery updates in the main process.
+- `udp-server.js`: development-only UDP peer that validates `ITS` commands, decodes both velocities, reports packet timing, and replies with the current Linux system battery percentage.
 - `src/App.vue`: persistent camera-first command shell, floating Settings/Exit actions, and Settings drawer state.
-- `src/views/HomeView.vue`: full-screen camera composition with connection/IP telemetry, placeholder battery level, and floating controller HUD.
+- `src/views/HomeView.vue`: full-screen camera composition with connection/IP telemetry, UDP battery telemetry, and floating controller HUD.
 - `src/components/CameraFeed.vue`: camera state, `<img>` rendering, and status events consumed by the Home telemetry HUD. Consumes `useSettings` directly.
 - `src/components/SettingsShell.vue`: modal shell that slides in from the right and hosts `SettingsView` without unmounting Home.
 - `src/components/ControllerPanel.vue`: Gamepad API polling, dead zone, per-axis velocity math, and the joystick/status layout.
@@ -55,7 +55,7 @@ Do not access Node.js, Electron, or the filesystem directly from Vue code. Add n
 
 Keep application lifecycle and settings filesystem ownership in the main process. Do not broaden `window.electronAPI` with generic IPC, filesystem, or shell access.
 
-The UDP preload contract is `updateUdpVelocity(host, port, velocity)` plus `stopUdpVelocity()`, where velocity is `[yVelocity, thetaVelocity]`. `ControllerPanel.vue` publishes only the latest reactive state. The main process retains the latest command and sends it every 20 ms with fixed header `ITS`; `electron-components/udp-client.js` validates the destination and serializes two finite IEEE-754 `float32` values before each send. Full renderer navigation, renderer termination, window close, and an explicit stop must clear the scheduler so a stale command cannot continue. Keep the packet packed with Y at byte offset `3`, theta at byte offset `7`, and little-endian byte order unless the receiver protocol changes explicitly. Do not overlap sends. Close the UDP socket during application shutdown.
+The UDP preload contract is `updateUdpVelocity(host, port, velocity)`, `stopUdpVelocity()`, and `onUdpBatteryPercentage(callback)`, where velocity is `[yVelocity, thetaVelocity]`. `ControllerPanel.vue` publishes only the latest reactive state. The main process retains the latest command and sends it every 20 ms with fixed header `ITS`; `electron-components/udp-client.js` validates the destination and serializes two finite IEEE-754 `float32` values before each send. Full renderer navigation, renderer termination, window close, and an explicit stop must clear the scheduler so a stale command cannot continue. Keep velocity packets packed with Y at byte offset `3`, theta at byte offset `7`, and little-endian byte order. Battery responses are exact 7-byte packets with `ITS` at offset `0` and a signed little-endian `int32` percentage at offset `3`; accept only values from `0` through `100` and expose only validated values to the renderer. Do not overlap sends. Close the UDP socket during application shutdown.
 
 ### Settings
 
@@ -129,7 +129,7 @@ Pointer and touch controls must follow the same axis constraints as hardware inp
 The application must fit the Steam Deck's 1280x800 viewport without page scrolling. Preserve:
 
 - A full-screen camera feed as the primary surface.
-- Floating top telemetry for connection state, camera/device IP, and placeholder battery level.
+- Floating top telemetry for connection state, camera/device IP, and UDP battery level.
 - Stable translucent joystick controls anchored to the lower corners.
 - Minimal floating Settings and Exit icon actions.
 - A modal Settings shell that slides in from the right and scrolls independently.
@@ -164,7 +164,7 @@ npm run start
 
 There are currently no automated test or lint scripts. Do not report tests or lint as passing unless those scripts are added and executed.
 
-`udp-server.js` is only a packet-format and timing diagnostic. It is started by `npm run dev`, accepts only exact 11-byte `ITS` packets, and excludes malformed packets from interval calculations. It does not acknowledge delivery, emulate the STM32 watchdog, or participate in production `npm run start`/`launch.sh` execution.
+`udp-server.js` is only a packet-format, timing, and battery-response diagnostic. It is started by `npm run dev`, accepts only exact 11-byte `ITS` commands, excludes malformed packets from interval calculations, and replies to each valid sender with a 7-byte `ITS` plus `int32` battery packet. It reads Linux battery capacity from `/sys/class/power_supply/BAT*/capacity`, caches it for one second, and sends no reply if no battery is readable. It does not emulate the STM32 watchdog or participate in production `npm run start`/`launch.sh` execution.
 
 ## Change Guidance
 
@@ -180,7 +180,8 @@ There are currently no automated test or lint scripts. Do not report tests or li
 
 ## Known Gaps
 
-- UDP is connectionless, so delivery and receiver health are not acknowledged by this application.
+- UDP remains connectionless. Battery telemetry demonstrates that a peer response arrived but does not acknowledge a specific velocity command or guarantee delivery.
+- Battery telemetry has no stale-data timeout and remains at its last valid value after replies stop.
 - The application intentionally sends no final zero-velocity datagram when Home unmounts or Electron quits; wheel stopping on communication loss depends on the STM32 UDP receive-timeout watchdog.
 - RTSP is supported through the main-process MJPEG relay; Chromium still cannot render `rtsp://` directly.
 - Camera credentials are not represented by the Settings form, although manually persisted URL credentials can be passed to `ffmpeg`.

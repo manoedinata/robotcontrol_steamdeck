@@ -37,6 +37,7 @@ A Steam Deck-oriented Electron application for viewing a robot camera and visual
 - Supports pointer and touch dragging for both on-screen joystick controls.
 - Stores the camera source, velocity limits, UDP destination, and keyboard preference in `settings.json` beside the launcher.
 - Sends packed Y/theta velocity datagrams to the configured UDP destination at 50 Hz (every 20 ms).
+- Receives validated battery percentage replies from that UDP peer and displays them in the Home telemetry bar.
 - Runs as a frameless Electron application with a persistent camera/control shell, sliding Settings drawer, and in-app Exit action.
 - Uses a layout sized to fit the Steam Deck display without scrolling.
 
@@ -220,7 +221,14 @@ Each transmission is one fixed-size, 11-byte UDP datagram. The header must be ex
 
 The receiver must use the same packed layout and little-endian byte order. `electron-components/udp-client.js` validates the destination, header, array shape, finite values, and `float32` range before transmission. Sends are not overlapped if a previous request is still pending.
 
-`udp-server.js` is a development diagnostic receiver, not part of the robot control path. It listens on UDP port `41234`, rejects packets that are not exactly 11 bytes or do not begin with `ITS`, decodes both velocities, and reports the monotonic interval between valid packets in milliseconds. `npm run dev` starts it automatically; only one process can bind that port at a time.
+The peer replies to the source address and ephemeral source port of a velocity command with a fixed-size, 7-byte battery datagram. The reply uses the same `ITS` header followed by a signed 32-bit little-endian integer. The Electron main process accepts only exact packets with a percentage from `0` through `100`, then forwards the validated value to the Home telemetry bar.
+
+| Offset | Size | Encoding                      | Value              |
+| ------ | ---- | ----------------------------- | ------------------ |
+| `0`    | 3    | ASCII bytes                   | Header (`ITS`)     |
+| `3`    | 4    | Signed `int32`, little-endian | Battery percentage |
+
+`udp-server.js` is a development diagnostic peer, not part of the robot control path. It listens on UDP port `41234`, rejects packets that are not exactly 11 bytes or do not begin with `ITS`, decodes both velocities, and reports the monotonic interval between valid packets. For every valid command, it reads the current Linux battery capacity from `/sys/class/power_supply/BAT*/capacity` (cached for one second) and sends a battery reply. If no readable system battery exists, it logs one warning and does not send a fabricated percentage. `npm run dev` starts it automatically; only one process can bind that port at a time.
 
 ## Architecture
 
@@ -230,8 +238,8 @@ The receiver must use the same packed layout and little-endian byte order. `elec
 ├── electron-components
 │   ├── preload.js             Restricted renderer bridge
 │   ├── rtsp-transcoder.js     Loopback RTSP-to-MJPEG ffmpeg relay
-│   └── udp-client.js          Packed Y/theta UDP datagram sender
-├── udp-server.js              Development UDP decoder and interval diagnostic
+│   └── udp-client.js          Velocity sender and battery response receiver
+├── udp-server.js              Development velocity/battery UDP peer
 ├── launch.sh                  Steam Gaming Mode production launcher
 ├── settings.json              Persisted camera, controls, and UDP settings
 ├── index.html                 Renderer entry and Content Security Policy
@@ -265,7 +273,7 @@ The renderer runs with:
 - `contextIsolation: true`
 - `nodeIntegration: false`
 
-`electron-components/preload.js` exposes only six operations through `window.electronAPI`:
+`electron-components/preload.js` exposes only seven operations through `window.electronAPI`:
 
 - `quitApp()`
 - `loadSettings()`
@@ -273,13 +281,14 @@ The renderer runs with:
 - `resolveCameraStream(cameraUrl)`
 - `updateUdpVelocity(host, port, velocity)`
 - `stopUdpVelocity()`
+- `onUdpBatteryPercentage(callback)`
 
 Keep filesystem access, transcoder processes, and application lifecycle operations in the main process. Do not expose Node.js or Electron modules directly to Vue components.
 
 ### Renderer Data Flow
 
 - `App.vue` owns the persistent command shell and toggles `SettingsShell.vue` without unmounting the camera or controller.
-- `HomeView.vue` composes the full-screen `CameraFeed.vue`, floating telemetry HUD, and `ControllerPanel.vue`. Camera connection state is emitted to the HUD; battery is currently a placeholder and the displayed device IP falls back to a placeholder when no camera source is configured.
+- `HomeView.vue` composes the full-screen `CameraFeed.vue`, floating telemetry HUD, and `ControllerPanel.vue`. Camera connection state is emitted to the HUD; validated UDP battery replies update battery telemetry, and the displayed device IP falls back to a placeholder when no camera source is configured.
 - `SettingsShell.vue` owns the modal right drawer while `SettingsView.vue` retains the settings form and persistence behavior.
 - `useGamepad.js` owns the single Gamepad API polling loop. Prioritized handlers route D-pad, left-stick, A, and B actions to the keyboard modal, Settings drawer, or floating shell actions while `ControllerPanel.vue` consumes the same reactive axes for robot velocity.
 - `useSettingsGamepadNavigation.js` and `useOnScreenKeyboardNavigation.js` own their respective focus and activation lifecycles. Both use `spatialFocus.js` for directional DOM focus selection, keeping navigation mechanics out of the Settings and keyboard components.
@@ -289,7 +298,8 @@ Keep filesystem access, transcoder processes, and application lifecycle operatio
 
 ## Current Limitations
 
-- UDP delivery is connectionless; the application cannot confirm that the robot received a datagram.
+- UDP delivery remains connectionless. A battery reply proves that the peer sent telemetry after a command, but it does not acknowledge a specific command or guarantee delivery.
+- Battery telemetry remains `--` until a valid response arrives and has no stale-data timeout.
 - Motion shutdown on lost or stopped transmission depends on the STM32 UDP receive-timeout watchdog; the application does not send a final stop datagram when Home unmounts or Electron quits.
 - RTSP transcoding is limited to one source at 15 fps and uses CPU-intensive MJPEG output.
 - RTSP startup and authentication failures depend on `ffmpeg` diagnostics and are not surfaced as structured UI errors.

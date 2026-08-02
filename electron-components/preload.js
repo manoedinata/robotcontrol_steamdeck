@@ -9,4 +9,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.send('udp:update-velocity', host, port, velocity)
     ),
     stopUdpVelocity: () => ipcRenderer.send('udp:stop-velocity'),
+    onUdpBatteryPercentage: (callback) => {
+        const listener = (_event, batteryPercentage) => callback(batteryPercentage)
+        ipcRenderer.on('udp:battery-percentage', listener)
+        return () => ipcRenderer.removeListener('udp:battery-percentage', listener)
+    },
 })

@@ -13,6 +13,14 @@ let udpSendTimer = null
 let udpSendInFlight = false
 let lastUdpSendError = ''
 
+udpClient.onBatteryPercentage((batteryPercentage) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+            window.webContents.send('udp:battery-percentage', batteryPercentage)
+        }
+    }
+})
+
 async function loadSettings() {
     try {
         const contents = await fs.readFile(settingsPath, 'utf8')

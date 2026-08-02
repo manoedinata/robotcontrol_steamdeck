@@ -3,6 +3,7 @@ const { createSocket } = require('node:dgram')
 const HEADER_SIZE = 3
 const VELOCITY_COUNT = 2
 const PACKET_SIZE = HEADER_SIZE + (VELOCITY_COUNT * Float32Array.BYTES_PER_ELEMENT)
+const BATTERY_PACKET_SIZE = HEADER_SIZE + Int32Array.BYTES_PER_ELEMENT
 const MAX_FLOAT32 = 3.4028234663852886e38
 
 function packVelocityPacket(header, velocity) {
@@ -26,6 +27,32 @@ function packVelocityPacket(header, velocity) {
 class UdpClient {
     constructor() {
         this.client = createSocket('udp4')
+        this.batteryListeners = new Set()
+        this.client.on('message', (message) => this.handleMessage(message))
+        this.client.on('error', (error) => {
+            console.error('UDP client socket error:', error)
+        })
+    }
+
+    handleMessage(message) {
+        if (
+            message.length !== BATTERY_PACKET_SIZE
+            || message.toString('ascii', 0, HEADER_SIZE) !== 'ITS'
+        ) {
+            return
+        }
+
+        const batteryPercentage = message.readInt32LE(HEADER_SIZE)
+        if (batteryPercentage < 0 || batteryPercentage > 100) return
+
+        for (const listener of this.batteryListeners) {
+            listener(batteryPercentage)
+        }
+    }
+
+    onBatteryPercentage(listener) {
+        this.batteryListeners.add(listener)
+        return () => this.batteryListeners.delete(listener)
     }
 
     verifyDestination(host, port) {
@@ -58,6 +85,7 @@ class UdpClient {
     }
 
     close() {
+        this.batteryListeners.clear()
         this.client.close()
     }
 }

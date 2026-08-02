@@ -1,8 +1,8 @@
 {
-  "cameraUrl": "http://10.125.38.200:8080/h264_opus.sdp",
+  "cameraUrl": "http://10.0.0.0:",
   "maxYVelocity": 20,
   "maxThetaVelocity": 10,
-  "udpHost": "10.125.38.1",
+  "udpHost": "127.0.0.1",
   "udpPort": 41234,
   "useOnScreenKeyboard": true
 }
