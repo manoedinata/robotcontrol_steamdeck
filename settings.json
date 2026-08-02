@@ -1,5 +1,5 @@
 {
-  "cameraUrl": "http://10.0.0.0:",
+  "cameraUrl": "http://10.0.0.0:8080",
   "maxYVelocity": 20,
   "maxThetaVelocity": 10,
   "udpHost": "127.0.0.1",

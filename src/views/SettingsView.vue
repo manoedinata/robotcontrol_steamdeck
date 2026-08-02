@@ -27,9 +27,11 @@ const targetHost = ref(udpHost.value)
 const targetPort = ref(udpPort.value || '')
 const oskEnabled = ref(useOnScreenKeyboard.value)
 const activeKeyboard = ref(null)
+const settingsForm = ref(null)
 const settingsState = ref('idle')
 const settingsMessage = ref('')
 let keyboardReturnControl = null
+let saveQueue = Promise.resolve(true)
 const { focusSaveControl } = useSettingsGamepadNavigation(activeKeyboard, () => emit('close'))
 
 const keyboardFields = {
@@ -61,9 +63,27 @@ function cancelKeyboard() {
   closeKeyboard()
 }
 
-function commitKeyboardValue(value) {
-  fieldValues[activeKeyboard.value.name].value = value
-  closeKeyboard()
+async function commitKeyboardValue(value) {
+  const fieldName = activeKeyboard.value.name
+  fieldValues[fieldName].value = value
+  await closeKeyboard()
+  await nextTick()
+  await saveCameraSettings()
+}
+
+function handleInputKeydown(event, fieldName) {
+  if (oskEnabled.value) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      openKeyboard(fieldName)
+    }
+    return
+  }
+
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    saveCameraSettings()
+  }
 }
 
 function populateCameraFields(url) {
@@ -115,7 +135,14 @@ watch(oskEnabled, (enabled) => {
   if (!enabled && activeKeyboard.value) closeKeyboard()
 })
 
-async function saveCameraSettings() {
+async function persistSettings({ focusSave = false } = {}) {
+  if (!settingsForm.value?.checkValidity()) {
+    settingsForm.value?.reportValidity()
+    settingsState.value = 'error'
+    settingsMessage.value = 'Complete the required fields before saving.'
+    return false
+  }
+
   settingsState.value = 'saving'
   settingsMessage.value = ''
 
@@ -133,19 +160,34 @@ async function saveCameraSettings() {
     })
     settingsState.value = 'saved'
     settingsMessage.value = 'Settings saved.'
+    return true
   } catch (error) {
     settingsState.value = 'error'
     settingsMessage.value = 'Settings could not be saved.'
     console.error(error)
+    return false
   } finally {
-    await focusSaveControl()
+    if (focusSave) await focusSaveControl()
   }
 }
+
+function saveCameraSettings(options = {}) {
+  const saveOperation = saveQueue.then(() => persistSettings(options))
+  saveQueue = saveOperation.catch(() => false)
+  return saveOperation
+}
+
+async function saveBeforeClose() {
+  if (activeKeyboard.value) await closeKeyboard()
+  return saveCameraSettings()
+}
+
+defineExpose({ saveBeforeClose })
 </script>
 
 <template>
   <section id="settings-page" aria-label="Settings controls">
-    <form class="settings-panel" @submit.prevent="saveCameraSettings">
+    <form ref="settingsForm" class="settings-panel" @submit.prevent="saveCameraSettings({ focusSave: true })">
       <div class="settings-panel-heading">
         <Camera :size="20" aria-hidden="true" />
         <div>
@@ -168,8 +210,7 @@ async function saveCameraSettings() {
           <input id="source-ip" v-model.trim="sourceIp" class="form-control" type="text"
             :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" placeholder="192.168.1.20"
             autocomplete="off" required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
-            @click="openKeyboard('sourceIp')" @keydown.enter.prevent="openKeyboard('sourceIp')"
-            @keydown.space.prevent="openKeyboard('sourceIp')" />
+            @click="openKeyboard('sourceIp')" @keydown="handleInputKeydown($event, 'sourceIp')" />
         </div>
 
         <div class="settings-field settings-field-port">
@@ -177,8 +218,7 @@ async function saveCameraSettings() {
           <input id="source-port" v-model="port" class="form-control" type="number"
             :inputmode="oskEnabled ? 'none' : 'numeric'" :readonly="oskEnabled" min="1" max="65535" placeholder="8080"
             required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
-            @click="openKeyboard('port')" @keydown.enter.prevent="openKeyboard('port')"
-            @keydown.space.prevent="openKeyboard('port')" />
+            @click="openKeyboard('port')" @keydown="handleInputKeydown($event, 'port')" />
         </div>
 
         <div class="settings-field settings-field-subpath">
@@ -186,7 +226,7 @@ async function saveCameraSettings() {
           <input id="stream-subpath" v-model.trim="subpath" class="form-control" type="text"
             :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" placeholder="video" autocomplete="off"
             data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('subpath')"
-            @keydown.enter.prevent="openKeyboard('subpath')" @keydown.space.prevent="openKeyboard('subpath')" />
+            @keydown="handleInputKeydown($event, 'subpath')" />
         </div>
       </div>
 
@@ -204,8 +244,7 @@ async function saveCameraSettings() {
           <input id="udp-target-host" v-model.trim="targetHost" class="form-control" type="text"
             :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" placeholder="192.168.1.30"
             autocomplete="off" data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
-            @click="openKeyboard('targetHost')" @keydown.enter.prevent="openKeyboard('targetHost')"
-            @keydown.space.prevent="openKeyboard('targetHost')" />
+            @click="openKeyboard('targetHost')" @keydown="handleInputKeydown($event, 'targetHost')" />
         </div>
 
         <div class="settings-field">
@@ -213,8 +252,7 @@ async function saveCameraSettings() {
           <input id="udp-target-port" v-model="targetPort" class="form-control" type="number"
             :inputmode="oskEnabled ? 'none' : 'numeric'" :readonly="oskEnabled" min="1" max="65535" placeholder="5000"
             data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
-            @click="openKeyboard('targetPort')" @keydown.enter.prevent="openKeyboard('targetPort')"
-            @keydown.space.prevent="openKeyboard('targetPort')" />
+            @click="openKeyboard('targetPort')" @keydown="handleInputKeydown($event, 'targetPort')" />
         </div>
       </div>
 
@@ -232,8 +270,7 @@ async function saveCameraSettings() {
           <input id="max-y-velocity" v-model="maxY" class="form-control" type="number"
             :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" min="0.1" max="100" step="0.1"
             placeholder="10" required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
-            @click="openKeyboard('maxY')" @keydown.enter.prevent="openKeyboard('maxY')"
-            @keydown.space.prevent="openKeyboard('maxY')" />
+            @click="openKeyboard('maxY')" @keydown="handleInputKeydown($event, 'maxY')" />
         </div>
 
         <div class="settings-field">
@@ -241,8 +278,7 @@ async function saveCameraSettings() {
           <input id="max-theta-velocity" v-model="maxTheta" class="form-control" type="number"
             :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" min="0.1" max="100" step="0.1"
             placeholder="10" required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
-            @click="openKeyboard('maxTheta')" @keydown.enter.prevent="openKeyboard('maxTheta')"
-            @keydown.space.prevent="openKeyboard('maxTheta')" />
+            @click="openKeyboard('maxTheta')" @keydown="handleInputKeydown($event, 'maxTheta')" />
         </div>
       </div>
 
