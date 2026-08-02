@@ -19,4 +19,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('udp:battery-percentage', listener)
         return () => ipcRenderer.removeListener('udp:battery-percentage', listener)
     },
+    onUdpMetrics: (callback) => {
+        const listener = (_event, metrics) => callback(metrics)
+        ipcRenderer.on('udp:metrics', listener)
+        return () => ipcRenderer.removeListener('udp:metrics', listener)
+    },
 })

@@ -47,6 +47,7 @@ The renderer uses:
 - `updateUdpVelocity(host, port, velocity)`
 - `stopUdpVelocity()`
 - `onUdpBatteryPercentage(callback)`
+- `onUdpMetrics(callback)`
 
 Filesystem access, child-process ownership, and UDP socket work remain in the main process. Vue code does not access Node.js or Electron modules directly.
 

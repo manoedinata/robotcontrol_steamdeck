@@ -60,7 +60,9 @@ Do not access Node.js, Electron, or the filesystem directly from Vue code. Add n
 
 Keep application lifecycle and settings filesystem ownership in the main process. Do not broaden `window.electronAPI` with generic IPC, filesystem, or shell access.
 
-The UDP preload contract is `updateUdpVelocity(host, port, velocity)`, `stopUdpVelocity()`, and `onUdpBatteryPercentage(callback)`, where velocity is `[yVelocity, thetaVelocity]`. `ControllerPanel.vue` publishes only the latest reactive state. The main process retains the latest command and sends it every 20 ms with fixed header `ITS`; `electron-components/udp-client.js` validates the destination and serializes two finite IEEE-754 `float32` values before each send. Full renderer navigation, renderer termination, window close, and an explicit stop must clear the scheduler so a stale command cannot continue. Keep velocity packets packed with Y at byte offset `3`, theta at byte offset `7`, and little-endian byte order. Battery responses are exact 7-byte packets with `ITS` at offset `0` and a signed little-endian `int32` percentage at offset `3`; accept only values from `0` through `100` and expose only validated values to the renderer. Do not overlap sends. Close the UDP socket during application shutdown.
+The UDP preload contract is `updateUdpVelocity(host, port, velocity)`, `stopUdpVelocity()`, `onUdpBatteryPercentage(callback)`, and `onUdpMetrics(callback)`, where velocity is `[yVelocity, thetaVelocity]`. `ControllerPanel.vue` publishes only the latest reactive state. The main process retains the latest command and sends it every 20 ms with fixed header `ITS`; `electron-components/udp-client.js` validates the destination and serializes two finite IEEE-754 `float32` values before each send. Full renderer navigation, renderer termination, window close, and an explicit stop must clear the scheduler so a stale command cannot continue. Keep velocity packets packed with Y at byte offset `3`, theta at byte offset `7`, and little-endian byte order. Battery responses are exact 7-byte packets with `ITS` at offset `0` and a signed little-endian `int32` percentage at offset `3`; accept only values from `0` through `100` and expose only replies from the configured destination host and port to the renderer. Do not overlap sends. Close the UDP socket during application shutdown.
+
+The UDP HUD displays an exact trailing-one-second valid reply count plus approximate RTT and packet loss. The main process pairs replies FIFO with unmatched sends, averages the latest 20 pair timings, and computes loss from independent reply and settled-send counts in a trailing five-second window with a 250 ms reply grace period. A valid reply within one second means connected. Reset samples on destination changes and transmission stop. Preserve the `~` marker in the HUD and documentation because exact per-command RTT/loss requires sequence IDs that the current 11-byte/7-byte protocol does not contain.
 
 ### Settings
 
@@ -188,8 +190,8 @@ There are currently no automated test or lint scripts. Do not report tests or li
 
 ## Known Gaps
 
-- UDP remains connectionless. Battery telemetry demonstrates that a peer response arrived but does not acknowledge a specific velocity command or guarantee delivery.
-- Battery telemetry has no stale-data timeout and remains at its last valid value after replies stop.
+- UDP remains connectionless. Battery telemetry demonstrates that the configured peer responded but does not acknowledge a specific velocity command or guarantee delivery.
+- UDP RX rate is exact for valid configured-peer replies, but RTT and loss are FIFO estimates because the protocol has no sequence IDs. Battery percentage remains at its last valid value after replies stop; UDP health separately becomes stale after one second.
 - The application intentionally sends no final zero-velocity datagram when Home unmounts or Electron quits; wheel stopping on communication loss depends on the STM32 UDP receive-timeout watchdog.
 - RTSP is supported through the main-process MJPEG relay; Chromium still cannot render `rtsp://` directly.
 - Camera credentials are not represented by the Settings form, although manually persisted URL credentials can be passed to `ffmpeg`.

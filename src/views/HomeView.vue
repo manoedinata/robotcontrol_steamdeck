@@ -11,8 +11,15 @@ const { gamepadName } = useGamepad()
 const cameraState = ref('idle')
 const cameraFps = ref(0)
 const batteryLevel = ref(null)
+const udpMetrics = ref({
+  status: 'disabled',
+  rxPerSecond: 0,
+  approximateRttMs: null,
+  approximateLossPercentage: null,
+})
 let removeBatteryListener
 let removeCameraFpsListener
+let removeUdpMetricsListener
 
 const gamepadStatusLabel = computed(() => gamepadName.value
   ? 'Connected'
@@ -27,6 +34,12 @@ const deviceAddress = computed(() => {
 })
 
 const udpAddress = computed(() => udpHost.value?.trim() || '--')
+const udpStatusLabel = computed(() => ({
+  connected: 'Connected',
+  waiting: 'Waiting for robot reply',
+  disconnected: 'No recent robot reply',
+  disabled: 'UDP transmission disabled',
+}[udpMetrics.value.status] || 'UDP status unavailable'))
 
 const statusLabel = computed(() => {
   if (cameraState.value === 'connected') return 'Connected'
@@ -43,11 +56,22 @@ onMounted(() => {
       batteryLevel.value = percentage
     }
   })
+  removeUdpMetricsListener = window.electronAPI?.onUdpMetrics?.((metrics) => {
+    if (
+      metrics
+      && ['disabled', 'waiting', 'connected', 'disconnected'].includes(metrics.status)
+      && Number.isInteger(metrics.rxPerSecond)
+      && metrics.rxPerSecond >= 0
+    ) {
+      udpMetrics.value = metrics
+    }
+  })
 })
 
 onBeforeUnmount(() => {
   removeCameraFpsListener?.()
   removeBatteryListener?.()
+  removeUdpMetricsListener?.()
 })
 </script>
 
@@ -76,10 +100,17 @@ onBeforeUnmount(() => {
 
       <div class="telemetry-divider" aria-hidden="true"></div>
 
-      <div class="connection-telemetry" title="UDP destination host">
-        <ChevronsLeftRightEllipsis :size="20" aria-hidden="true" />
-        <span class="telemetry-ip">{{ udpAddress }}</span>
-        <span class="visually-hidden">UDP host {{ udpAddress }}</span>
+      <div class="udp-telemetry" :title="udpStatusLabel">
+        <div class="connection-telemetry">
+          <ChevronsLeftRightEllipsis :size="20" aria-hidden="true" />
+          <span class="telemetry-ip">{{ udpAddress }}</span>
+          <span class="connection-dot" :class="udpMetrics.status" aria-hidden="true"></span>
+          <span class="visually-hidden">UDP host {{ udpAddress }}: {{ udpStatusLabel }}</span>
+        </div>
+        <small class="udp-metrics">
+          RX {{ udpMetrics.rxPerSecond }}/s · RTT ~{{ udpMetrics.approximateRttMs ?? '--' }} ms · Loss
+          ~{{ udpMetrics.approximateLossPercentage ?? '--' }}%
+        </small>
       </div>
 
     </div>

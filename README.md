@@ -11,7 +11,7 @@ The application supports HTTP snapshots/MJPEG streams and RTSP sources. HTTP/HTT
 - Rolling camera FPS telemetry based on complete JPEG frames received
 - Configurable Y/theta velocity limits with pointer, touch, and gamepad controls
 - Full Steam Deck navigation for the shell, Settings drawer, and built-in keyboard
-- Validated UDP velocity packets and battery telemetry
+- Validated UDP velocity packets, battery telemetry, and rolling peer-health metrics
 - Persistent camera, control, UDP, and keyboard settings
 
 ## Quick Start

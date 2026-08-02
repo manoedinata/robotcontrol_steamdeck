@@ -160,19 +160,27 @@ body {
     font-weight: 650;
 }
 
-.camera-telemetry {
+.camera-telemetry,
+.udp-telemetry {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 2px;
 }
 
-.camera-fps {
+.camera-fps,
+.udp-metrics {
     color: #c3cbce;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.62rem;
     font-weight: 600;
     line-height: 1;
+}
+
+.udp-metrics {
+    min-width: 190px;
+    text-align: center;
+    white-space: nowrap;
 }
 
 .connection-dot {

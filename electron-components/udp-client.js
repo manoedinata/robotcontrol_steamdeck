@@ -28,13 +28,13 @@ class UdpClient {
     constructor() {
         this.client = createSocket('udp4')
         this.batteryListeners = new Set()
-        this.client.on('message', (message) => this.handleMessage(message))
+        this.client.on('message', (message, remoteInfo) => this.handleMessage(message, remoteInfo))
         this.client.on('error', (error) => {
             console.error('UDP client socket error:', error)
         })
     }
 
-    handleMessage(message) {
+    handleMessage(message, remoteInfo) {
         if (
             message.length !== BATTERY_PACKET_SIZE
             || message.toString('ascii', 0, HEADER_SIZE) !== 'ITS'
@@ -46,7 +46,7 @@ class UdpClient {
         if (batteryPercentage < 0 || batteryPercentage > 100) return
 
         for (const listener of this.batteryListeners) {
-            listener(batteryPercentage)
+            listener(batteryPercentage, remoteInfo)
         }
     }
 

@@ -27,7 +27,13 @@ A peer may reply from the command socket with exactly 7 bytes:
 | `0`    | 3    | ASCII bytes                   | Header `ITS`                |
 | `3`    | 4    | Signed `int32`, little-endian | Battery percentage `0..100` |
 
-Only valid replies are forwarded to Home telemetry. Battery telemetry demonstrates that a peer replied; it does not acknowledge a particular velocity command or guarantee delivery.
+Only valid replies from the configured destination host and port are forwarded to Home telemetry. Battery telemetry demonstrates that the configured peer replied; it does not acknowledge a particular velocity command or guarantee delivery.
+
+## Peer Health Metrics
+
+The UDP telemetry reports `RX <count>/s · RTT ~<ms> ms · Loss ~<percent>%`. RX is the exact number of valid configured-peer replies received during the trailing second. The main process marks the peer connected when a valid reply arrived within the last second, waiting before the first reply, and disconnected when replies become stale.
+
+RTT and loss are approximate because the current packets contain no sequence number. Replies are paired in arrival order with the oldest unmatched recent send. RTT averages the latest 20 such pairs; loss compares independent reply and settled-send counts over a trailing five-second window, with a 250 ms grace period for in-flight replies. Destination changes and transmission stops clear all measurements. Exact per-command RTT and loss require a sequence ID echoed by the receiver.
 
 ## Development Diagnostic Peer
 
