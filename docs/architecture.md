@@ -17,7 +17,8 @@
 └── src
     ├── App.vue                Persistent command shell and Settings state
     ├── main.js                Vue and Bootstrap initialization
-    ├── styles.css             Steam Deck-oriented application styles
+    ├── styles.scss            Ordered Sass entrypoint
+    ├── styles                 Global style partials by responsibility
     ├── components              Camera, controller, joystick, keyboard, and drawer UI
     ├── composables              Shared settings, gamepad, and focus behavior
     ├── utils                    Spatial focus helpers

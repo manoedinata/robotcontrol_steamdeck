@@ -1,0 +1,14 @@
+@media (max-width: 1050px) {
+    .joysticks-grid {
+        grid-template-columns: 160px minmax(140px, 1fr) 160px;
+        gap: 16px;
+        padding-inline: 12px;
+    }
+
+    .joystick-control,
+    .joystick-stage {
+        width: 160px;
+        height: 160px;
+    }
+}
+

@@ -1,0 +1,45 @@
+@media (max-width: 1050px),
+(max-height: 680px) {
+
+    .joystick-control,
+    .joystick-stage {
+        width: 132px;
+        height: 132px;
+    }
+
+    .joysticks-grid {
+        padding: 0 22px 18px;
+    }
+
+    .control-mode {
+        bottom: 16px;
+    }
+}
+
+@media (max-width: 720px) {
+
+    .hud-brand small,
+    .control-mode,
+    .exit-trigger {
+        display: none;
+    }
+
+    .hud-brand {
+        left: 14px;
+    }
+
+    .telemetry-bar {
+        right: 70px;
+        left: auto;
+        transform: none;
+    }
+
+    .telemetry-divider,
+    .battery-telemetry {
+        display: none;
+    }
+
+    .settings-shell {
+        width: 100%;
+    }
+}

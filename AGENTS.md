@@ -30,7 +30,8 @@ While the command shell is active, the Electron main process sends packed Y/thet
 - `src/composables/useSettingsGamepadNavigation.js`: Settings form focus movement, control activation, drawer close, and Save focus restoration.
 - `src/composables/useOnScreenKeyboardNavigation.js`: keyboard-modal D-pad/stick navigation, A/B handling, Escape handling, and initial key focus.
 - `src/utils/spatialFocus.js`: shared geometry-based directional focus selection used by Settings and the on-screen keyboard.
-- `src/styles.css`: global layout optimized for a 1280x800 display.
+- `src/styles.scss`: Sass entrypoint that loads the global styles in cascade order.
+- `src/styles/`: Sass partials for foundations, Settings and keyboard controls, the camera-first command shell, Settings drawer, and responsive rules. Keep partial ordering in `styles.scss` stable when selectors intentionally override earlier foundations.
 - `settings.json`: local runtime configuration stored beside `launch.sh`.
 
 ### Runtime Modes

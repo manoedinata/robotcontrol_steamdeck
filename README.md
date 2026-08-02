@@ -36,6 +36,6 @@ To test the camera pipeline without hardware, `npm run camera` serves a syntheti
 
 ## Stack
 
-Electron, Vue 3, Vite, Bootstrap 5, Lucide icons, and `ffmpeg-static`.
+Electron, Vue 3, Vite, Bootstrap 5, Sass, Lucide icons, and `ffmpeg-static`. Global application styles enter through `src/styles.scss` and are split into ordered partials under `src/styles/` by layout responsibility.
 
 There are currently no automated test or lint scripts. Run `npm run build` as the minimum validation after changes. For camera or controller changes, verify the complete workflow in Electron on the target Steam Deck when possible.
