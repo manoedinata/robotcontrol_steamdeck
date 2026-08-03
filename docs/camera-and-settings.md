@@ -46,7 +46,9 @@ The built-in keyboard does not disable Steam's global `Steam + X` keyboard overl
 
 The Home view renders camera output with an HTML `<img>` element:
 
-- HTTP or HTTPS snapshots and MJPEG streams load directly.
+- HTTP/HTTPS snapshots and MJPEG streams pass through a tokenized loopback relay that preserves upstream bytes and content type while counting complete JPEG frames.
 - RTSP sources are passed to the Electron main process, which runs bundled `ffmpeg` and exposes a tokenized MJPEG relay on `127.0.0.1`.
 
 The RTSP relay uses RTSP/TCP, removes audio, scales within 1280x800, limits output to 15 fps, and uses CPU-based MJPEG encoding. Only one RTSP source runs at a time. Changing the source or quitting Electron stops the previous transcoder. Camera diagnostics use the `[camera]` prefix.
+
+The relays treat an unexpected upstream error, stream termination, or five seconds without MJPEG/RTSP output as an interruption. Home immediately changes the camera status to disconnected with a red indicator and keeps retrying the configured source every two seconds. The status returns to connected only after the renderer loads camera output again. Initial connection failures use the same automatic retry behavior. Intentional source changes and application shutdown do not trigger reconnects.

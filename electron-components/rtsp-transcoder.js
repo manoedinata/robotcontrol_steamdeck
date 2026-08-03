@@ -4,12 +4,14 @@ const http = require('node:http')
 const ffmpegPath = require('ffmpeg-static')
 
 const MAX_FRAME_BYTES = 16 * 1024 * 1024
+const STREAM_INACTIVITY_TIMEOUT_MS = 5000
 const JPEG_START = Buffer.from([0xff, 0xd8])
 const JPEG_END = Buffer.from([0xff, 0xd9])
 
 class RtspTranscoder {
-    constructor(onFrame) {
+    constructor(onFrame, onInterrupted) {
         this.onFrame = onFrame
+        this.onInterrupted = onInterrupted
         this.sourceUrl = ''
         this.token = ''
         this.server = null
@@ -17,6 +19,7 @@ class RtspTranscoder {
         this.clients = new Set()
         this.frameBuffer = Buffer.alloc(0)
         this.operation = Promise.resolve()
+        this.inactivityTimer = null
     }
 
     async resolveStreamUrl(cameraUrl) {
@@ -124,6 +127,7 @@ class RtspTranscoder {
             windowsHide: true,
         })
         this.process = child
+        this.resetInactivityTimer(child)
 
         child.stdout.on('data', (chunk) => {
             if (this.process === child) this.consumeFrames(chunk)
@@ -136,26 +140,40 @@ class RtspTranscoder {
         })
         child.once('error', (error) => {
             console.error('[camera] Could not start RTSP transcoder:', error.message)
-            if (this.process === child) {
-                this.process = null
-                this.closeClients()
-                this.server?.close()
-                this.server = null
-                this.sourceUrl = ''
-                this.token = ''
-            }
+            this.handleUnexpectedStop(child)
         })
         child.once('exit', (code, signal) => {
             if (this.process === child) {
                 console.warn('[camera] RTSP transcoder stopped', { code, signal })
-                this.process = null
-                this.closeClients()
-                this.server?.close()
-                this.server = null
-                this.sourceUrl = ''
-                this.token = ''
+                this.handleUnexpectedStop(child)
             }
         })
+    }
+
+    resetInactivityTimer(child = this.process) {
+        clearTimeout(this.inactivityTimer)
+        this.inactivityTimer = setTimeout(() => {
+            if (this.process !== child) return
+            console.warn('[camera] RTSP stream produced no frames for 5 seconds')
+            this.handleUnexpectedStop(child)
+            if (!child.killed) child.kill('SIGTERM')
+        }, STREAM_INACTIVITY_TIMEOUT_MS)
+        this.inactivityTimer.unref()
+    }
+
+    handleUnexpectedStop(child) {
+        if (this.process !== child) return
+
+        clearTimeout(this.inactivityTimer)
+        this.inactivityTimer = null
+        this.process = null
+        this.closeClients()
+        this.server?.close()
+        this.server = null
+        this.sourceUrl = ''
+        this.token = ''
+        this.frameBuffer = Buffer.alloc(0)
+        this.onInterrupted?.()
     }
 
     consumeFrames(chunk) {
@@ -185,6 +203,7 @@ class RtspTranscoder {
     }
 
     broadcastFrame(frame) {
+        this.resetInactivityTimer()
         this.onFrame?.()
         const header = Buffer.from(
             `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`,
@@ -215,6 +234,8 @@ class RtspTranscoder {
     }
 
     stop() {
+        clearTimeout(this.inactivityTimer)
+        this.inactivityTimer = null
         const process = this.process
         this.process = null
         if (process && !process.killed) {

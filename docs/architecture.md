@@ -44,6 +44,7 @@ The renderer uses:
 - `loadSettings()`
 - `saveSettings(settings)`
 - `resolveCameraStream(cameraUrl)`
+- `onCameraStreamInterrupted(callback)`
 - `updateUdpVelocity(host, port, velocity)`
 - `stopUdpVelocity()`
 - `onUdpBatteryPercentage(callback)`

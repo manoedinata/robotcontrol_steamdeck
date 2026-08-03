@@ -18,8 +18,16 @@ const CAMERA_FPS_WINDOW_MS = 1000
 const CAMERA_FPS_PUBLISH_INTERVAL_MS = 500
 let cameraFrameTimestamps = []
 const recordCameraFrame = () => cameraFrameTimestamps.push(Date.now())
-const httpCameraRelay = new HttpCameraRelay(recordCameraFrame)
-const rtspTranscoder = new RtspTranscoder(recordCameraFrame)
+const publishCameraInterruption = () => {
+    cameraFrameTimestamps = []
+    for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+            window.webContents.send('camera:stream-interrupted')
+        }
+    }
+}
+const httpCameraRelay = new HttpCameraRelay(recordCameraFrame, publishCameraInterruption)
+const rtspTranscoder = new RtspTranscoder(recordCameraFrame, publishCameraInterruption)
 const udpClient = new UdpClient()
 let latestUdpCommand = null
 let udpSendTimer = null

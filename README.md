@@ -8,6 +8,7 @@ The application supports HTTP snapshots/MJPEG streams and RTSP sources. HTTP/HTT
 
 - Camera-first, frameless Electron UI for SteamOS Gaming Mode
 - HTTP, MJPEG, and RTSP camera support
+- Automatic camera interruption detection and reconnection
 - Rolling camera FPS telemetry based on complete JPEG frames received
 - Configurable Y/theta velocity limits with pointer, touch, and gamepad controls
 - Full Steam Deck navigation for the shell, Settings drawer, and built-in keyboard

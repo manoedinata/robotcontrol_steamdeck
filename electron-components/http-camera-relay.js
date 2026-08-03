@@ -3,15 +3,18 @@ const http = require('node:http')
 const https = require('node:https')
 
 const MAX_REDIRECTS = 5
+const STREAM_INACTIVITY_TIMEOUT_MS = 5000
 
 class HttpCameraRelay {
-    constructor(onFrame) {
+    constructor(onFrame, onInterrupted) {
         this.onFrame = onFrame
+        this.onInterrupted = onInterrupted
         this.sourceUrl = ''
         this.token = ''
         this.server = null
         this.upstreamRequests = new Set()
         this.operation = Promise.resolve()
+        this.generation = 0
     }
 
     async resolveStreamUrl(cameraUrl) {
@@ -77,11 +80,38 @@ class HttpCameraRelay {
     }
 
     proxySource(sourceUrl, response, redirectCount = 0) {
+        const generation = this.generation
         const transport = sourceUrl.startsWith('https:') ? https : http
         const upstreamRequest = transport.get(sourceUrl, {
             headers: { Accept: 'multipart/x-mixed-replace,image/jpeg,image/*' },
         })
         this.upstreamRequests.add(upstreamRequest)
+        let downstreamClosed = false
+        let interruptionReported = false
+        let inactivityTimer = null
+
+        const reportInterruption = (message) => {
+            if (
+                interruptionReported
+                || downstreamClosed
+                || generation !== this.generation
+                || !this.sourceUrl
+            ) return
+
+            interruptionReported = true
+            console.warn('[camera] HTTP camera stream interrupted:', message)
+            response.destroy()
+            this.onInterrupted?.()
+        }
+
+        const resetInactivityTimer = () => {
+            clearTimeout(inactivityTimer)
+            inactivityTimer = setTimeout(() => {
+                reportInterruption('no complete frames received for 5 seconds')
+                upstreamRequest.destroy()
+            }, STREAM_INACTIVITY_TIMEOUT_MS)
+            inactivityTimer.unref()
+        }
 
         upstreamRequest.once('response', (upstreamResponse) => {
             const statusCode = upstreamResponse.statusCode || 502
@@ -117,6 +147,14 @@ class HttpCameraRelay {
                 Pragma: 'no-cache',
             })
 
+            const contentType = upstreamResponse.headers['content-type'] || ''
+            const isMultipartStream = contentType.toLowerCase().includes('multipart/x-mixed-replace')
+            if (isMultipartStream) {
+                resetInactivityTimer()
+                upstreamResponse.once('aborted', () => reportInterruption('upstream response aborted'))
+                upstreamResponse.once('end', () => reportInterruption('upstream stream ended'))
+            }
+
             let previousByte = -1
             let insideFrame = false
             upstreamResponse.on('data', (chunk) => {
@@ -125,21 +163,28 @@ class HttpCameraRelay {
                         insideFrame = true
                     } else if (insideFrame && previousByte === 0xff && byte === 0xd9) {
                         insideFrame = false
+                        if (isMultipartStream) resetInactivityTimer()
                         this.onFrame?.()
                     }
                     previousByte = byte
                 }
             })
             upstreamResponse.pipe(response)
-            upstreamResponse.once('error', () => response.destroy())
+            upstreamResponse.once('error', (error) => {
+                reportInterruption(error.message)
+                response.destroy()
+            })
         })
 
         upstreamRequest.once('close', () => this.upstreamRequests.delete(upstreamRequest))
-        upstreamRequest.once('error', () => {
-            if (!response.headersSent) response.writeHead(502)
-            response.end()
+        upstreamRequest.once('error', (error) => {
+            reportInterruption(error.message)
         })
-        response.once('close', () => upstreamRequest.destroy())
+        response.once('close', () => {
+            downstreamClosed = true
+            clearTimeout(inactivityTimer)
+            upstreamRequest.destroy()
+        })
     }
 
     getRelayUrl() {
@@ -151,6 +196,7 @@ class HttpCameraRelay {
     }
 
     stop() {
+        this.generation += 1
         for (const request of this.upstreamRequests) request.destroy()
         this.upstreamRequests.clear()
         this.server?.close()

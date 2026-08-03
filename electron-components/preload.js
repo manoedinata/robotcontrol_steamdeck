@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('camera:fps', listener)
         return () => ipcRenderer.removeListener('camera:fps', listener)
     },
+    onCameraStreamInterrupted: (callback) => {
+        const listener = () => callback()
+        ipcRenderer.on('camera:stream-interrupted', listener)
+        return () => ipcRenderer.removeListener('camera:stream-interrupted', listener)
+    },
     updateUdpVelocity: (host, port, velocity) => (
         ipcRenderer.send('udp:update-velocity', host, port, velocity)
     ),
