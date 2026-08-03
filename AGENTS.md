@@ -15,7 +15,7 @@ While the command shell is active, the Electron main process sends packed Y/thet
 - `electron-components/http-camera-relay.js`: one-source HTTP/HTTPS camera passthrough relay bound to a tokenized loopback URL; forwards image bytes unchanged, counts complete JPEG frames, and reports upstream termination or inactivity.
 - `electron-components/rtsp-transcoder.js`: one-source RTSP/TCP to MJPEG relay using bundled `ffmpeg`, bound to a tokenized loopback URL; reports transcoder termination or frame inactivity.
 - `electron-components/udp-client.js`: validates and sends 11-byte velocity commands, receives validated 7-byte battery replies, and publishes battery updates in the main process.
-- `udp-server.js`: development-only UDP peer that validates `ITS` commands, decodes both velocities, reports packet timing, and replies with the current Linux system battery percentage.
+- `udp-server.js`: development-only UDP peer that validates `ITS` commands, decodes both velocities, reports packet timing, and streams the current Linux system battery percentage at 50 Hz to the latest valid sender.
 - `camera-server.js`: development-only mock IP camera that serves an MJPEG stream over HTTP at `http://localhost:8080/video`, using bundled `ffmpeg-static` to generate a synthetic test pattern by default or stream a v4l2 device via `CAMERA_DEVICE`. Device streams request the camera's native MJPEG and stream-copy it (no re-encode) to avoid transcode lag; `CAMERA_SIZE` and `CAMERA_FRAMERATE` set the capture geometry.
 - `docs/`: focused user documentation for setup, camera/settings, controls, UDP protocol, architecture, and limitations.
 - `src/App.vue`: persistent camera-first command shell, floating Settings/Exit actions, and Settings drawer state.
@@ -176,7 +176,7 @@ npm run start
 
 There are currently no automated test or lint scripts. Do not report tests or lint as passing unless those scripts are added and executed.
 
-`udp-server.js` is only a packet-format, timing, and battery-response diagnostic. It is started by `npm run dev`, accepts only exact 11-byte `ITS` commands, excludes malformed packets from interval calculations, and replies to each valid sender with a 7-byte `ITS` plus `int32` battery packet. It reads Linux battery capacity from `/sys/class/power_supply/BAT*/capacity`, caches it for one second, and sends no reply if no battery is readable. It does not emulate the STM32 watchdog or participate in production `npm run start`/`launch.sh` execution.
+`udp-server.js` is only a packet-format, timing, and battery-response diagnostic. It is started by `npm run dev`, accepts only exact 11-byte `ITS` commands, and excludes malformed packets from interval calculations. The latest valid command sender becomes its telemetry destination; once known, the server independently sends a 7-byte `ITS` plus `int32` battery packet every 20 ms (50 Hz). It reads Linux battery capacity from `/sys/class/power_supply/BAT*/capacity`, caches it for one second, does not overlap battery sends, and sends nothing if no battery is readable. It does not emulate the STM32 watchdog or participate in production `npm run start`/`launch.sh` execution.
 
 ## Change Guidance
 

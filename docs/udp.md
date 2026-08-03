@@ -18,16 +18,16 @@ Each command is exactly 11 bytes:
 
 `electron-components/udp-client.js` validates the destination, header, array shape, finite values, and float32 range before sending.
 
-## Battery Replies
+## Battery Telemetry
 
-A peer may reply from the command socket with exactly 7 bytes:
+A peer may send battery telemetry from the command socket with exactly 7 bytes:
 
 | Offset | Size | Encoding                      | Value                       |
 | ------ | ---- | ----------------------------- | --------------------------- |
 | `0`    | 3    | ASCII bytes                   | Header `ITS`                |
 | `3`    | 4    | Signed `int32`, little-endian | Battery percentage `0..100` |
 
-Only valid replies from the configured destination host and port are forwarded to Home telemetry. Battery telemetry demonstrates that the configured peer replied; it does not acknowledge a particular velocity command or guarantee delivery.
+Only valid packets from the configured destination host and port are forwarded to Home telemetry. Battery telemetry demonstrates that the configured peer is transmitting; it does not acknowledge a particular velocity command or guarantee delivery.
 
 ## Peer Health Metrics
 
@@ -37,4 +37,4 @@ RTT and loss are approximate because the current packets contain no sequence num
 
 ## Development Diagnostic Peer
 
-`udp-server.js` listens on UDP port `41234`, rejects malformed packets, decodes valid commands, reports timing, and replies with the Linux system battery percentage when readable. It is started by `npm run dev` and is not part of the production robot control path.
+`udp-server.js` listens on UDP port `41234`, rejects malformed packets, decodes valid commands, and reports timing. The latest valid command sender becomes its battery telemetry destination. After that destination is known, the server sends the Linux system battery percentage every 20 ms (50 Hz), independently of command arrival; it sends nothing before the first valid command or when no battery is readable. It is started by `npm run dev` and is not part of the production robot control path.

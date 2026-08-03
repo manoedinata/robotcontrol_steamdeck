@@ -1,5 +1,5 @@
-// Development UDP peer: logs velocity commands and replies to each valid sender
-// with the current Linux system battery percentage.
+// Development UDP peer: logs velocity commands and streams the current Linux
+// system battery percentage to the latest valid sender at 50 Hz.
 
 const { createSocket } = require('node:dgram');
 const fs = require('node:fs/promises');
@@ -8,13 +8,16 @@ const server = createSocket('udp4');
 const HEADER = 'ITS';
 const PACKET_SIZE = 11;
 const BATTERY_PACKET_SIZE = 7;
+const BATTERY_SEND_INTERVAL_MS = 20;
 const BATTERY_CACHE_MS = 1000;
 const POWER_SUPPLY_PATH = '/sys/class/power_supply';
 let previousPacketTime;
+let latestClient;
 let cachedBatteryPercentage;
 let batteryCacheTime = 0;
 let batteryReadPromise;
 let batteryReadWarningShown = false;
+let batterySendInFlight = false;
 
 async function readBatteryPercentage() {
     const now = Date.now();
@@ -51,19 +54,30 @@ async function readBatteryPercentage() {
     }
 }
 
-async function sendBatteryPercentage(rinfo) {
+async function sendBatteryPercentage() {
+    if (!latestClient || batterySendInFlight) return;
+
+    const destination = latestClient;
+    batterySendInFlight = true;
     try {
         const batteryPercentage = await readBatteryPercentage();
         const packet = Buffer.allocUnsafe(BATTERY_PACKET_SIZE);
         packet.write(HEADER, 0, 3, 'ascii');
         packet.writeInt32LE(batteryPercentage, 3);
-        server.send(packet, rinfo.port, rinfo.address);
+        await new Promise((resolve, reject) => {
+            server.send(packet, destination.port, destination.address, (error) => {
+                if (error) reject(error);
+                else resolve();
+            });
+        });
         batteryReadWarningShown = false;
     } catch (error) {
         if (!batteryReadWarningShown) {
             console.warn(`Unable to send battery percentage: ${error.message}`);
             batteryReadWarningShown = true;
         }
+    } finally {
+        batterySendInFlight = false;
     }
 }
 
@@ -91,6 +105,7 @@ server.on('message', (msg, rinfo) => {
 
     const yVelocity = msg.readFloatLE(3);
     const thetaVelocity = msg.readFloatLE(7);
+    latestClient = { address: rinfo.address, port: rinfo.port };
 
     console.log(
         `Received ${header} from ${rinfo.address}:${rinfo.port}: `
@@ -98,7 +113,6 @@ server.on('message', (msg, rinfo) => {
         + `interval=${elapsedMilliseconds === null ? 'first packet' : `${elapsedMilliseconds.toFixed(3)} ms`}`,
     );
 
-    void sendBatteryPercentage(rinfo);
 });
 
 server.on('error', (err) => {
@@ -109,6 +123,15 @@ server.on('error', (err) => {
 server.on('listening', () => {
     const address = server.address();
     console.log(`UDP Server listening on ${address.address}:${address.port}`);
+});
+
+const batterySendTimer = setInterval(() => {
+    void sendBatteryPercentage();
+}, BATTERY_SEND_INTERVAL_MS);
+batterySendTimer.unref();
+
+server.on('close', () => {
+    clearInterval(batterySendTimer);
 });
 
 const PORT = 41234;
