@@ -8,7 +8,9 @@
 ├── electron-components
 │   ├── preload.js             Restricted renderer bridge
 │   ├── rtsp-transcoder.js     Loopback RTSP-to-MJPEG relay
-│   └── udp-client.js          Velocity sender and battery response receiver
+│   ├── udp-client.js          Velocity sender and battery response receiver
+│   └── packet-schema.js       JSON-driven UDP packet codec (shared)
+├── packet-schema.json         Configurable UDP command/reply packet layout
 ├── udp-server.js              Development UDP diagnostic peer
 ├── launch.sh                  Steam Gaming Mode launcher
 ├── settings.json              Persisted runtime settings

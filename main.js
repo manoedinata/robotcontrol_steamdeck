@@ -189,6 +189,19 @@ function publishCameraFps() {
     }
 }
 
+// Maps the renderer's [yVelocity, thetaVelocity] array onto the named command
+// fields declared by the active packet schema, so a schema rename or added
+// field does not require renderer changes. Additional fields fall back to their
+// schema defaults during encoding.
+function buildCommandValues(velocity) {
+    const yField = udpClient.codec.fieldNameForRole('command', 'yVelocity')
+    const thetaField = udpClient.codec.fieldNameForRole('command', 'thetaVelocity')
+    const values = {}
+    if (yField) values[yField] = velocity[0]
+    if (thetaField) values[thetaField] = velocity[1]
+    return values
+}
+
 async function sendLatestUdpVelocity() {
     if (!latestUdpCommand || udpSendInFlight) return
 
@@ -197,7 +210,7 @@ async function sendLatestUdpVelocity() {
     udpSendSamples.push(sendSample)
     udpSendInFlight = true
     try {
-        await udpClient.sendMessage(command.host, command.port, 'ITS', command.velocity)
+        await udpClient.sendCommand(command.host, command.port, buildCommandValues(command.velocity))
         lastUdpSendError = ''
     } catch (error) {
         udpSendSamples = udpSendSamples.filter((sample) => sample !== sendSample)

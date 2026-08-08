@@ -13,6 +13,7 @@ The application supports HTTP snapshots/MJPEG streams and RTSP sources. HTTP/HTT
 - Configurable Y/theta velocity limits with pointer, touch, and gamepad controls
 - Full Steam Deck navigation for the shell, Settings drawer, and built-in keyboard
 - Validated 50 Hz UDP velocity and battery packets with rolling peer-health metrics
+- JSON-configurable UDP packet layout (`packet-schema.json`) shared by client and diagnostic peer
 - Persistent camera, control, UDP, and keyboard settings
 
 ## Quick Start

@@ -1,8 +1,8 @@
 {
-  "cameraUrl": "http://10.0.0.0:8080",
+  "cameraUrl": "http://10.91.54.1:8080/video",
   "maxYVelocity": 20,
   "maxThetaVelocity": 10,
-  "udpHost": "127.0.0.1",
+  "udpHost": "10.91.54.1",
   "udpPort": 41234,
   "useOnScreenKeyboard": true
 }

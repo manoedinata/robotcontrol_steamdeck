@@ -1,0 +1,33 @@
+{
+    "byteOrder": "little",
+    "command": {
+        "header": "ITS",
+        "fields": [
+            {
+                "name": "yVelocity",
+                "type": "float32",
+                "role": "yVelocity",
+                "default": 0
+            },
+            {
+                "name": "thetaVelocity",
+                "type": "float32",
+                "role": "thetaVelocity",
+                "default": 0
+            }
+        ]
+    },
+    "reply": {
+        "header": "ITS",
+        "fields": [
+            {
+                "name": "batteryPercentage",
+                "type": "int32",
+                "role": "batteryPercentage",
+                "min": 0,
+                "max": 100,
+                "default": 0
+            }
+        ]
+    }
+}

@@ -1,31 +1,15 @@
 const { createSocket } = require('node:dgram')
+const path = require('node:path')
+const { loadPacketCodec } = require('./packet-schema')
 
-const HEADER_SIZE = 3
-const VELOCITY_COUNT = 2
-const PACKET_SIZE = HEADER_SIZE + (VELOCITY_COUNT * Float32Array.BYTES_PER_ELEMENT)
-const BATTERY_PACKET_SIZE = HEADER_SIZE + Int32Array.BYTES_PER_ELEMENT
-const MAX_FLOAT32 = 3.4028234663852886e38
-
-function packVelocityPacket(header, velocity) {
-    if (typeof header !== 'string' || !/^[\x00-\x7f]{3}$/.test(header)) {
-        throw new TypeError('UDP packet header must contain exactly 3 ASCII characters.')
-    }
-    if (!Array.isArray(velocity) || velocity.length !== VELOCITY_COUNT) {
-        throw new TypeError('UDP packet velocity must be an array containing Y and theta.')
-    }
-    if (!velocity.every((value) => Number.isFinite(value) && Math.abs(value) <= MAX_FLOAT32)) {
-        throw new RangeError('UDP packet velocities must be finite 32-bit floating-point values.')
-    }
-
-    const packet = Buffer.allocUnsafe(PACKET_SIZE)
-    packet.write(header, 0, HEADER_SIZE, 'ascii')
-    packet.writeFloatLE(velocity[0], HEADER_SIZE)
-    packet.writeFloatLE(velocity[1], HEADER_SIZE + Float32Array.BYTES_PER_ELEMENT)
-    return packet
-}
+const DEFAULT_SCHEMA_PATH = path.join(__dirname, '..', 'packet-schema.json')
 
 class UdpClient {
-    constructor() {
+    // A schema path (or a pre-built PacketCodec) drives the on-wire layout so
+    // the command and battery packets stay JSON-configurable.
+    constructor(options = {}) {
+        this.codec = options.codec ?? loadPacketCodec(options.schemaPath ?? DEFAULT_SCHEMA_PATH)
+        this.batteryFieldName = this.codec.fieldNameForRole('reply', 'batteryPercentage')
         this.client = createSocket('udp4')
         this.batteryListeners = new Set()
         this.client.on('message', (message, remoteInfo) => this.handleMessage(message, remoteInfo))
@@ -35,18 +19,15 @@ class UdpClient {
     }
 
     handleMessage(message, remoteInfo) {
-        if (
-            message.length !== BATTERY_PACKET_SIZE
-            || message.toString('ascii', 0, HEADER_SIZE) !== 'ITS'
-        ) {
-            return
-        }
+        const reply = this.codec.decodeReply(message)
+        if (!reply) return
 
-        const batteryPercentage = message.readInt32LE(HEADER_SIZE)
-        if (batteryPercentage < 0 || batteryPercentage > 100) return
+        const batteryPercentage = this.batteryFieldName
+            ? reply[this.batteryFieldName]
+            : undefined
 
         for (const listener of this.batteryListeners) {
-            listener(batteryPercentage, remoteInfo)
+            listener(batteryPercentage, remoteInfo, reply)
         }
     }
 
@@ -67,10 +48,12 @@ class UdpClient {
         }
     }
 
-    sendMessage(host, port, header, velocity) {
+    // Serializes a { fieldName: value } command map (e.g. { yVelocity,
+    // thetaVelocity }) according to the active schema and sends it.
+    sendCommand(host, port, values) {
         this.verifyDestination(host, port)
 
-        const packet = packVelocityPacket(header, velocity)
+        const packet = this.codec.encodeCommand(values)
 
         return new Promise((resolve, reject) => {
             this.client.send(packet, port, host, (error) => {

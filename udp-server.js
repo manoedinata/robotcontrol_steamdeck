@@ -3,11 +3,15 @@
 
 const { createSocket } = require('node:dgram');
 const fs = require('node:fs/promises');
+const path = require('node:path');
+const { loadPacketCodec } = require('./electron-components/packet-schema');
 
 const server = createSocket('udp4');
-const HEADER = 'ITS';
-const PACKET_SIZE = 11;
-const BATTERY_PACKET_SIZE = 7;
+// Shared JSON-driven packet layout, identical to the one the app sends/receives.
+const codec = loadPacketCodec(path.join(__dirname, 'packet-schema.json'));
+const batteryFieldName = codec.fieldNameForRole('reply', 'batteryPercentage');
+const yVelocityFieldName = codec.fieldNameForRole('command', 'yVelocity');
+const thetaVelocityFieldName = codec.fieldNameForRole('command', 'thetaVelocity');
 const BATTERY_SEND_INTERVAL_MS = 20;
 const BATTERY_CACHE_MS = 1000;
 const POWER_SUPPLY_PATH = '/sys/class/power_supply';
@@ -61,9 +65,9 @@ async function sendBatteryPercentage() {
     batterySendInFlight = true;
     try {
         const batteryPercentage = await readBatteryPercentage();
-        const packet = Buffer.allocUnsafe(BATTERY_PACKET_SIZE);
-        packet.write(HEADER, 0, 3, 'ascii');
-        packet.writeInt32LE(batteryPercentage, 3);
+        const packet = codec.encodeReply(
+            batteryFieldName ? { [batteryFieldName]: batteryPercentage } : {},
+        );
         await new Promise((resolve, reject) => {
             server.send(packet, destination.port, destination.address, (error) => {
                 if (error) reject(error);
@@ -82,17 +86,11 @@ async function sendBatteryPercentage() {
 }
 
 server.on('message', (msg, rinfo) => {
-    if (msg.length !== PACKET_SIZE) {
+    const command = codec.decodeCommand(msg);
+    if (!command) {
         console.warn(
-            `Ignored ${msg.length}-byte packet from ${rinfo.address}:${rinfo.port}; expected ${PACKET_SIZE} bytes.`,
-        );
-        return;
-    }
-
-    const header = msg.toString('ascii', 0, 3);
-    if (header !== HEADER) {
-        console.warn(
-            `Ignored packet from ${rinfo.address}:${rinfo.port}; expected header "${HEADER}", received "${header}".`,
+            `Ignored ${msg.length}-byte packet from ${rinfo.address}:${rinfo.port}; `
+            + `expected ${codec.command.size}-byte "${codec.command.header}" command.`,
         );
         return;
     }
@@ -103,13 +101,19 @@ server.on('message', (msg, rinfo) => {
         : Number(currentPacketTime - previousPacketTime) / 1_000_000;
     previousPacketTime = currentPacketTime;
 
-    const yVelocity = msg.readFloatLE(3);
-    const thetaVelocity = msg.readFloatLE(7);
     latestClient = { address: rinfo.address, port: rinfo.port };
 
+    // Report every decoded field so custom schema entries are visible too, while
+    // still highlighting the well-known Y/theta velocities when present.
+    const yVelocity = yVelocityFieldName ? command[yVelocityFieldName] : undefined;
+    const thetaVelocity = thetaVelocityFieldName ? command[thetaVelocityFieldName] : undefined;
+    const fieldSummary = Object.entries(command)
+        .map(([name, value]) => `${name}=${value}`)
+        .join(', ');
+
     console.log(
-        `Received ${header} from ${rinfo.address}:${rinfo.port}: `
-        + `Y=${yVelocity}, theta=${thetaVelocity}, `
+        `Received ${codec.command.header} from ${rinfo.address}:${rinfo.port}: `
+        + `${fieldSummary || `Y=${yVelocity}, theta=${thetaVelocity}`}, `
         + `interval=${elapsedMilliseconds === null ? 'first packet' : `${elapsedMilliseconds.toFixed(3)} ms`}`,
     );
 

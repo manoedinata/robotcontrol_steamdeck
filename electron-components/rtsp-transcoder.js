@@ -108,7 +108,7 @@ class RtspTranscoder {
             '-avioflags', 'direct',
             '-probesize', '32',
             '-analyzeduration', '0',
-            '-rtsp_transport', 'tcp',
+            '-rtsp_transport', 'udp',
             '-max_delay', '0',
             '-i', sourceUrl,
             '-an',
