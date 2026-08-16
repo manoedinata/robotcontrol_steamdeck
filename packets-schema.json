@@ -1,0 +1,15 @@
+{
+    "type": "object",
+    "properties": {
+        "vy": {
+            "type": "number"
+        },
+        "vtheta": {
+            "type": "number"
+        }
+    },
+    "required": [
+        "vy",
+        "vtheta"
+    ]
+}
