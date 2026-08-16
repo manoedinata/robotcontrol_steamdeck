@@ -1,12 +1,12 @@
-def ms_to_hz(ms: float) -> float:
-    """Convert milliseconds to Hertz (Hz)."""
-    if ms <= 0:
+def s_to_hz(s: float) -> float:
+    """Convert seconds to Hertz (Hz)."""
+    if s <= 0:
         return 0.0
-    return 1.0 / ms
+    return 1.0 / s
 
 
-def hz_to_ms(hz: float) -> float:
-    """Convert Hertz (Hz) to milliseconds."""
+def hz_to_s(hz: float) -> float:
+    """Convert Hertz (Hz) to seconds."""
     if hz <= 0:
         return 0.0
     return 1.0 / hz
