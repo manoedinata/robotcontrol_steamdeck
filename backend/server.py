@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import os
 
 import cv2
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import StreamingResponse
 import settings as settings_module
 import utils
@@ -302,10 +302,16 @@ app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/stream")
-async def video_feed() -> StreamingResponse:
-    """Expose the configured camera source as a shared MJPEG stream."""
+async def video_feed(request: Request) -> StreamingResponse:
+    async def frames_generator():
+        async for frame in video_stream.frames():
+            # If the Vue UI tab is closed, break the infinite loop
+            if await request.is_disconnected():
+                break
+            yield frame
+
     return StreamingResponse(
-        video_stream.frames(),
+        frames_generator(),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
 
