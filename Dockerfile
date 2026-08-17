@@ -1,27 +1,8 @@
 # syntax=docker/dockerfile:1
-# Steam Deck Robot Monitor: single container that bundles the Electron UI
-# and the FastAPI backend. Run with host networking and a mounted settings
-# directory for Steam/Gaming Mode launch.
+# Steam Deck Robot Monitor: Base image with all dependencies installed.
+# Application source code should be mounted to /app at runtime.
 
-# -----------------------------------------------------------------------------
-# Stage 1: Build the frontend renderer bundle.
-# -----------------------------------------------------------------------------
-FROM node:22-bookworm AS frontend-builder
-
-WORKDIR /build
-
-# Install dependencies first so package-lock changes reuse layers.
-COPY frontend/package.json ./
-RUN npm install
-
-# Copy source and build the production renderer into dist/.
-COPY frontend/ ./
-RUN npm run build
-
-# -----------------------------------------------------------------------------
-# Stage 2: Runtime image with backend, Electron, and the built renderer.
-# -----------------------------------------------------------------------------
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.12-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -34,11 +15,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     APP_SETTINGS_DIR=/app/config
 
 # Install runtime dependencies:
-#   - Node.js + npm for Electron
-#   - X11/Wayland libraries and Mesa for Electron rendering
-#   - OpenCV build/runtime dependencies (FFmpeg, codecs)
-#   - curl for health checks
-#   - tini as a tiny init for signal reaping
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -81,32 +57,29 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 
 WORKDIR /app
 
-# Install backend Python dependencies.
+# -----------------------------------------------------------------------------
+# Install Dependencies (Cached Layer)
+# -----------------------------------------------------------------------------
+
+# 1. Python Backend Dependencies
 COPY backend/requirements.txt ./backend/
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
-# Copy backend source.
-COPY backend/ ./backend/
-COPY packets-schema.json ./
-COPY scripts/ ./scripts/
+# 2. Node.js Frontend Dependencies
+COPY frontend/package.json ./frontend/
+# Note: Uncomment the line below if you use package-lock.json (recommended for consistent installs)
+# COPY frontend/package-lock.json ./frontend/
+RUN cd frontend && npm install
 
-# Copy the built frontend renderer from the first stage.
-COPY --from=frontend-builder /build/dist ./frontend/dist
-COPY --from=frontend-builder /build/electron-components ./frontend/electron-components
-COPY --from=frontend-builder /build/main.js ./frontend/main.js
-COPY --from=frontend-builder /build/index.html ./frontend/index.html
-COPY --from=frontend-builder /build/package.json ./frontend/package.json
-
-# Install frontend dependencies (only production runtime files; devDependencies
-# include electron which is required at runtime inside the container).
-RUN cd /app/frontend && npm install
+# -----------------------------------------------------------------------------
+# Runtime Setup
+# -----------------------------------------------------------------------------
 
 # Copy the container supervisor entrypoint.
 COPY packaging/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Keep the settings directory on a volume by default; Steam launch script will
-# bind-mount a host path for persistence.
+# Keep the settings directory on a volume by default.
 VOLUME ["/app/config"]
 
 ENTRYPOINT ["/usr/bin/tini", "--"]

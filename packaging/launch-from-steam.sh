@@ -11,6 +11,10 @@
 
 set -euo pipefail
 
+# Determine the absolute path to the project root (assuming this script is in the root directory)
+# PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 IMAGE_NAME="${SDRM_IMAGE:-steamdeck-robot-monitor:latest}"
 APP_NAME="${SDRM_APP_NAME:-steamdeck-robot-monitor}"
 CONFIG_DIR="${SDRM_CONFIG_DIR:-${HOME}/.config/steamdeck-robot-monitor}"
@@ -40,7 +44,7 @@ mkdir -p "${CONFIG_DIR}"
 GRAPHICS_ARGS=()
 
 if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
-    WAYLAND_SOCKET_PATH="${XDG_RUNTIME_DIR:-/run/user/$(id - u)}/${WAYLAND_DISPLAY}"
+    WAYLAND_SOCKET_PATH="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/${WAYLAND_DISPLAY}"
     if [[ -S "${WAYLAND_SOCKET_PATH}" ]]; then
         GRAPHICS_ARGS+=(
             -e "WAYLAND_DISPLAY=${WAYLAND_DISPLAY}"
@@ -95,6 +99,9 @@ echo "[launch] Starting ${APP_NAME} using ${CONTAINER_RUNTIME}..." >&2
     --ipc host \
     -e "APP_SETTINGS_DIR=/app/config" \
     -v "${CONFIG_DIR}:/app/config" \
+    -v "${PROJECT_ROOT}:/app" \
+    -v "${APP_NAME}-node-modules:/app/frontend/node_modules" \
+    -v "${APP_NAME}-electron-cache:/opt/electron/cache" \
     "${GRAPHICS_ARGS[@]}" \
     "${DEVICE_ARGS[@]}" \
     "${IMAGE_NAME}"
