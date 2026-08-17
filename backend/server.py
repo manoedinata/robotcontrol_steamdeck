@@ -6,7 +6,7 @@ import threading
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, AsyncIterator
 from urllib.parse import urlparse
 
 import cv2
@@ -67,7 +67,7 @@ class MjpegStream:
         with self._condition:
             self._camera_url = camera_url
 
-    def frames(self) -> Iterator[bytes]:
+    async def frames(self) -> AsyncIterator[bytes]:
         with self._condition:
             self._subscribers += 1
             self._stop_event.clear()
@@ -75,19 +75,20 @@ class MjpegStream:
             last_sequence = self._sequence
 
         try:
-            while True:
+            while not self._stop_event.is_set():
+                # Lock the condition to safely read the current frame and sequence number
                 with self._condition:
-                    self._condition.wait_for(
-                        lambda: self._sequence != last_sequence
-                        or self._stop_event.is_set()
-                    )
-                    if self._stop_event.is_set() and self._sequence == last_sequence:
-                        return
+                    current_sequence = self._sequence
                     frame = self._frame
-                    last_sequence = self._sequence
 
-                if frame is not None:
-                    yield MJPEG_BOUNDARY + frame + b"\r\n"
+                if current_sequence != last_sequence:
+                    last_sequence = current_sequence
+                    if frame is not None:
+                        yield MJPEG_BOUNDARY + frame + b"\r\n"
+                else:
+                    # Bring back control to the Uvicorn Event Loop.
+                    # This allows Uvicorn to cancel this task instantly on Ctrl-C.
+                    await asyncio.sleep(0.02)  # ~50 FPS polling rate
         finally:
             with self._condition:
                 self._subscribers -= 1
@@ -279,7 +280,7 @@ app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/stream")
-def video_feed() -> StreamingResponse:
+async def video_feed() -> StreamingResponse:
     """Expose the configured camera source as a shared MJPEG stream."""
     return StreamingResponse(
         video_stream.frames(),
