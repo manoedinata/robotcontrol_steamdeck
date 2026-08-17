@@ -15,7 +15,7 @@ WIRE_FORMATS = {
     "float32": "f",
     "float64": "d",
 }
-UDP_IP = "127.0.0.1"
+UDP_IP = "0.0.0.0"
 UDP_PORT = 8888
 
 

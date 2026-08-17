@@ -102,6 +102,7 @@ echo "[launch] Starting ${APP_NAME} using ${CONTAINER_RUNTIME}..." >&2
     -v "${PROJECT_ROOT}:/app" \
     -v "${APP_NAME}-node-modules:/app/frontend/node_modules" \
     -v "${APP_NAME}-electron-cache:/opt/electron/cache" \
+    -v /run/udev:/run/udev:ro \
     "${GRAPHICS_ARGS[@]}" \
     "${DEVICE_ARGS[@]}" \
-    "${IMAGE_NAME}"
+    "${IMAGE_NAME}" 2>&1 | tee "launch.log"

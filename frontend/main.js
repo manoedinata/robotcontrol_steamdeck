@@ -45,7 +45,9 @@ function createWindow() {
         height: 800,
         minWidth: 960,
         minHeight: 640,
+        fullscreen: true,
         frame: false,
+        autoHideMenuBar: true,
         backgroundColor: '#f4f6f8',
         webPreferences: {
             preload: path.join(__dirname, 'electron-components', 'preload.js'),
