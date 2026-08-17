@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, AsyncIterator
 from urllib.parse import urlparse
+import os
 
 import cv2
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -18,7 +19,7 @@ import utils
 LOGGER = logging.getLogger(__name__)
 UDP_SEND_HZ = 50
 RTSP_RECONNECT_DELAY_S = 1.0
-JPEG_QUALITY = 75
+JPEG_QUALITY = 60
 MJPEG_BOUNDARY = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "packets-schema.json"
@@ -48,6 +49,11 @@ runtime = RuntimeState(
     ),
     current_packet=default_packet,
     packet_payload=encode_packet(default_packet),
+)
+
+
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+    "rtsp_transport;udp|fflags;nobuffer|flags;low_delay"
 )
 
 
@@ -137,7 +143,16 @@ class MjpegStream:
                     if capture is not None:
                         capture.release()
                     capture_url = configured_url
-                    capture = cv2.VideoCapture(capture_url)
+
+                    capture = cv2.VideoCapture(
+                        capture_url,
+                        cv2.CAP_FFMPEG,
+                        params=[
+                            cv2.CAP_PROP_HW_ACCELERATION,
+                            cv2.VIDEO_ACCELERATION_ANY,
+                        ],
+                    )
+
                     capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
                     if not capture.isOpened():
@@ -147,13 +162,20 @@ class MjpegStream:
                         self._stop_event.wait(RTSP_RECONNECT_DELAY_S)
                         continue
 
-                success, frame = capture.read()
+                # Rapidly drain the buffer to ensure we only decode the absolute latest frame
+                success = capture.grab()
                 if not success:
-                    LOGGER.warning("Camera frame read failed; reconnecting")
+                    LOGGER.warning("Camera frame grab failed; reconnecting")
                     capture.release()
                     capture = None
                     self._stop_event.wait(RTSP_RECONNECT_DELAY_S)
                     continue
+
+                # Retrieve the actual image data from the last grab
+                _, frame = capture.retrieve()
+
+                # Reduce resolution
+                # frame = cv2.resize(frame, (640, 480))
 
                 encoded, buffer = cv2.imencode(
                     ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY]
