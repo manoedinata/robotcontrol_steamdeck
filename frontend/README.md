@@ -61,7 +61,7 @@ For a single container that launches both frontend and backend from Steam, see t
 - [Setup and launch](docs/setup.md)
 - [Camera and Settings](docs/camera-and-settings.md)
 - [Controls](docs/controls.md)
-- [UDP and WebSocket contract](docs/udp.md)
+- [UDP and WebSocket contract](docs/udp.md) — includes the step-by-step guide for adding a new UDP packet field
 - [Architecture and security](docs/architecture.md)
 - [Current limitations](docs/limitations.md)
 - [Contributor guidance](AGENTS.md)

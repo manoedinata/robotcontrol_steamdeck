@@ -49,4 +49,72 @@ The shipped packet is 11 bytes:
 
 To add a command value, add it to the frontend packet state and to the ordered schema fields. No WebSocket dispatcher or encoder changes should be necessary.
 
+## Extending the UDP packet
+
+The following three edits are enough to wire a new field end-to-end. Do not touch WebSocket dispatch, IPC, or the encoder logic.
+
+### 1. Declare the field in the shared schema
+
+Edit [`packets-schema.json`](../../packets-schema.json). Append a new entry to `packet_types.command.fields` after the existing fields. Choose a name, a wire type, and optional `min`/`max`/`default`.
+
+Supported wire types: `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `float32`, `float64`.
+
+Example: add a `gripper` clamp value stored as a `uint8` from 0 to 255.
+
+```json
+{
+  "name": "gripper",
+  "type": "uint8",
+  "role": "gripper",
+  "default": 0,
+  "min": 0,
+  "max": 255
+}
+```
+
+Field order matters. The encoder packs fields in the exact order they appear under `fields`, so the robot parser must read the same order. After this change the UDP packet size increases by 1 byte and all previous offsets remain unchanged.
+
+### 2. Initialize the field in the frontend control state
+
+Edit [`frontend/src/composables/useControlState.js`](../../src/composables/useControlState.js). Add the same field name to the `packet` object with the same default.
+
+```javascript
+const packet = reactive({
+    vy: 0,
+    vtheta: 0,
+    gripper: 0,
+})
+```
+
+`resetPacket()` will also zero the new field automatically because it iterates over `Object.keys(packet)`.
+
+### 3. Bind a UI component to the new field
+
+Call `updatePacket({ gripper: value })` from any component. For example, in a new Settings slider or a controller button:
+
+```javascript
+const { updatePacket } = useControlState()
+updatePacket({ gripper: 180 })
+```
+
+The backend receives a `control` message containing the new field, validates it against the schema bounds, merges it into the cached packet, and includes it in the next binary UDP frame. Fields that the frontend omits keep their previous or default values.
+
+### What does not need to change
+
+- `useBackendConnection.js` — it sends the whole `packet` object generically.
+- `backend/server.py` — it reads `packet` from the WebSocket and merges it with the current state.
+- `backend/utils.py` — `encode_binary_packet` derives byte order, offsets, and types from the schema.
+- The WebSocket message shape stays the same: `{ "type": "control", "packet": { ... } }`.
+
+### Validation rules the backend enforces
+
+For each field the backend checks:
+
+- The value type matches the schema type (e.g., integer for integer types, finite number for floats).
+- `min <= value <= max` when bounds are declared.
+- `NaN` and `Infinity` are rejected for floating-point fields.
+- Unknown field names are rejected.
+
+If validation fails, the backend replies with `{ "type": "error", "message": "..." }` and does not update the packet.
+
 UDP receive telemetry, battery state, RTT, and loss are not implemented in the current backend contract.
