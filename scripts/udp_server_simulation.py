@@ -1,64 +1,67 @@
+import json
 import socket
-import time
 import struct
+import time
+from pathlib import Path
 
-UDP_IP = "127.0.0.1"  # Change to "0.0.0.0" if receiving from another computer
+SCHEMA_PATH = Path(__file__).resolve().parent.parent / "packets-schema.json"
+WIRE_FORMATS = {
+    "int8": "b",
+    "uint8": "B",
+    "int16": "h",
+    "uint16": "H",
+    "int32": "i",
+    "uint32": "I",
+    "float32": "f",
+    "float64": "d",
+}
+UDP_IP = "127.0.0.1"
 UDP_PORT = 8888
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.bind((UDP_IP, UDP_PORT))
 
-print(f"Listening for UDP telemetry on {UDP_IP}:{UDP_PORT}...")
+def load_packet_layout() -> tuple[bytes, struct.Struct, list[str]]:
+    with SCHEMA_PATH.open(encoding="utf-8") as schema_file:
+        command = json.load(schema_file)["packet_types"]["command"]
 
-# Tracking variables
-packet_count = 0
-window_start = time.perf_counter()
-last_arrival = time.perf_counter()
+    byte_order = {"little": "<", "big": ">"}[command["byte_order"]]
+    fields = command["fields"]
+    packet_struct = struct.Struct(
+        byte_order + "".join(WIRE_FORMATS[field["type"]] for field in fields)
+    )
+    return (
+        command["header"].encode("ascii"),
+        packet_struct,
+        [field["name"] for field in fields],
+    )
 
-# Lists to hold data for the 1-second rolling average
-latencies = []
-intervals = []
 
-while True:
-    data, addr = sock.recvfrom(1024)
-    now_perf = time.perf_counter()  # For highly accurate interval math
-    now_sys = time.time()  # For latency comparison against client timestamp
+def main() -> None:
+    header, packet_struct, field_names = load_packet_layout()
+    expected_size = len(header) + packet_struct.size
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((UDP_IP, UDP_PORT))
+    print(f"Listening for {expected_size}-byte UDP commands on {UDP_IP}:{UDP_PORT}...")
 
-    # 1. Calculate Inter-packet Interval (Spacing)
-    interval_ms = (now_perf - last_arrival) * 1000.0
-    intervals.append(interval_ms)
-    last_arrival = now_perf
+    last_arrival: float | None = None
+    try:
+        while True:
+            data, address = sock.recvfrom(1024)
+            arrived_at = time.perf_counter()
+            if len(data) != expected_size or not data.startswith(header):
+                print(f"Rejected {len(data)}-byte packet from {address}")
+                continue
 
-    # 2. Calculate Latency
-    # We expect the first 8 bytes of the packet to be a 'double' (the timestamp)
-    if len(data) >= 8:
-        try:
-            sent_time = struct.unpack("d", data[:8])[0]
-            latency_ms = (now_sys - sent_time) * 1000.0
-            latencies.append(latency_ms)
-        except struct.error:
-            pass  # Ignore malformed packets
+            values = packet_struct.unpack(data[len(header) :])
+            interval_ms = (
+                None if last_arrival is None else (arrived_at - last_arrival) * 1000.0
+            )
+            last_arrival = arrived_at
+            decoded = dict(zip(field_names, values))
+            timing = "first packet" if interval_ms is None else f"{interval_ms:.2f} ms"
+            print(f"{address} | {timing} | {decoded}")
+    finally:
+        sock.close()
 
-    packet_count += 1
 
-    # # 3. Print stats every 1 second
-    # if now_perf - window_start >= 1.0:
-    hz = packet_count / (now_perf - window_start)
-
-    avg_interval = sum(intervals) / len(intervals) if intervals else 0
-    max_interval = max(intervals) if intervals else 0
-    avg_latency = sum(latencies) / len(latencies) if latencies else 0
-
-    print(f"--- Stats for last second ---")
-    print(f"Rate:        {hz:.2f} Hz")
-    print(f"Avg Spacing: {avg_interval:.2f} ms (Target: 20.00 ms)")
-    print(f"Max Spacing: {max_interval:.2f} ms (Jitter spike)")
-    if latencies:
-        print(f"Avg Latency: {avg_latency:.2f} ms (One-way)")
-    print("-" * 29)
-
-    # Reset window
-    packet_count = 0
-    window_start = now_perf
-    latencies.clear()
-    intervals.clear()
+if __name__ == "__main__":
+    main()

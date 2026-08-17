@@ -2,30 +2,39 @@
 
 ## Scope
 
-This directory contains the FastAPI backend for robot control transport and camera monitoring. The repository may also contain a separate frontend.
+This directory is the sole owner of UDP and camera transport. Electron is only a UI shell and settings store; Vue communicates with this backend through local WebSocket and HTTP endpoints.
 
 ## Structure
 
-- `server.py`: application lifecycle, controls WebSocket, 50 Hz UDP sender, and shared RTSP-to-MJPEG stream.
-- `settings.py`: mutable runtime network configuration.
-- `utils.py`: frequency conversion and schema-derived default state.
-- `../packets-schema.json`: authoritative UDP control packet schema.
-- `../scripts/udp_server_simulation.py`: local UDP receiver.
+- `server.py`: FastAPI lifecycle, typed controls WebSocket, 50 Hz UDP sender, and shared camera-to-MJPEG stream.
+- `settings.py`: mutable runtime destination and camera configuration.
+- `utils.py`: schema-derived packet defaults, validation, timing, and binary encoding.
+- `test_utils.py`: focused tests for binary layout and validation.
+- `../packets-schema.json`: authoritative ordered UDP command schema.
+- `../scripts/udp_server_simulation.py`: schema-driven local UDP receiver.
 
 ## Runtime Contracts
 
-- Keep UDP payload fields aligned with `packets-schema.json`.
-- Configuration keys `ip`, `port`, and `rtsp_url` must not enter UDP payloads.
-- Send UDP only while at least one controls WebSocket is connected.
-- Reset controls after the final controls WebSocket disconnects.
-- Keep blocking OpenCV capture off the asyncio event-loop thread.
-- Share RTSP capture and JPEG encoding among HTTP stream subscribers.
-- Run a single application worker because runtime state is process-local.
+- `WS /ws/controls` accepts only `config` and `control` message types.
+- Config fields are `udp_host`, `udp_port`, and `camera_url`; they never enter UDP payloads.
+- Empty UDP host plus port `0` disables transmission. Any partially configured destination is invalid.
+- Control messages may contain any subset of fields declared in `packets-schema.json`; merge them into the current complete packet.
+- Never add field-specific WebSocket handlers or hard-coded binary offsets. Field order, defaults, types, and bounds come from the schema.
+- Supported wire types are `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `float32`, and `float64`.
+- Send cached binary UDP bytes at 50 Hz only while a controls WebSocket is connected and UDP is enabled.
+- Reset controls to schema defaults after the final controls WebSocket disconnects.
+- Keep blocking OpenCV capture off the asyncio event loop and idle when `camera_url` is empty.
+- Share one camera capture/JPEG encoder among HTTP stream subscribers.
+- Run one Uvicorn worker because runtime state is process-local.
+
+## Extension Pattern
+
+To add a command field, update `../packets-schema.json` and initialize/bind the same field in the frontend `useControlState.js`. Generic validation, merge, and encoding code should remain unchanged.
 
 ## Validation
 
-After Python changes, compile `backend/` and `scripts/` from the repository root and check Pylance diagnostics. Do not require a live RTSP source for static validation. The user performs interactive server and browser validation.
+After Python changes, run `test_utils`, check syntax and Pylance diagnostics for `backend/` and `scripts/`, and verify the frontend build when contracts change. Static validation must not require a live camera, backend server, browser, or UDP peer; interactive validation belongs to the user.
 
 ## Documentation
 
-Update `README.md` and this file when architecture, packet fields, endpoints, configuration, controls, or limitations change.
+Update `README.md` and this file when endpoints, message types, packet fields, transport ownership, camera behavior, or limitations change. Keep frontend architecture documentation synchronized with the same contract.

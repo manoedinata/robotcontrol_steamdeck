@@ -7,12 +7,11 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.parse import urlparse
 
 import cv2
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from jsonschema import Draft202012Validator, ValidationError
-
 import settings as settings_module
 import utils
 
@@ -25,7 +24,6 @@ MJPEG_BOUNDARY = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "packets-schema.json"
 with SCHEMA_PATH.open(encoding="utf-8") as schema_file:
     PACKET_SCHEMA = json.load(schema_file)
-PACKET_VALIDATOR = Draft202012Validator(PACKET_SCHEMA)
 
 
 @dataclass
@@ -33,11 +31,12 @@ class RuntimeState:
     config: settings_module.Settings
     current_packet: dict[str, Any]
     packet_payload: bytes
+    udp_enabled: bool = False
     connected_clients: int = 0
 
 
 def encode_packet(packet: dict[str, Any]) -> bytes:
-    return json.dumps(packet, separators=(",", ":")).encode("utf-8")
+    return utils.encode_binary_packet(packet, PACKET_SCHEMA)
 
 
 default_packet = utils.generate_default_state(PACKET_SCHEMA)
@@ -45,7 +44,7 @@ runtime = RuntimeState(
     config=settings_module.Settings(
         udp_ip="127.0.0.1",
         udp_port=8888,
-        rtsp_url="rtsp://admin:password@127.0.0.1:554/stream",
+        camera_url="rtsp://admin:password@127.0.0.1:554/stream",
     ),
     current_packet=default_packet,
     packet_payload=encode_packet(default_packet),
@@ -53,10 +52,10 @@ runtime = RuntimeState(
 
 
 class MjpegStream:
-    """Capture and encode one RTSP stream for all connected HTTP clients."""
+    """Capture and encode one camera source for all connected HTTP clients."""
 
-    def __init__(self, rtsp_url: str) -> None:
-        self._rtsp_url = rtsp_url
+    def __init__(self, camera_url: str) -> None:
+        self._camera_url = camera_url
         self._condition = threading.Condition()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -64,9 +63,9 @@ class MjpegStream:
         self._sequence = 0
         self._subscribers = 0
 
-    def update_url(self, rtsp_url: str) -> None:
+    def update_url(self, camera_url: str) -> None:
         with self._condition:
-            self._rtsp_url = rtsp_url
+            self._camera_url = camera_url
 
     def frames(self) -> Iterator[bytes]:
         with self._condition:
@@ -111,7 +110,7 @@ class MjpegStream:
 
         self._thread = threading.Thread(
             target=self._capture_loop,
-            name="rtsp-capture",
+            name="camera-capture",
             daemon=True,
         )
         self._thread.start()
@@ -123,7 +122,15 @@ class MjpegStream:
         try:
             while not self._stop_event.is_set():
                 with self._condition:
-                    configured_url = self._rtsp_url
+                    configured_url = self._camera_url
+
+                if not configured_url:
+                    if capture is not None:
+                        capture.release()
+                        capture = None
+                    capture_url = ""
+                    self._stop_event.wait(RTSP_RECONNECT_DELAY_S)
+                    continue
 
                 if capture is None or configured_url != capture_url:
                     if capture is not None:
@@ -133,7 +140,7 @@ class MjpegStream:
                     capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
                     if not capture.isOpened():
-                        LOGGER.warning("Unable to open RTSP stream; retrying")
+                        LOGGER.warning("Unable to open camera stream; retrying")
                         capture.release()
                         capture = None
                         self._stop_event.wait(RTSP_RECONNECT_DELAY_S)
@@ -141,7 +148,7 @@ class MjpegStream:
 
                 success, frame = capture.read()
                 if not success:
-                    LOGGER.warning("RTSP frame read failed; reconnecting")
+                    LOGGER.warning("Camera frame read failed; reconnecting")
                     capture.release()
                     capture = None
                     self._stop_event.wait(RTSP_RECONNECT_DELAY_S)
@@ -169,7 +176,39 @@ class MjpegStream:
                 self._condition.notify_all()
 
 
-video_stream = MjpegStream(runtime.config.rtsp_url)
+video_stream = MjpegStream(runtime.config.camera_url)
+
+
+def validate_config(config: dict[str, Any]) -> tuple[str, int, str, bool]:
+    allowed_keys = {"udp_host", "udp_port", "camera_url"}
+    unknown_keys = set(config) - allowed_keys
+    if unknown_keys:
+        raise ValueError(f"Unknown config fields: {sorted(unknown_keys)}")
+
+    udp_host_value = config.get("udp_host", runtime.config.udp_ip)
+    udp_port_value = config.get("udp_port", runtime.config.udp_port)
+    camera_url_value = config.get("camera_url", runtime.config.camera_url)
+    if not isinstance(udp_host_value, str):
+        raise ValueError("udp_host must be a string")
+    if isinstance(udp_port_value, bool) or not isinstance(udp_port_value, int):
+        raise ValueError("udp_port must be an integer")
+    if not isinstance(camera_url_value, str):
+        raise ValueError("camera_url must be a string")
+
+    udp_host = udp_host_value.strip()
+    udp_port = udp_port_value
+    camera_url = camera_url_value.strip()
+
+    udp_enabled = bool(udp_host or udp_port)
+    if udp_enabled and (not udp_host or not 1 <= udp_port <= 65535):
+        raise ValueError("udp_host and udp_port 1..65535 must both be set")
+    parsed_camera_url = urlparse(camera_url)
+    if camera_url and (
+        parsed_camera_url.scheme not in {"http", "https", "rtsp"}
+        or not parsed_camera_url.hostname
+    ):
+        raise ValueError("camera_url must be a valid HTTP, HTTPS, or RTSP URL")
+    return udp_host, udp_port, camera_url, udp_enabled
 
 
 async def udp_loop() -> None:
@@ -183,7 +222,7 @@ async def udp_loop() -> None:
 
     try:
         while True:
-            if runtime.connected_clients > 0:
+            if runtime.connected_clients > 0 and runtime.udp_enabled:
                 try:
                     await loop.sock_sendto(
                         sock,
@@ -228,7 +267,7 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/stream")
 def video_feed() -> StreamingResponse:
-    """Expose the configured RTSP source as a shared MJPEG stream."""
+    """Expose the configured camera source as a shared MJPEG stream."""
     return StreamingResponse(
         video_stream.frames(),
         media_type="multipart/x-mixed-replace; boundary=frame",
@@ -248,24 +287,36 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     try:
         while True:
-            incoming_data = json.loads(await websocket.receive_text())
+            try:
+                incoming_data = json.loads(await websocket.receive_text())
+                if not isinstance(incoming_data, dict):
+                    raise ValueError("WebSocket message must be an object")
+                message_type = incoming_data.get("type")
 
-            if "ip" in incoming_data:
-                runtime.config.udp_ip = str(incoming_data.pop("ip"))
-            if "port" in incoming_data:
-                runtime.config.udp_port = int(incoming_data.pop("port"))
-            if "rtsp_url" in incoming_data:
-                runtime.config.rtsp_url = str(incoming_data.pop("rtsp_url"))
-                video_stream.update_url(runtime.config.rtsp_url)
-
-            if incoming_data:
-                try:
-                    PACKET_VALIDATOR.validate(incoming_data)
-                except ValidationError as error:
-                    LOGGER.warning("Ignored invalid control packet: %s", error.message)
+                if message_type == "config":
+                    config = incoming_data.get("config", {})
+                    if not isinstance(config, dict):
+                        raise ValueError("config must be an object")
+                    udp_host, udp_port, camera_url, udp_enabled = validate_config(
+                        config
+                    )
+                    runtime.config.udp_ip = udp_host
+                    runtime.config.udp_port = udp_port
+                    runtime.config.camera_url = camera_url
+                    runtime.udp_enabled = udp_enabled
+                    video_stream.update_url(camera_url)
+                elif message_type == "control":
+                    packet = incoming_data.get("packet", {})
+                    if not isinstance(packet, dict):
+                        raise ValueError("packet must be an object")
+                    utils.validate_packet_values(packet, PACKET_SCHEMA)
+                    next_packet = {**runtime.current_packet, **packet}
+                    runtime.packet_payload = encode_packet(next_packet)
+                    runtime.current_packet = next_packet
                 else:
-                    runtime.current_packet.update(incoming_data)
-                    runtime.packet_payload = encode_packet(runtime.current_packet)
+                    raise ValueError("message type must be 'config' or 'control'")
+            except (TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
+                await websocket.send_json({"type": "error", "message": str(error)})
     except WebSocketDisconnect:
         LOGGER.info("UI disconnected")
     finally:

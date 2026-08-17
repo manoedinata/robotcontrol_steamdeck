@@ -1,49 +1,69 @@
 # Steam Deck Robot Monitor Backend
 
-FastAPI backend that receives robot controls from a UI, sends the latest control packet over UDP at 50 Hz, and proxies an RTSP camera as an MJPEG HTTP stream.
+FastAPI owns robot and camera transport for the Steam Deck UI. Vue sends configuration and control state over a local WebSocket; the backend sends the latest command as a binary UDP datagram at 50 Hz and exposes the configured camera as HTTP MJPEG.
 
-## Architecture
+## Endpoints
 
-```text
-server.py                         FastAPI, WebSocket, UDP, and video streaming
-settings.py                       Runtime network settings
-utils.py                          Timing and default-packet helpers
-../packets-schema.json            Control packet JSON Schema
-../scripts/udp_server_simulation.py UDP receiver for local testing
-```
+- `WS /ws/controls`: typed configuration and control messages.
+- `GET /stream`: `multipart/x-mixed-replace` MJPEG for an HTML `<img>`.
 
-The application exposes:
-
-- `WS /ws/controls`: accepts `vy` and `vtheta` control packets plus optional `ip`, `port`, and `rtsp_url` configuration fields.
-- `GET /stream`: returns `multipart/x-mixed-replace` MJPEG suitable for an HTML `<img>` element.
-
-UDP transmission starts while at least one controls WebSocket is connected. The sender runs as an asyncio task, caches serialized packet bytes, and avoids CPU-intensive busy waiting. Control state resets after the last UI disconnects.
-
-RTSP capture starts on demand when the first stream viewer connects. One background capture performs JPEG encoding for all viewers, reconnects after failures, and stops after the last viewer disconnects.
-
-## Requirements
-
-- Python 3.10 or newer
-- FastAPI
-- Uvicorn
-- jsonschema
-- OpenCV Python
-
-Run Uvicorn with `backend` as the working directory because the backend modules use local imports. The packet schema itself is resolved relative to `server.py`, so it does not depend on the process working directory.
-
-## Control Packet
-
-The packet schema requires both numeric fields:
+Configuration message:
 
 ```json
-{"vy": 0.0, "vtheta": 0.0}
+{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"camera_url":"rtsp://camera/stream"}}
 ```
 
-Configuration and controls may be sent together. Configuration keys are removed before schema validation and are not included in UDP payloads.
+Control messages may update any subset of schema fields:
+
+```json
+{"type":"control","packet":{"vy":1.5,"vtheta":-0.25}}
+```
+
+Invalid messages receive `{"type":"error","message":"..."}` without closing the connection. Empty `udp_host` plus port `0` disables UDP. Empty `camera_url` leaves camera capture idle.
+
+## Binary UDP Schema
+
+`../packets-schema.json` is the source of truth for the command header, endian, ordered fields, defaults, numeric types, and bounds. Supported field types are `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `float32`, and `float64`.
+
+The shipped command is exactly 11 bytes:
+
+| Offset | Size | Encoding                | Value    |
+| ------ | ---- | ----------------------- | -------- |
+| `0`    | 3    | ASCII                   | `ITS`    |
+| `3`    | 4    | little-endian `float32` | `vy`     |
+| `7`    | 4    | little-endian `float32` | `vtheta` |
+
+Adding a Vue input requires adding its initial value to `useControlState.js`, binding the component through `updatePacket()`, and adding the corresponding ordered field to `packets-schema.json`. The WebSocket dispatcher and UDP encoder require no field-specific handler or offset.
+
+## Run
+
+Requirements are Python 3.10+, FastAPI, Uvicorn, and OpenCV Python. Run one worker from `backend/` because runtime settings, connected-client count, packet state, and camera capture are process-local:
+
+```bash
+uvicorn server:app --host 127.0.0.1 --port 8000
+```
+
+The frontend defaults to `http://127.0.0.1:8000`. It can be built with a different local endpoint through `VITE_BACKEND_URL`, with the corresponding CSP allowlist updated in `frontend/index.html`.
+
+## Behavior
+
+UDP transmission runs only while at least one controls WebSocket is connected and a complete destination is enabled. Disconnecting the final UI resets all controls to schema defaults. The app sends no special final stop datagram; the robot must enforce a UDP receive-timeout watchdog.
+
+Camera capture starts on demand for the first `/stream` subscriber. One background OpenCV worker captures and JPEG-encodes frames for all subscribers, reconnects after failures, responds to runtime URL changes, and stops after the final viewer disconnects.
+
+## Validation
+
+Run the focused codec tests from `backend/`:
+
+```bash
+python -m unittest test_utils
+```
+
+`../scripts/udp_server_simulation.py` decodes received commands from the same schema for local diagnostics. Static validation does not require a camera or live UDP target.
 
 ## Limitations
 
-- Runtime settings and control state are process-local; use one Uvicorn worker.
-- All connected control clients share one packet and destination configuration.
-- MJPEG re-encodes RTSP frames and uses more bandwidth than forwarding a compressed H.264/H.265 stream.
-- OpenCV backend support for `CAP_PROP_BUFFERSIZE` varies by platform.
+- Runtime state is shared by all connected UIs and requires one Uvicorn worker.
+- UDP is send-only in the current implementation; robot telemetry and acknowledgement are not exposed.
+- MJPEG re-encoding uses CPU and more bandwidth than forwarding compressed H.264/H.265.
+- OpenCV support and `CAP_PROP_BUFFERSIZE` behavior vary by platform.

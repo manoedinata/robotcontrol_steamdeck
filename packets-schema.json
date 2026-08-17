@@ -1,15 +1,27 @@
 {
-    "type": "object",
-    "properties": {
-        "vy": {
-            "type": "number"
-        },
-        "vtheta": {
-            "type": "number"
+    "version": 1,
+    "packet_types": {
+        "command": {
+            "byte_order": "little",
+            "header": "ITS",
+            "fields": [
+                {
+                    "name": "vy",
+                    "type": "float32",
+                    "role": "yVelocity",
+                    "default": 0.0,
+                    "min": -100.0,
+                    "max": 100.0
+                },
+                {
+                    "name": "vtheta",
+                    "type": "float32",
+                    "role": "thetaVelocity",
+                    "default": 0.0,
+                    "min": -100.0,
+                    "max": 100.0
+                }
+            ]
         }
-    },
-    "required": [
-        "vy",
-        "vtheta"
-    ]
+    }
 }
