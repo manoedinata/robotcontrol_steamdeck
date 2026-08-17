@@ -2,6 +2,8 @@
 
 ## Process Boundaries
 
+### Local development
+
 ```text
 Vue renderer                    Electron main                 FastAPI backend
 -------------                   -------------                 ---------------
@@ -10,11 +12,29 @@ Gamepad and touch input  <IPC>  Settings JSON                Binary UDP at 50 Hz
 Typed WebSocket client          Exit/lifecycle               GET /stream (MJPEG)
 ```
 
+### Docker / Steam deployment
+
+```text
+Host Steam
+   |
+   +-- launch-from-steam.sh (Docker/Podman)
+           |
+           +-- container
+                   +-- docker-entrypoint.sh
+                   |       +-- uvicorn backend on 127.0.0.1:8000
+                   |       +-- wait for /health
+                   |       +-- Electron frontend on same host
+                   |
+                   +-- /app/config bind-mounted from host
+```
+
 Electron has no robot or camera transport code. It exposes only `quitApp()`, `loadSettings()`, and `saveSettings(settings)` through a context-isolated preload. `nodeIntegration` remains disabled.
 
 Vue owns input interpretation and UI state. `useBackendConnection.js` owns one WebSocket, reconnects every two seconds, and replays latest configuration and control state after connection. `useControlState.js` owns the packet object and coalesces reactive updates per animation frame. `useSettings.js` persists the frontend settings shape, keeps RTSP credentials separate from the source URL, and translates them into an authenticated backend config URL.
 
 FastAPI owns network configuration, schema-driven packet validation/encoding, the 50 Hz UDP task, OpenCV camera capture, and shared MJPEG encoding. `packets-schema.json` at the repository root is the binary packet source of truth.
+
+The Docker image uses host networking so the frontend renderer continues to connect to `http://127.0.0.1:8000` without cross-container DNS. The entrypoint starts both processes, waits for backend readiness via `GET /health`, and shuts them down together when Electron exits. Settings are persisted in a bind-mounted host directory controlled by `APP_SETTINGS_DIR`.
 
 The camera and controller stay mounted when the Settings drawer opens, so transport and control state remain active. Backend disconnection is shown in the Home HUD and does not block local UI operation.
 

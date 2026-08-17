@@ -16,6 +16,7 @@ This directory is the sole owner of UDP and camera transport. Electron is only a
 ## Runtime Contracts
 
 - `WS /ws/controls` accepts only `config` and `control` message types.
+- `GET /health` is a lightweight readiness probe. Keep it dependency-free (no camera connect, no UDP peer) so the Docker entrypoint can poll it safely.
 - Config fields are `udp_host`, `udp_port`, and `camera_url`; they never enter UDP payloads. RTSP credentials are URL-encoded in `camera_url` userinfo and must never be logged.
 - Empty UDP host plus port `0` disables transmission. Any partially configured destination is invalid.
 - Control messages may contain any subset of fields declared in `packets-schema.json`; merge them into the current complete packet.
@@ -26,6 +27,7 @@ This directory is the sole owner of UDP and camera transport. Electron is only a
 - Keep blocking OpenCV capture off the asyncio event loop and idle when `camera_url` is empty.
 - Share one camera capture/JPEG encoder among HTTP stream subscribers.
 - Run one Uvicorn worker because runtime state is process-local.
+- Container builds set `PYTHONPATH=/app/backend`; do not rely on the working directory for backend module imports.
 
 ## Extension Pattern
 

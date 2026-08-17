@@ -1,0 +1,5 @@
+# Backend runtime dependencies for the Steam Deck Robot Monitor.
+# Pinned to the versions currently used in local development.
+fastapi==0.141.1
+uvicorn[standard]==0.52.3
+opencv-python==5.0.0.93

@@ -14,6 +14,8 @@ A Steam Deck-oriented Electron and Vue UI for viewing the backend MJPEG camera s
 
 ## Quick Start
 
+### Local development
+
 Start the backend separately from `../backend`:
 
 ```bash
@@ -30,6 +32,15 @@ npm run dev
 `npm run dev` starts Vite and Electron. `npm run start` builds and launches the production UI. `./launch.sh` launches an existing build for Steam Gaming Mode.
 
 The renderer defaults to `http://127.0.0.1:8000`. Set `VITE_BACKEND_URL` at build/dev time to use another local backend URL, and keep the Content Security Policy in `index.html` aligned.
+
+### Docker / Steam
+
+For a single container that launches both frontend and backend from Steam, see the [packaging scripts](../packaging/). The container entrypoint starts FastAPI, waits for `/health`, then launches Electron. Settings are persisted in a bind-mounted host directory (`~/.config/steamdeck-robot-monitor` by default).
+
+```bash
+../packaging/build-image.sh
+../packaging/launch-from-steam.sh
+```
 
 ## Data Flow
 
@@ -57,4 +68,4 @@ The renderer defaults to `http://127.0.0.1:8000`. Set `VITE_BACKEND_URL` at buil
 
 ## Stack and Validation
 
-Electron, Vue 3, Vite, Bootstrap 5, Sass, and Lucide icons. Node.js `20.19+` or `22.12+` is required by Vite 8. Run `npm run build` after frontend changes. There is no frontend lint or automated test script.
+Electron, Vue 3, Vite, Bootstrap 5, Sass, and Lucide icons. Node.js `22+` is required. Run `npm run build` after frontend changes. There is no frontend lint or automated test script.

@@ -1,6 +1,6 @@
 # Limitations
 
-- The FastAPI backend must be started separately; Electron does not supervise it.
+- Local development: the FastAPI backend must be started separately; Electron does not supervise it. The Docker path bundles and supervises both processes inside one container.
 - Backend runtime state is process-local and requires a single Uvicorn worker.
 - All connected UIs share one UDP destination, camera source, and control packet.
 - UDP is send-only. Robot telemetry, command acknowledgement, battery, RX rate, RTT, and loss are not implemented.
@@ -13,4 +13,4 @@
 - Gamepad axis indices assume a conventional Steam Deck/gamepad mapping.
 - The built-in keyboard cannot disable Steam's global `Steam + X` overlay.
 - There are no frontend automated tests or lint rules. Backend codec coverage is focused and does not exercise live WebSocket, UDP, or camera behavior.
-- Installers, packaged releases, and backend service management are not configured.
+- Installers and native packaged releases are not configured. Docker image packaging and a Steam launcher script are provided, but host-side service management is not.

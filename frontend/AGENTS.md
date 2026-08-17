@@ -22,7 +22,11 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 
 ### Electron
 
-Keep `contextIsolation: true` and `nodeIntegration: false`. Do not expose generic IPC, filesystem, shell, network, process-spawn, or packet APIs. Keep settings writes as temporary-file plus rename. The backend is launched separately and is not supervised by Electron.
+Keep `contextIsolation: true` and `nodeIntegration: false`. Do not expose generic IPC, filesystem, shell, network, process-spawn, or packet APIs. Keep settings writes as temporary-file plus rename.
+
+In local development the backend is launched separately and is not supervised by Electron. In the Docker/Steam path, both processes run inside the same container and are supervised by `docker-entrypoint.sh`; Electron still must not spawn the backend itself.
+
+Settings directory is configurable through `APP_SETTINGS_DIR` at runtime. Default to a path under the user's config home when the variable is absent, and use the provided path verbatim when present. This is required for Docker bind-mounts.
 
 ### Backend Connection
 
@@ -84,6 +88,12 @@ Keep the camera-first operational surface mounted while Settings opens as a draw
 
 Vite 8 requires Node.js `20.19+` or `22.12+`. There is no frontend test or lint script. Do not run a server or browser for static verification; the user performs interactive validation.
 
+## Packaging
+
+- Do not add backend process management inside `main.js`; use `packaging/docker-entrypoint.sh` for container lifecycle.
+- Keep renderer configuration build-time only (`VITE_BACKEND_URL`) aligned with container runtime expectation `http://127.0.0.1:8000`.
+- Settings persistence must work with a bind-mounted directory and `APP_SETTINGS_DIR`.
+
 ## Documentation
 
-Update this file and `README.md` for architecture, settings, controls, endpoint, or major behavior changes. Keep focused docs under `docs/` synchronized. Do not commit generated `dist/` or `node_modules/` changes.
+Update this file and `README.md` for architecture, settings, controls, endpoint, packaging, or major behavior changes. Keep focused docs under `docs/` synchronized. Do not commit generated `dist/` or `node_modules/` changes.

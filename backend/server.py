@@ -301,6 +301,12 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+@app.get("/health")
+async def health_check() -> dict[str, str]:
+    """Lightweight readiness probe for the container entrypoint."""
+    return {"status": "ok"}
+
+
 @app.get("/stream")
 async def video_feed(request: Request) -> StreamingResponse:
     async def frames_generator():

@@ -6,6 +6,7 @@ FastAPI owns robot and camera transport for the Steam Deck UI. Vue sends configu
 
 - `WS /ws/controls`: typed configuration and control messages.
 - `GET /stream`: `multipart/x-mixed-replace` MJPEG for an HTML `<img>`.
+- `GET /health`: readiness probe used by the Docker entrypoint and external health checks.
 
 Configuration message (RTSP credentials may be supplied as URL-encoded userinfo):
 
@@ -45,6 +46,10 @@ uvicorn server:app --host 127.0.0.1 --port 8000
 
 The frontend defaults to `http://127.0.0.1:8000`. It can be built with a different local endpoint through `VITE_BACKEND_URL`, with the corresponding CSP allowlist updated in `frontend/index.html`.
 
+## Docker
+
+The project image bundles the backend with the frontend. Inside the container the backend is started from `/app/backend` and `PYTHONPATH=/app/backend` is set so modules resolve regardless of working directory. The Docker entrypoint waits for `/health` before launching Electron.
+
 ## Behavior
 
 UDP transmission runs only while at least one controls WebSocket is connected and a complete destination is enabled. Disconnecting the final UI resets all controls to schema defaults. The app sends no special final stop datagram; the robot must enforce a UDP receive-timeout watchdog.
@@ -57,6 +62,12 @@ Run the focused codec tests from `backend/`:
 
 ```bash
 python -m unittest test_utils
+```
+
+To run the same tests inside the built container:
+
+```bash
+docker run --rm --network host steamdeck-robot-monitor:latest python -m unittest test_utils
 ```
 
 `../scripts/udp_server_simulation.py` decodes received commands from the same schema for local diagnostics. Static validation does not require a camera or live UDP target.

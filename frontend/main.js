@@ -2,9 +2,23 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 
-const settingsPath = path.join(__dirname, 'settings.json')
+const settingsDir = process.env.APP_SETTINGS_DIR
+    ? path.resolve(process.env.APP_SETTINGS_DIR)
+    : __dirname
+const settingsPath = path.join(settingsDir, 'settings.json')
+
+async function ensureSettingsDir() {
+    if (process.env.APP_SETTINGS_DIR) {
+        try {
+            await fs.mkdir(settingsDir, { recursive: true })
+        } catch (error) {
+            console.error('Failed to create settings directory:', error)
+        }
+    }
+}
 
 async function loadSettings() {
+    await ensureSettingsDir()
     try {
         const contents = await fs.readFile(settingsPath, 'utf8')
         return JSON.parse(contents)
@@ -17,7 +31,8 @@ async function loadSettings() {
 }
 
 async function saveSettings(_event, settings) {
-    const temporaryPath = `${settingsPath}.tmp`
+    await ensureSettingsDir()
+    const temporaryPath = path.join(settingsDir, `.settings.json.tmp-${process.pid}`)
 
     await fs.writeFile(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8')
     await fs.rename(temporaryPath, settingsPath)
