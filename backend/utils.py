@@ -12,6 +12,11 @@ def hz_to_s(hz: float) -> float:
     return 1.0 / hz
 
 
+def hz_to_ms(hz: float) -> float:
+    """Convert Hertz (Hz) to milliseconds."""
+    return hz_to_s(hz) * 1000.0
+
+
 def generate_default_state(schema: dict) -> dict:
     """Creates a default dictionary based on the JSON Schema properties."""
     state = {}
