@@ -222,13 +222,19 @@ async def udp_loop() -> None:
 
     try:
         while True:
+            # print(
+            #     f"Clients: {runtime.connected_clients}, UDP Enabled: {runtime.udp_enabled}"
+            # )
+
             if runtime.connected_clients > 0 and runtime.udp_enabled:
                 try:
-                    await loop.sock_sendto(
-                        sock,
+                    sock.sendto(
                         runtime.packet_payload,
                         (runtime.config.udp_ip, runtime.config.udp_port),
                     )
+                except BlockingIOError:
+                    # Non-blocking socket OS buffer is full, just skip this tick
+                    pass
                 except OSError as error:
                     now = loop.time()
                     if now - last_error_log >= 1.0:
@@ -246,6 +252,13 @@ async def udp_loop() -> None:
                 await asyncio.sleep(delay)
             else:
                 next_send = loop.time()
+
+    except asyncio.CancelledError:
+        # Expected when FastAPI shuts down
+        raise
+    except Exception as e:
+        # CRITICAL: Catch any other errors so the task doesn't die silently
+        LOGGER.error("UDP loop crashed unexpectedly: %s", e)
     finally:
         sock.close()
 
@@ -305,6 +318,12 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.config.camera_url = camera_url
                     runtime.udp_enabled = udp_enabled
                     video_stream.update_url(camera_url)
+                    print(
+                        "UDP config accepted: "
+                        f"enabled={udp_enabled} destination="
+                        f"{udp_host}:{udp_port} clients={runtime.connected_clients}",
+                        flush=True,
+                    )
                 elif message_type == "control":
                     packet = incoming_data.get("packet", {})
                     if not isinstance(packet, dict):
