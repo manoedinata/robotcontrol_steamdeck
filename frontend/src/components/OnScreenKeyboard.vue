@@ -20,6 +20,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  sensitive: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['cancel', 'done'])
@@ -71,10 +75,21 @@ const rows = computed(() => {
     ]
   }
 
+  if (props.layout === 'credential') {
+    return [
+      ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+      ...letterRows,
+    ]
+  }
+
   return letterRows
 })
 
-const isTextLayout = computed(() => ['text', 'hostname'].includes(props.layout))
+const isTextLayout = computed(() => ['text', 'hostname', 'credential'].includes(props.layout))
+
+const symbolKeys = computed(() => props.layout === 'credential'
+  ? ['@', '-', '_', '.', '!', '#', '$', '%', '&', '*', '+', '=', '?']
+  : ['/', '-', '_', '.', ':'])
 
 function appendKey(key) {
   if (draft.value.length >= props.maxLength) return
@@ -108,7 +123,7 @@ function finish() {
       </header>
 
       <div class="osk-preview" aria-live="polite">
-        <span v-if="draft">{{ draft }}</span>
+        <span v-if="draft">{{ sensitive ? '*'.repeat(draft.length) : draft }}</span>
         <span v-else class="osk-placeholder">Enter a value</span>
         <span class="osk-cursor" aria-hidden="true"></span>
       </div>
@@ -126,8 +141,7 @@ function finish() {
               <ArrowBigUp :size="20" aria-hidden="true" />
               Shift
             </button>
-            <button v-for="key in ['/', '-', '_', '.', ':']" :key="key" class="osk-key" type="button"
-              @click="appendKey(key)">
+            <button v-for="key in symbolKeys" :key="key" class="osk-key" type="button" @click="appendKey(key)">
               {{ key }}
             </button>
           </div>

@@ -5,12 +5,12 @@ A Steam Deck-oriented Electron and Vue UI for viewing the backend MJPEG camera s
 ## Features
 
 - Camera-first frameless UI for the Steam Deck's 1280x800 viewport
-- HTTP, HTTPS, and RTSP camera sources through backend `GET /stream`
+- HTTP, HTTPS, and RTSP camera sources through backend `GET /stream`, with optional RTSP credentials
 - Pointer, touch, Steam Deck, and compatible gamepad controls
 - Configurable linear Y and angular theta limits
 - Settings drawer and built-in gamepad-navigable keyboard
 - Automatic backend WebSocket reconnect and current-state replay
-- Persistent camera, UDP destination, velocity, and keyboard settings
+- Persistent camera source, RTSP credentials, UDP destination, velocity, and keyboard settings
 
 ## Quick Start
 

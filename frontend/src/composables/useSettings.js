@@ -9,6 +9,8 @@ const DEFAULT_MAX_VELOCITY = 10
 // camera URL and velocity limits in sync across every view without prop
 // drilling.
 const cameraUrl = ref('')
+const cameraUsername = ref('')
+const cameraPassword = ref('')
 const maxYVelocity = ref(DEFAULT_MAX_VELOCITY)
 const maxThetaVelocity = ref(DEFAULT_MAX_VELOCITY)
 const udpHost = ref('')
@@ -17,16 +19,57 @@ const useOnScreenKeyboard = ref(true)
 let loaded = false
 const { updateConfig } = useBackendConnection()
 
+function buildBackendCameraUrl() {
+    const sourceUrl = cameraUrl.value.trim()
+    if (!sourceUrl || !sourceUrl.toLowerCase().startsWith('rtsp:')) return sourceUrl
+
+    try {
+        const authenticatedUrl = new URL(sourceUrl)
+        authenticatedUrl.username = cameraUsername.value
+        authenticatedUrl.password = cameraPassword.value
+        return authenticatedUrl.toString()
+    } catch {
+        return sourceUrl
+    }
+}
+
 function syncBackendConfig() {
     updateConfig({
         udp_host: udpHost.value.trim(),
         udp_port: udpPort.value,
-        camera_url: cameraUrl.value.trim(),
+        camera_url: buildBackendCameraUrl(),
     })
 }
 
+function parseStoredCameraSettings(settings) {
+    const sourceUrl = settings?.cameraUrl ?? ''
+    let normalizedUrl = sourceUrl
+    let embeddedUsername = ''
+    let embeddedPassword = ''
+
+    try {
+        const parsedUrl = new URL(sourceUrl)
+        embeddedUsername = decodeURIComponent(parsedUrl.username)
+        embeddedPassword = decodeURIComponent(parsedUrl.password)
+        parsedUrl.username = ''
+        parsedUrl.password = ''
+        normalizedUrl = parsedUrl.toString()
+    } catch {
+        // Keep malformed legacy values visible in Settings for correction.
+    }
+
+    return {
+        url: normalizedUrl,
+        username: settings?.cameraUsername ?? embeddedUsername,
+        password: settings?.cameraPassword ?? embeddedPassword,
+    }
+}
+
 function applySettings(settings) {
-    cameraUrl.value = settings?.cameraUrl ?? ''
+    const cameraSettings = parseStoredCameraSettings(settings)
+    cameraUrl.value = cameraSettings.url
+    cameraUsername.value = cameraSettings.username
+    cameraPassword.value = cameraSettings.password
     maxYVelocity.value = settings?.maxYVelocity ?? DEFAULT_MAX_VELOCITY
     maxThetaVelocity.value = settings?.maxThetaVelocity ?? DEFAULT_MAX_VELOCITY
     udpHost.value = settings?.udpHost ?? ''
@@ -61,6 +104,8 @@ export function useSettings() {
 
     return {
         cameraUrl: readonly(cameraUrl),
+        cameraUsername: readonly(cameraUsername),
+        cameraPassword: readonly(cameraPassword),
         maxYVelocity: readonly(maxYVelocity),
         maxThetaVelocity: readonly(maxThetaVelocity),
         udpHost: readonly(udpHost),

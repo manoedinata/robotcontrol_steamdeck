@@ -7,10 +7,10 @@ FastAPI owns robot and camera transport for the Steam Deck UI. Vue sends configu
 - `WS /ws/controls`: typed configuration and control messages.
 - `GET /stream`: `multipart/x-mixed-replace` MJPEG for an HTML `<img>`.
 
-Configuration message:
+Configuration message (RTSP credentials may be supplied as URL-encoded userinfo):
 
 ```json
-{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"camera_url":"rtsp://camera/stream"}}
+{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"camera_url":"rtsp://user:password@camera/stream"}}
 ```
 
 Control messages may update any subset of schema fields:
@@ -67,3 +67,4 @@ python -m unittest test_utils
 - UDP is send-only in the current implementation; robot telemetry and acknowledgement are not exposed.
 - MJPEG re-encoding uses CPU and more bandwidth than forwarding compressed H.264/H.265.
 - OpenCV support and `CAP_PROP_BUFFERSIZE` behavior vary by platform.
+- RTSP credentials are supplied in `camera_url` userinfo and should not be written to logs.

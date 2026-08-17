@@ -6,6 +6,7 @@ The Settings drawer stores camera source, UDP destination, velocity limits, and 
 
 - Camera stream type: HTTP or RTSP.
 - Camera source IP, port, and optional subpath.
+- Optional RTSP username and password.
 - UDP target host and port.
 - Maximum linear Y and angular theta velocity, `0.1..100`.
 - Built-in on-screen keyboard toggle.
@@ -15,6 +16,8 @@ The persisted contract remains:
 ```json
 {
   "cameraUrl": "http://192.168.1.20:8080/video",
+  "cameraUsername": "",
+  "cameraPassword": "",
   "maxYVelocity": 10,
   "maxThetaVelocity": 10,
   "udpHost": "192.168.1.30",
@@ -23,7 +26,7 @@ The persisted contract remains:
 }
 ```
 
-Empty UDP host and port `0` disable backend UDP transmission. The form requires a camera host and port, but the underlying backend accepts an empty camera URL and keeps capture idle. The form does not expose HTTPS selection, credentials, query parameters, or fragments.
+Empty UDP host and port `0` disable backend UDP transmission. The form requires a camera host and port, but the underlying backend accepts an empty camera URL and keeps capture idle. RTSP credentials are optional and persisted separately from `cameraUrl`; the backend receives them as URL-encoded userinfo in its transient `camera_url` configuration. The form does not expose HTTPS selection, query parameters, or fragments.
 
 ## Camera Path
 

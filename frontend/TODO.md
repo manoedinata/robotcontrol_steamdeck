@@ -10,7 +10,7 @@
 
 ## Product
 
-- [ ] Username & password support for RTSP connection
+- [x] Username & password support for RTSP connection
 - [ ] Improve responsive behavior and gamepad navigation after target-device validation.
 - [ ] Add backend service installation/startup for Steam Gaming Mode deployment.
 - [ ] Add end-to-end transport tests with a simulated WebSocket client and UDP receiver.

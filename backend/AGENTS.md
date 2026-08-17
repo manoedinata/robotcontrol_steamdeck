@@ -16,7 +16,7 @@ This directory is the sole owner of UDP and camera transport. Electron is only a
 ## Runtime Contracts
 
 - `WS /ws/controls` accepts only `config` and `control` message types.
-- Config fields are `udp_host`, `udp_port`, and `camera_url`; they never enter UDP payloads.
+- Config fields are `udp_host`, `udp_port`, and `camera_url`; they never enter UDP payloads. RTSP credentials are URL-encoded in `camera_url` userinfo and must never be logged.
 - Empty UDP host plus port `0` disables transmission. Any partially configured destination is invalid.
 - Control messages may contain any subset of fields declared in `packets-schema.json`; merge them into the current complete packet.
 - Never add field-specific WebSocket handlers or hard-coded binary offsets. Field order, defaults, types, and bounds come from the schema.

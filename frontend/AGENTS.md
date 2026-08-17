@@ -54,6 +54,8 @@ Preserve this persisted contract:
 ```json
 {
   "cameraUrl": "http://192.168.1.20:8080/video",
+  "cameraUsername": "",
+  "cameraPassword": "",
   "maxYVelocity": 10,
   "maxThetaVelocity": 10,
   "udpHost": "192.168.1.30",
@@ -62,7 +64,7 @@ Preserve this persisted contract:
 }
 ```
 
-Empty UDP host and port `0` disable transmission. The camera form supports HTTP and RTSP selections, does not preserve query/fragment data, and does not expose credentials. Keep `useSettings.js` as the renderer source of truth.
+Empty UDP host and port `0` disable transmission. The camera form supports HTTP and RTSP selections, preserves RTSP credentials in separate persisted fields, and does not preserve query/fragment data. Credentials are included only in the transient authenticated `camera_url` sent to the backend. Keep `useSettings.js` as the renderer source of truth.
 
 ### Camera
 

@@ -9,6 +9,8 @@ const emit = defineEmits(['close'])
 
 const {
   cameraUrl,
+  cameraUsername,
+  cameraPassword,
   maxYVelocity,
   maxThetaVelocity,
   udpHost,
@@ -21,6 +23,8 @@ const streamType = ref('http')
 const sourceIp = ref('')
 const port = ref('')
 const subpath = ref('')
+const username = ref(cameraUsername.value)
+const password = ref(cameraPassword.value)
 const maxY = ref(maxYVelocity.value)
 const maxTheta = ref(maxThetaVelocity.value)
 const targetHost = ref(udpHost.value)
@@ -38,13 +42,15 @@ const keyboardFields = {
   sourceIp: { label: 'Source IP', layout: 'ip', maxLength: 253 },
   port: { label: 'Port', layout: 'integer', maxLength: 5 },
   subpath: { label: 'Stream subpath', layout: 'text', maxLength: 256 },
+  username: { label: 'RTSP username', layout: 'credential', maxLength: 128 },
+  password: { label: 'RTSP password', layout: 'credential', maxLength: 256, sensitive: true },
   maxY: { label: 'Max Y-velocity', layout: 'decimal', maxLength: 5 },
   maxTheta: { label: 'Max Theta-velocity', layout: 'decimal', maxLength: 5 },
   targetHost: { label: 'UDP target host', layout: 'hostname', maxLength: 253 },
   targetPort: { label: 'UDP target port', layout: 'integer', maxLength: 5 },
 }
 
-const fieldValues = { sourceIp, port, subpath, maxY, maxTheta, targetHost, targetPort }
+const fieldValues = { sourceIp, port, subpath, username, password, maxY, maxTheta, targetHost, targetPort }
 
 function openKeyboard(fieldName) {
   if (!oskEnabled.value) return
@@ -92,6 +98,8 @@ function populateCameraFields(url) {
     sourceIp.value = ''
     port.value = ''
     subpath.value = ''
+    username.value = ''
+    password.value = ''
     return
   }
 
@@ -102,13 +110,31 @@ function populateCameraFields(url) {
     port.value = parsedUrl.port
     subpath.value = parsedUrl.pathname
     subpath.value = subpath.value.startsWith('/') ? subpath.value : "/" + subpath.value
+    username.value = decodeUrlComponent(parsedUrl.username)
+    password.value = decodeUrlComponent(parsedUrl.password)
   } catch (error) {
     console.error('Could not parse the saved camera URL:', error)
   }
 }
 
+function decodeUrlComponent(value) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
 watch(cameraUrl, (nextUrl) => {
   populateCameraFields(nextUrl)
+}, { immediate: true })
+
+watch(cameraUsername, (next) => {
+  username.value = next
+}, { immediate: true })
+
+watch(cameraPassword, (next) => {
+  password.value = next
 }, { immediate: true })
 
 watch(maxYVelocity, (next) => {
@@ -152,6 +178,8 @@ async function persistSettings({ focusSave = false } = {}) {
 
     await saveSettings({
       cameraUrl,
+      cameraUsername: streamType.value === 'rtsp' ? username.value : '',
+      cameraPassword: streamType.value === 'rtsp' ? password.value : '',
       maxYVelocity: Number.parseFloat(maxY.value),
       maxThetaVelocity: Number.parseFloat(maxTheta.value),
       udpHost: targetHost.value.trim(),
@@ -197,13 +225,21 @@ defineExpose({ saveBeforeClose })
       </div>
 
       <div class="camera-settings-row">
-        <div class="settings-field settings-field-type">
-          <label for="stream-type">Stream type</label>
-          <select id="stream-type" v-model="streamType" class="form-select" data-gamepad-control>
-            <option value="http">HTTP</option>
-            <option value="rtsp">RTSP</option>
-          </select>
-        </div>
+        <fieldset class="settings-field settings-field-type">
+          <legend>Stream type</legend>
+          <div class="stream-type-options">
+            <label class="stream-type-option" for="stream-type-http">
+              <input id="stream-type-http" v-model="streamType" type="radio" value="http" name="stream-type"
+                data-gamepad-control />
+              <span>HTTP</span>
+            </label>
+            <label class="stream-type-option" for="stream-type-rtsp">
+              <input id="stream-type-rtsp" v-model="streamType" type="radio" value="rtsp" name="stream-type"
+                data-gamepad-control />
+              <span>RTSP</span>
+            </label>
+          </div>
+        </fieldset>
 
         <div class="settings-field settings-field-source">
           <label for="source-ip">Source IP</label>
@@ -227,6 +263,22 @@ defineExpose({ saveBeforeClose })
             :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" placeholder="video" autocomplete="off"
             data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('subpath')"
             @keydown="handleInputKeydown($event, 'subpath')" />
+        </div>
+
+        <div v-if="streamType === 'rtsp'" class="settings-field settings-field-credential">
+          <label for="camera-username">Username <span>(optional)</span></label>
+          <input id="camera-username" v-model="username" class="form-control" type="text"
+            :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" autocomplete="username"
+            data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('username')"
+            @keydown="handleInputKeydown($event, 'username')" />
+        </div>
+
+        <div v-if="streamType === 'rtsp'" class="settings-field settings-field-credential">
+          <label for="camera-password">Password <span>(optional)</span></label>
+          <input id="camera-password" v-model="password" class="form-control" type="password"
+            :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" autocomplete="current-password"
+            data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('password')"
+            @keydown="handleInputKeydown($event, 'password')" />
         </div>
       </div>
 
@@ -315,7 +367,7 @@ defineExpose({ saveBeforeClose })
     </form>
 
     <OnScreenKeyboard v-if="activeKeyboard" :key="activeKeyboard.name" :layout="activeKeyboard.layout"
-      :max-length="activeKeyboard.maxLength" :title="activeKeyboard.label"
+      :max-length="activeKeyboard.maxLength" :title="activeKeyboard.label" :sensitive="activeKeyboard.sensitive"
       :value="String(fieldValues[activeKeyboard.name].value ?? '')" @cancel="cancelKeyboard"
       @done="commitKeyboardValue" />
   </section>
