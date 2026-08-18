@@ -30,14 +30,14 @@ mkdir -p /app/config
 # Start FastAPI backend. Host networking lets it bind to 127.0.0.1:8000.
 echo "[entrypoint] Starting backend..." >&2
 cd /app/backend
-uvicorn server:app --host 127.0.0.1 --port 8000 --workers 1 --timeout-graceful-shutdown 1 &
+uvicorn server:app --host 127.0.0.1 --port 8000 --workers 1 --timeout-graceful-shutdown 1 --loop asyncio &
 BACKEND_PID=$!
 
 # Wait for backend readiness with a bounded retry loop.
 ready=false
 for ((i = 0; i < 60; i++)); do
     if curl -fsS "${HEALTH_URL}" >/dev/null 2>&1; then
-        ready=true
+    ready=true
         break
     fi
     if ! kill -0 "${BACKEND_PID}" 2>/dev/null; then
