@@ -69,4 +69,4 @@ After `npm install` and `npm run build`, run `./launch.sh`. It locates Electron'
 
 ## Diagnostics
 
-Run `python scripts/udp_server_simulation.py` from the repository root to receive and decode schema-defined command packets on `127.0.0.1:8888`. Run `python scripts/udp_telemetry_simulation.py 75` to send a schema-defined battery packet to the backend telemetry port (`127.0.0.1:8889` by default). Change the simulator arguments when testing another host or port. Neither script emulates a robot motion watchdog.
+Run `python scripts/udp_server_simulation.py` from the repository root to receive and decode schema-defined command packets on `0.0.0.0:8888` while periodically sending dummy battery receive packets to `127.0.0.1:8889`. Use `--battery-level`, `--telemetry-interval`, `--listen-port`, and `--telemetry-port` to customize the simulation. The standalone `python scripts/udp_telemetry_simulation.py 75` command remains available for sending one packet. Neither simulator emulates a robot motion watchdog.

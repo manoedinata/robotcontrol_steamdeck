@@ -27,6 +27,11 @@ with SCHEMA_PATH.open(encoding="utf-8") as schema_file:
     PACKET_SCHEMA = json.load(schema_file)
 
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+)
+
+
 @dataclass
 class RuntimeState:
     config: settings_module.Settings

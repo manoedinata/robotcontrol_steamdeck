@@ -55,8 +55,8 @@ backend/
   server.py                       WebSocket, UDP send/receive, camera/MJPEG
   utils.py                        Binary schema encoder/decoder
 scripts/
-  udp_server_simulation.py        Command receiver
-  udp_telemetry_simulation.py     Battery telemetry sender
+  udp_server_simulation.py        Bidirectional command/telemetry simulator
+  udp_telemetry_simulation.py     One-shot battery telemetry sender
 packets-schema.json               Ordered command and telemetry layouts
 ```
 
