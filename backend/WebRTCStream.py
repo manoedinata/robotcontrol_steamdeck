@@ -38,7 +38,7 @@ class WebRTCStream:
                 camera_url,
                 format="rtsp",
                 options={
-                    "rtsp_transport": "tcp",
+                    "rtsp_transport": "udp",
                     "fflags": "nobuffer",
                     "flags": "low_delay",
                 },
