@@ -4,7 +4,7 @@ This repository contains a Steam Deck robot monitor: a FastAPI backend for camer
 
 ## Scope Boundaries
 
-- `backend/` owns WebSocket, HTTP, UDP, binary packet encoding, and OpenCV camera capture.
+- `backend/` owns WebSocket, HTTP, UDP send/receive, binary packet encoding/decoding, and OpenCV camera capture.
 - `frontend/` owns the user interface, input handling, and renderer-side settings shape.
 - `packaging/` owns Docker image build and the Steam launcher script.
 - `packets-schema.json` is the single source of truth for the binary UDP command layout.
@@ -24,6 +24,6 @@ Update the top-level `README.md`, backend/frontend `README.md`, `AGENTS.md` file
 ## Validation
 
 - Run backend tests with `python -m unittest test_utils` from `backend/`.
-- Run the same tests inside the built image with `docker run --rm --network host steamdeck-robot-monitor:latest python -m unittest test_utils`.
+- Run the same tests inside the built image with `docker run --rm --network host -v "$PWD:/app" -w /app/backend steamdeck-robot-monitor:latest python -m unittest test_utils`.
 - Run frontend build with `npm run build`.
 - Static validation must not require a live camera, backend server, browser, or UDP peer.

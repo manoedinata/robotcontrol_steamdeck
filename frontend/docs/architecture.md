@@ -10,6 +10,7 @@ Vue renderer                    Electron main                 FastAPI backend
 Camera/control UI               BrowserWindow                WS /ws/controls
 Gamepad and touch input  <IPC>  Settings JSON                Binary UDP at 50 Hz
 Typed WebSocket client          Exit/lifecycle               GET /stream (MJPEG)
+Battery telemetry HUD                                       UDP telemetry receiver
 ```
 
 ### Docker / Steam deployment
@@ -30,9 +31,9 @@ Host Steam
 
 Electron has no robot or camera transport code. It exposes only `quitApp()`, `loadSettings()`, and `saveSettings(settings)` through a context-isolated preload. `nodeIntegration` remains disabled.
 
-Vue owns input interpretation and UI state. `useBackendConnection.js` owns one WebSocket, reconnects every two seconds, and replays latest configuration and control state after connection. `useControlState.js` owns the packet object and coalesces reactive updates per animation frame. `useSettings.js` persists the frontend settings shape, keeps RTSP credentials separate from the source URL, and translates them into an authenticated backend config URL.
+Vue owns input interpretation and UI state. `useBackendConnection.js` owns one WebSocket, reconnects every two seconds, replays latest configuration and control state after connection, and tracks live/stale telemetry. `useControlState.js` owns the packet object and coalesces reactive updates per animation frame. `useSettings.js` persists the frontend settings shape, including the telemetry listening port, keeps RTSP credentials separate from the source URL, and translates them into backend configuration.
 
-FastAPI owns network configuration, schema-driven packet validation/encoding, the 50 Hz UDP task, OpenCV camera capture, and shared MJPEG encoding. `packets-schema.json` at the repository root is the binary packet source of truth.
+FastAPI owns network configuration, schema-driven packet validation/encoding/decoding, the 50 Hz command task, the independently bound telemetry receiver, OpenCV camera capture, and shared MJPEG encoding. `packets-schema.json` at the repository root is the binary packet source of truth.
 
 The Docker image uses host networking so the frontend renderer continues to connect to `http://127.0.0.1:8000` without cross-container DNS. The entrypoint starts both processes, waits for backend readiness via `GET /health`, and shuts them down together when Electron exits. Settings are persisted in a bind-mounted host directory controlled by `APP_SETTINGS_DIR`.
 
@@ -45,15 +46,18 @@ frontend/
   main.js                         Electron shell/settings
   electron-components/preload.js Restricted renderer bridge
   src/composables/
-    useBackendConnection.js       WebSocket and stream endpoint
+    useBackendConnection.js       WebSocket, telemetry state, stream endpoint
     useControlState.js            Generic packet state
     useSettings.js                Persisted settings/config sync
   src/components/                 Camera, controls, Settings shell, keyboard
   src/views/                      Home and Settings content
 backend/
-  server.py                       WebSocket, UDP, camera/MJPEG
-  utils.py                        Binary schema encoder
-packets-schema.json               Ordered UDP command layout
+  server.py                       WebSocket, UDP send/receive, camera/MJPEG
+  utils.py                        Binary schema encoder/decoder
+scripts/
+  udp_server_simulation.py        Command receiver
+  udp_telemetry_simulation.py     Battery telemetry sender
+packets-schema.json               Ordered command and telemetry layouts
 ```
 
 The backend is a separately launched local service. Electron does not spawn, restart, or terminate it.

@@ -1,6 +1,6 @@
 # Steam Deck Robot Monitor Frontend
 
-A Steam Deck-oriented Electron and Vue UI for viewing the backend MJPEG camera stream and controlling a differential-drive robot. Electron is only the desktop shell and settings store. Python/FastAPI owns camera capture, binary UDP encoding, and 50 Hz UDP transmission.
+A Steam Deck-oriented Electron and Vue UI for viewing the backend MJPEG camera stream and controlling a differential-drive robot. Electron is only the desktop shell and settings store. Python/FastAPI owns camera capture, binary UDP command transmission, and robot telemetry reception.
 
 ## Features
 
@@ -10,7 +10,8 @@ A Steam Deck-oriented Electron and Vue UI for viewing the backend MJPEG camera s
 - Configurable linear Y and angular theta limits
 - Settings drawer and built-in gamepad-navigable keyboard
 - Automatic backend WebSocket reconnect and current-state replay
-- Persistent camera source, RTSP credentials, UDP destination, velocity, and keyboard settings
+- Live/stale robot battery percentage in the Home HUD
+- Persistent camera source, RTSP credentials, UDP command destination, telemetry listening port, velocity, and keyboard settings
 
 ## Quick Start
 
@@ -47,7 +48,7 @@ For a single container that launches both frontend and backend from Steam, see t
 `useBackendConnection.js` owns the singleton WebSocket and reconnect lifecycle. It sends typed messages:
 
 ```json
-{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"camera_url":"rtsp://camera/stream"}}
+{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"udp_listen_port":8889,"camera_url":"rtsp://camera/stream"}}
 ```
 
 ```json
@@ -55,6 +56,8 @@ For a single container that launches both frontend and backend from Steam, see t
 ```
 
 `useControlState.js` owns the generic reactive packet object and coalesces changes to one publication per animation frame. Camera rendering points an HTML `<img>` directly at backend `/stream`.
+
+The backend broadcasts received telemetry as `{"type":"telemetry","packet":{"battery_level":75}}`. The renderer validates the percentage and marks the value stale after two seconds without another packet.
 
 ## Documentation
 

@@ -22,6 +22,20 @@
                     "max": 100.0
                 }
             ]
+        },
+        "telemetry": {
+            "byte_order": "little",
+            "header": "ITS",
+            "fields": [
+                {
+                    "name": "battery_level",
+                    "type": "uint8",
+                    "role": "batteryLevel",
+                    "unit": "percent",
+                    "min": 0,
+                    "max": 100
+                }
+            ]
         }
     }
 }

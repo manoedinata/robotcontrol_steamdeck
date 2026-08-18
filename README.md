@@ -2,16 +2,16 @@
 
 All-in-one camera and control UI for a differential-drive robot, designed for the Steam Deck.
 
-The application consists of a FastAPI backend that handles camera capture, binary UDP command encoding, and a 50 Hz sender, plus an Electron + Vue 3 frontend that provides the gamepad/touch/keyboard UI.
+The application consists of a FastAPI backend that handles camera capture, binary UDP command encoding, a 50 Hz command sender, and battery telemetry reception, plus an Electron + Vue 3 frontend that provides the gamepad/touch/keyboard UI and battery status.
 
 ## Repository Layout
 
 ```text
 backend/          FastAPI server and packet utilities
 frontend/         Electron/Vite/Vue UI
-scripts/          Local UDP receiver simulation
+scripts/          Local command receiver and telemetry sender simulations
 packaging/        Docker build and Steam launcher scripts
-packets-schema.json   Binary UDP command schema
+packets-schema.json   Binary UDP command and telemetry schemas
 Dockerfile        Multi-stage image that bundles FE + BE
 ```
 
@@ -103,7 +103,8 @@ Docker image build:
 Run backend tests inside the built container:
 
 ```bash
-docker run --rm --network host steamdeck-robot-monitor:latest python -m unittest test_utils
+docker run --rm --network host -v "$PWD:/app" -w /app/backend \
+	steamdeck-robot-monitor:latest python -m unittest test_utils
 ```
 
 Interactive runtime validation should be performed by the user on the target device.

@@ -24,7 +24,19 @@ SCHEMA = {
                     "max": 10,
                 },
             ],
-        }
+        },
+        "telemetry": {
+            "byte_order": "little",
+            "header": "ITS",
+            "fields": [
+                {
+                    "name": "battery_level",
+                    "type": "uint8",
+                    "min": 0,
+                    "max": 100,
+                }
+            ],
+        },
     }
 }
 
@@ -65,6 +77,38 @@ class BinaryPacketTests(unittest.TestCase):
         for value in (float("nan"), float("inf"), float("-inf")):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 utils.validate_packet_values({"vy": value}, SCHEMA)
+
+    def test_decoder_uses_named_schema_and_exact_layout(self) -> None:
+        packet = utils.decode_binary_packet(b"ITS\x4b", SCHEMA, "telemetry")
+
+        self.assertEqual(packet, {"battery_level": 75})
+
+    def test_decoder_rejects_wrong_header_and_length(self) -> None:
+        invalid_payloads = (b"BAD\x4b", b"ITS", b"ITS\x4b\x00")
+
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                utils.decode_binary_packet(payload, SCHEMA, "telemetry")
+
+    def test_decoder_applies_schema_bounds(self) -> None:
+        with self.assertRaises(ValueError):
+            utils.decode_binary_packet(b"ITS\xff", SCHEMA, "telemetry")
+
+    def test_unknown_packet_type_and_wire_type_are_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            utils.decode_binary_packet(b"", SCHEMA, "missing")
+
+        invalid_schema = {
+            "packet_types": {
+                "telemetry": {
+                    "byte_order": "little",
+                    "header": "ITS",
+                    "fields": [{"name": "value", "type": "string"}],
+                }
+            }
+        }
+        with self.assertRaises(ValueError):
+            utils.decode_binary_packet(b"ITS", invalid_schema, "telemetry")
 
 
 if __name__ == "__main__":

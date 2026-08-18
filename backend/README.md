@@ -1,6 +1,6 @@
 # Steam Deck Robot Monitor Backend
 
-FastAPI owns robot and camera transport for the Steam Deck UI. Vue sends configuration and control state over a local WebSocket; the backend sends the latest command as a binary UDP datagram at 50 Hz and exposes the configured camera as HTTP MJPEG.
+FastAPI owns robot and camera transport for the Steam Deck UI. Vue sends configuration and control state over a local WebSocket; the backend sends commands at 50 Hz, receives battery telemetry on a separate UDP port, and exposes the configured camera as HTTP MJPEG.
 
 ## Endpoints
 
@@ -11,7 +11,7 @@ FastAPI owns robot and camera transport for the Steam Deck UI. Vue sends configu
 Configuration message (RTSP credentials may be supplied as URL-encoded userinfo):
 
 ```json
-{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"camera_url":"rtsp://user:password@camera/stream"}}
+{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"udp_listen_port":8889,"camera_url":"rtsp://user:password@camera/stream"}}
 ```
 
 Control messages may update any subset of schema fields:
@@ -21,6 +21,12 @@ Control messages may update any subset of schema fields:
 ```
 
 Invalid messages receive `{"type":"error","message":"..."}` without closing the connection. Empty `udp_host` plus port `0` disables UDP. Empty `camera_url` leaves camera capture idle.
+
+Valid robot telemetry is broadcast to all connected UIs:
+
+```json
+{"type":"telemetry","packet":{"battery_level":75}}
+```
 
 ## Binary UDP Schema
 
@@ -33,6 +39,8 @@ The shipped command is exactly 11 bytes:
 | `0`    | 3    | ASCII                   | `ITS`    |
 | `3`    | 4    | little-endian `float32` | `vy`     |
 | `7`    | 4    | little-endian `float32` | `vtheta` |
+
+The telemetry receiver binds `0.0.0.0:8889` by default. Its packet is exactly 4 bytes: ASCII `ITS` followed by `battery_level` as a `uint8` percentage constrained to `0..100`. Packets with a wrong header, wrong length, or out-of-range value are discarded.
 
 Adding a Vue input requires adding its initial value to `useControlState.js`, binding the component through `updatePacket()`, and adding the corresponding ordered field to `packets-schema.json`. The WebSocket dispatcher and UDP encoder require no field-specific handler or offset.
 
@@ -67,15 +75,16 @@ python -m unittest test_utils
 To run the same tests inside the built container:
 
 ```bash
-docker run --rm --network host steamdeck-robot-monitor:latest python -m unittest test_utils
+docker run --rm --network host -v "$PWD/..:/app" -w /app/backend \
+	steamdeck-robot-monitor:latest python -m unittest test_utils
 ```
 
-`../scripts/udp_server_simulation.py` decodes received commands from the same schema for local diagnostics. Static validation does not require a camera or live UDP target.
+`../scripts/udp_server_simulation.py` decodes received commands. `../scripts/udp_telemetry_simulation.py 75` sends one schema-derived battery packet to the default telemetry port. Static validation does not require a camera or live UDP target.
 
 ## Limitations
 
 - Runtime state is shared by all connected UIs and requires one Uvicorn worker.
-- UDP is send-only in the current implementation; robot telemetry and acknowledgement are not exposed.
+- Telemetry currently contains only battery percentage; acknowledgement, sequence IDs, RTT, and loss are not implemented.
 - MJPEG re-encoding uses CPU and more bandwidth than forwarding compressed H.264/H.265.
 - OpenCV support and `CAP_PROP_BUFFERSIZE` behavior vary by platform.
 - RTSP credentials are supplied in `camera_url` userinfo and should not be written to logs.

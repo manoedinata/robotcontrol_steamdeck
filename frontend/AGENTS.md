@@ -13,7 +13,7 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 - `src/views/SettingsView.vue`: camera source, UDP destination, velocity limits, and keyboard settings.
 - `src/components/CameraFeed.vue`: backend MJPEG `<img>` and reconnect state.
 - `src/components/ControllerPanel.vue`: Y/theta input mapping and generic packet updates.
-- `src/composables/useBackendConnection.js`: singleton typed WebSocket transport, reconnect, replay, and backend stream URL.
+- `src/composables/useBackendConnection.js`: singleton typed WebSocket transport, telemetry freshness, reconnect, replay, and backend stream URL.
 - `src/composables/useControlState.js`: generic reactive command packet and frame-coalesced publication.
 - `src/composables/useSettings.js`: shared persisted settings and backend config synchronization.
 - `../packets-schema.json`: backend-owned binary UDP command layout.
@@ -34,8 +34,9 @@ The default backend base URL is `http://127.0.0.1:8000`; `VITE_BACKEND_URL` may 
 
 WebSocket messages are separated by `type`:
 
-- `{ "type": "config", "config": { "udp_host", "udp_port", "camera_url" } }`
+- `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_url" } }`
 - `{ "type": "control", "packet": { ...schemaFields } }`
+- Backend telemetry uses `{ "type": "telemetry", "packet": { "battery_level": 0..100 } }`.
 - Backend errors use `{ "type": "error", "message": "..." }`.
 
 Reconnect automatically and replay latest config before latest control state. Components must not create their own sockets.
@@ -64,6 +65,7 @@ Preserve this persisted contract:
   "maxThetaVelocity": 10,
   "udpHost": "192.168.1.30",
   "udpPort": 5000,
+  "udpListenPort": 8889,
   "useOnScreenKeyboard": true
 }
 ```

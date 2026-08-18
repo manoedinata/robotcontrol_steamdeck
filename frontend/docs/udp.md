@@ -12,6 +12,7 @@ Configuration:
   "config": {
     "udp_host": "127.0.0.1",
     "udp_port": 8888,
+    "udp_listen_port": 8889,
     "camera_url": "rtsp://camera/stream"
   }
 }
@@ -31,6 +32,14 @@ Control state:
 
 Control packets may contain a subset of schema fields. FastAPI validates those fields and merges them into the current complete state. Invalid messages receive a typed error response and do not close the socket. After reconnect, the renderer sends the latest config followed by latest control state.
 
+Robot telemetry uses the same WebSocket in the backend-to-renderer direction:
+
+```json
+{"type":"telemetry","packet":{"battery_level":75}}
+```
+
+The frontend accepts integer battery values in `0..100`, marks telemetry live on receipt, and marks it stale after two seconds without another valid packet.
+
 ## UDP Scheduling
 
 FastAPI caches the encoded command and sends it every 20 ms (50 Hz) while at least one UI WebSocket is connected and a complete UDP destination is enabled. Empty host plus port `0` disables sends. The final UI disconnect resets controls to schema defaults. No final stop datagram is sent; the robot must stop motion through a receive-timeout watchdog.
@@ -46,6 +55,8 @@ The shipped packet is 11 bytes:
 | `0`    | 3    | ASCII                   | `ITS` header |
 | `3`    | 4    | little-endian `float32` | `vy`         |
 | `7`    | 4    | little-endian `float32` | `vtheta`     |
+
+`packet_types.telemetry` defines the independent receive layout. The shipped telemetry datagram is 4 bytes: ASCII `ITS` followed by one `uint8 battery_level` percentage. FastAPI listens on the persisted `udpListenPort` setting (`8889` by default), binds all interfaces, and rebinds when the setting changes. Header and total length must match exactly.
 
 To add a command value, add it to the frontend packet state and to the ordered schema fields. No WebSocket dispatcher or encoder changes should be necessary.
 
@@ -117,4 +128,4 @@ For each field the backend checks:
 
 If validation fails, the backend replies with `{ "type": "error", "message": "..." }` and does not update the packet.
 
-UDP receive telemetry, battery state, RTT, and loss are not implemented in the current backend contract.
+Battery telemetry is implemented. Command acknowledgement, sequence IDs, exact RTT, and loss are not implemented.

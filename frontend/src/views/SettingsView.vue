@@ -15,6 +15,7 @@ const {
   maxThetaVelocity,
   udpHost,
   udpPort,
+  udpListenPort,
   useOnScreenKeyboard,
   saveSettings,
 } = useSettings()
@@ -29,6 +30,7 @@ const maxY = ref(maxYVelocity.value)
 const maxTheta = ref(maxThetaVelocity.value)
 const targetHost = ref(udpHost.value)
 const targetPort = ref(udpPort.value || '')
+const listenPort = ref(udpListenPort.value)
 const oskEnabled = ref(useOnScreenKeyboard.value)
 const activeKeyboard = ref(null)
 const settingsForm = ref(null)
@@ -48,9 +50,10 @@ const keyboardFields = {
   maxTheta: { label: 'Max Theta-velocity', layout: 'decimal', maxLength: 5 },
   targetHost: { label: 'UDP target host', layout: 'hostname', maxLength: 253 },
   targetPort: { label: 'UDP target port', layout: 'integer', maxLength: 5 },
+  listenPort: { label: 'UDP telemetry listen port', layout: 'integer', maxLength: 5 },
 }
 
-const fieldValues = { sourceIp, port, subpath, username, password, maxY, maxTheta, targetHost, targetPort }
+const fieldValues = { sourceIp, port, subpath, username, password, maxY, maxTheta, targetHost, targetPort, listenPort }
 
 function openKeyboard(fieldName) {
   if (!oskEnabled.value) return
@@ -153,6 +156,10 @@ watch(udpPort, (next) => {
   targetPort.value = next || ''
 }, { immediate: true })
 
+watch(udpListenPort, (next) => {
+  listenPort.value = next
+}, { immediate: true })
+
 watch(useOnScreenKeyboard, (next) => {
   oskEnabled.value = next
 }, { immediate: true })
@@ -184,6 +191,7 @@ async function persistSettings({ focusSave = false } = {}) {
       maxThetaVelocity: Number.parseFloat(maxTheta.value),
       udpHost: targetHost.value.trim(),
       udpPort: targetPort.value === '' ? 0 : Number.parseInt(targetPort.value, 10),
+      udpListenPort: Number.parseInt(listenPort.value, 10),
       useOnScreenKeyboard: oskEnabled.value,
     })
     settingsState.value = 'saved'
@@ -305,6 +313,14 @@ defineExpose({ saveBeforeClose })
             :inputmode="oskEnabled ? 'none' : 'numeric'" :readonly="oskEnabled" min="1" max="65535" placeholder="5000"
             data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
             @click="openKeyboard('targetPort')" @keydown="handleInputKeydown($event, 'targetPort')" />
+        </div>
+
+        <div class="settings-field">
+          <label for="udp-listen-port">Telemetry listen port</label>
+          <input id="udp-listen-port" v-model="listenPort" class="form-control" type="number"
+            :inputmode="oskEnabled ? 'none' : 'numeric'" :readonly="oskEnabled" min="1" max="65535" placeholder="8889"
+            required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
+            @click="openKeyboard('listenPort')" @keydown="handleInputKeydown($event, 'listenPort')" />
         </div>
       </div>
 

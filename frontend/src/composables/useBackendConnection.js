@@ -2,6 +2,7 @@ import { readonly, ref } from 'vue'
 
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:8000'
 const RECONNECT_DELAY_MS = 2000
+const TELEMETRY_STALE_MS = 2000
 
 const backendUrl = new URL(import.meta.env.VITE_BACKEND_URL || DEFAULT_BACKEND_URL)
 const websocketUrl = new URL('/ws/controls', backendUrl)
@@ -9,9 +10,12 @@ websocketUrl.protocol = backendUrl.protocol === 'https:' ? 'wss:' : 'ws:'
 
 const connectionState = ref('disconnected')
 const lastError = ref('')
+const telemetry = ref(null)
+const telemetryState = ref('waiting')
 const streamUrl = new URL('/stream', backendUrl).toString()
 let socket = null
 let reconnectTimer = null
+let telemetryTimer = null
 let shouldReconnect = false
 let latestConfig = null
 let latestPacket = null
@@ -25,6 +29,31 @@ function send(message) {
 function sendCurrentState() {
     if (latestConfig) send({ type: 'config', config: latestConfig })
     if (latestPacket) send({ type: 'control', packet: latestPacket })
+}
+
+function clearTelemetry() {
+    if (telemetryTimer !== null) {
+        clearTimeout(telemetryTimer)
+        telemetryTimer = null
+    }
+    telemetry.value = null
+    telemetryState.value = 'waiting'
+}
+
+function acceptTelemetry(message) {
+    const batteryLevel = message?.packet?.battery_level
+    if (!Number.isInteger(batteryLevel) || batteryLevel < 0 || batteryLevel > 100) {
+        console.warn('[backend] Ignored invalid telemetry message:', message)
+        return
+    }
+
+    telemetry.value = { battery_level: batteryLevel }
+    telemetryState.value = 'live'
+    if (telemetryTimer !== null) clearTimeout(telemetryTimer)
+    telemetryTimer = setTimeout(() => {
+        telemetryTimer = null
+        telemetryState.value = 'stale'
+    }, TELEMETRY_STALE_MS)
 }
 
 function scheduleReconnect() {
@@ -50,11 +79,14 @@ function connect() {
         sendCurrentState()
     })
     nextSocket.addEventListener('message', (event) => {
+        if (socket !== nextSocket) return
         try {
             const message = JSON.parse(event.data)
             if (message.type === 'error') {
                 lastError.value = message.message || 'Backend rejected a message.'
                 console.error('[backend]', lastError.value)
+            } else if (message.type === 'telemetry') {
+                acceptTelemetry(message)
             }
         } catch (error) {
             console.warn('[backend] Ignored invalid WebSocket response:', error)
@@ -67,6 +99,7 @@ function connect() {
         if (socket !== nextSocket) return
         socket = null
         connectionState.value = 'disconnected'
+        clearTelemetry()
         scheduleReconnect()
     })
 }
@@ -81,6 +114,7 @@ function disconnect() {
     socket = null
     activeSocket?.close()
     connectionState.value = 'disconnected'
+    clearTelemetry()
 }
 
 function updateConfig(config) {
@@ -97,6 +131,8 @@ export function useBackendConnection() {
     return {
         connectionState: readonly(connectionState),
         lastError: readonly(lastError),
+        telemetry: readonly(telemetry),
+        telemetryState: readonly(telemetryState),
         streamUrl,
         connect,
         disconnect,

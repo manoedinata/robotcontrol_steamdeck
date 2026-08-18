@@ -33,17 +33,20 @@ def hz_to_ms(hz: float) -> float:
     return hz_to_s(hz) * 1000.0
 
 
-def generate_default_state(schema: dict) -> dict:
+def packet_schema(schema: dict, packet_type: str = "command") -> dict:
+    try:
+        return schema["packet_types"][packet_type]
+    except KeyError as error:
+        raise ValueError(f"Unknown packet type: {packet_type}") from error
+
+
+def generate_default_state(schema: dict, packet_type: str = "command") -> dict:
     """Return the default state for a binary packet schema."""
-    fields = schema["packet_types"]["command"]["fields"]
+    fields = packet_schema(schema, packet_type)["fields"]
     return {
         field["name"]: field.get("default", default_for_wire_type(field["type"]))
         for field in fields
     }
-
-
-def command_schema(schema: dict) -> dict:
-    return schema["packet_types"]["command"]
 
 
 def default_for_wire_type(wire_type: str) -> int | float:
@@ -52,9 +55,13 @@ def default_for_wire_type(wire_type: str) -> int | float:
     return 0.0 if wire_type.startswith("float") else 0
 
 
-def validate_packet_values(packet: dict[str, Any], schema: dict) -> None:
+def validate_packet_values(
+    packet: dict[str, Any], schema: dict, packet_type: str = "command"
+) -> None:
     """Validate names, primitive types, and numeric ranges from the schema."""
-    fields = {field["name"]: field for field in command_schema(schema)["fields"]}
+    fields = {
+        field["name"]: field for field in packet_schema(schema, packet_type)["fields"]
+    }
     unknown = set(packet) - set(fields)
     if unknown:
         raise ValueError(f"Unknown packet fields: {sorted(unknown)}")
@@ -81,21 +88,69 @@ def validate_packet_values(packet: dict[str, Any], schema: dict) -> None:
             raise ValueError(f"Field {name!r} exceeds its maximum")
 
 
-def encode_binary_packet(packet: dict[str, Any], schema: dict) -> bytes:
-    """Encode a complete command packet using schema order and byte order."""
-    packet_schema = command_schema(schema)
-    validate_packet_values(packet, schema)
-    byte_order = {"little": "<", "big": ">"}[packet_schema["byte_order"]]
-    payload = bytearray(packet_schema["header"].encode("ascii"))
+def packet_struct(schema: dict, packet_type: str = "command") -> struct.Struct:
+    definition = packet_schema(schema, packet_type)
+    try:
+        byte_order = {"little": "<", "big": ">"}[definition["byte_order"]]
+        format_codes = "".join(
+            WIRE_TYPES[field["type"]][0] for field in definition["fields"]
+        )
+    except KeyError as error:
+        raise ValueError(f"Invalid {packet_type!r} packet schema: {error}") from error
+    return struct.Struct(byte_order + format_codes)
 
-    for field in packet_schema["fields"]:
+
+def encode_binary_packet(
+    packet: dict[str, Any], schema: dict, packet_type: str = "command"
+) -> bytes:
+    """Encode a complete packet using schema order and byte order."""
+    definition = packet_schema(schema, packet_type)
+    validate_packet_values(packet, schema, packet_type)
+    payload = bytearray(definition["header"].encode("ascii"))
+    value_struct = packet_struct(schema, packet_type)
+
+    values = []
+    for field in definition["fields"]:
         name = field["name"]
         if name not in packet:
             raise ValueError(f"Missing packet field: {name}")
-        format_code = WIRE_TYPES[field["type"]][0]
-        try:
-            payload.extend(struct.pack(f"{byte_order}{format_code}", packet[name]))
-        except struct.error as error:
-            raise ValueError(f"Could not encode field {name!r}: {error}") from error
+        values.append(packet[name])
+
+    try:
+        payload.extend(value_struct.pack(*values))
+    except struct.error as error:
+        raise ValueError(f"Could not encode {packet_type!r} packet: {error}") from error
 
     return bytes(payload)
+
+
+def decode_binary_packet(
+    payload: bytes, schema: dict, packet_type: str
+) -> dict[str, int | float]:
+    """Decode a packet only when its header and total length match the schema."""
+    definition = packet_schema(schema, packet_type)
+    try:
+        header = definition["header"].encode("ascii")
+    except (AttributeError, UnicodeEncodeError) as error:
+        raise ValueError(f"Invalid {packet_type!r} packet header") from error
+
+    value_struct = packet_struct(schema, packet_type)
+    expected_size = len(header) + value_struct.size
+    if len(payload) != expected_size:
+        raise ValueError(
+            f"Invalid {packet_type!r} packet length: expected {expected_size}, "
+            f"received {len(payload)}"
+        )
+    if not payload.startswith(header):
+        raise ValueError(f"Invalid {packet_type!r} packet header")
+
+    try:
+        values = value_struct.unpack(payload[len(header) :])
+    except struct.error as error:
+        raise ValueError(f"Could not decode {packet_type!r} packet: {error}") from error
+
+    packet = dict(
+        zip((field["name"] for field in definition["fields"]), values, strict=True)
+    )
+    validate_packet_values(packet, schema, packet_type)
+    return packet

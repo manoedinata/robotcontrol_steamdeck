@@ -3,7 +3,7 @@
 - Local development: the FastAPI backend must be started separately; Electron does not supervise it. The Docker path bundles and supervises both processes inside one container.
 - Backend runtime state is process-local and requires a single Uvicorn worker.
 - All connected UIs share one UDP destination, camera source, and control packet.
-- UDP is send-only. Robot telemetry, command acknowledgement, battery, RX rate, RTT, and loss are not implemented.
+- Robot telemetry currently exposes only battery percentage. Command acknowledgement, sequence IDs, RX rate, RTT, and loss are not implemented.
 - UDP is connectionless; robot motion shutdown depends on its receive-timeout watchdog.
 - Camera output is re-encoded to MJPEG through OpenCV, which uses CPU and more bandwidth than compressed H.264/H.265 forwarding.
 - OpenCV camera protocol/codec support and buffering behavior vary by platform.

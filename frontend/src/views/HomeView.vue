@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { Camera, Gamepad2, LoaderCircle, Server } from '@lucide/vue'
+import { Battery, Camera, Gamepad2, LoaderCircle, Server } from '@lucide/vue'
 import CameraFeed from '../components/CameraFeed.vue'
 import ControllerPanel from '../components/ControllerPanel.vue'
 import { useGamepad } from '../composables/useGamepad'
@@ -9,7 +9,7 @@ import { useBackendConnection } from '../composables/useBackendConnection'
 
 const { cameraUrl } = useSettings()
 const { gamepadName } = useGamepad()
-const { connectionState } = useBackendConnection()
+const { connectionState, telemetry, telemetryState } = useBackendConnection()
 const cameraState = ref('idle')
 
 const gamepadStatusLabel = computed(() => gamepadName.value
@@ -29,6 +29,16 @@ const backendStatusLabel = computed(() => ({
   connecting: 'Connecting',
   disconnected: 'Disconnected',
 }[connectionState.value] || 'Unavailable'))
+
+const batteryLevel = computed(() => telemetry.value?.battery_level)
+const batteryLabel = computed(() => batteryLevel.value === undefined
+  ? '--'
+  : `${batteryLevel.value}%`)
+const telemetryStatusLabel = computed(() => ({
+  live: `Battery ${batteryLabel.value}`,
+  stale: `Battery ${batteryLabel.value}, telemetry stale`,
+  waiting: 'Waiting for robot telemetry',
+}[telemetryState.value]))
 
 const statusLabel = computed(() => {
   if (cameraState.value === 'connected') return 'Connected'
@@ -72,7 +82,15 @@ const statusLabel = computed(() => {
           <span class="visually-hidden">Backend: {{ backendStatusLabel }}</span>
         </div>
       </div>
+    </div>
 
+    <div class="battery-telemetry" :title="telemetryStatusLabel" role="status" aria-live="polite">
+      <div class="connection-telemetry">
+        <Battery :size="20" aria-hidden="true" />
+        <span class="telemetry-value">{{ batteryLabel }}</span>
+        <span class="connection-dot" :class="{ connected: telemetryState === 'live' }" aria-hidden="true"></span>
+        <span class="visually-hidden">{{ telemetryStatusLabel }}</span>
+      </div>
     </div>
 
     <div class="control-mode" :class="{ connected: gamepadName }"
