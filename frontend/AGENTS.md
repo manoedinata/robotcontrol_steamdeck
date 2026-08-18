@@ -9,7 +9,7 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 - `main.js`: BrowserWindow, application lifecycle, settings load/save IPC, and Exit IPC.
 - `electron-components/preload.js`: narrow `quitApp`, `loadSettings`, and `saveSettings` bridge.
 - `src/App.vue`: persistent command shell, backend connection lifecycle, and Settings drawer state.
-- `src/views/HomeView.vue`: camera, backend/camera status, controller status, and control composition.
+- `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition.
 - `src/views/SettingsView.vue`: camera source, UDP destination, velocity limits, and keyboard settings.
 - `src/components/CameraFeed.vue`: backend MJPEG `<img>` and reconnect state.
 - `src/components/ControllerPanel.vue`: Y/theta input mapping and generic packet updates.
@@ -37,6 +37,7 @@ WebSocket messages are separated by `type`:
 - `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_url" } }`
 - `{ "type": "send", "packet": { ...schemaFields } }`
 - Backend telemetry uses `{ "type": "receive", "packet": { "battery_level": 0..100 } }`.
+- Backend host reachability uses `{ "type": "ping", "ping_ms": number | null }`; the value measures ICMP latency to the configured UDP destination, not command-datagram RTT.
 - Backend errors use `{ "type": "error", "message": "..." }`.
 
 Reconnect automatically and replay latest config before latest control state. Components must not create their own sockets.

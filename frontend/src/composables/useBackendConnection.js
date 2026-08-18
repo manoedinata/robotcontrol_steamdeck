@@ -12,6 +12,8 @@ const connectionState = ref('disconnected')
 const lastError = ref('')
 const telemetry = ref(null)
 const telemetryState = ref('waiting')
+const pingMs = ref(null)
+const pingState = ref('waiting')
 const streamUrl = new URL('/stream', backendUrl).toString()
 let socket = null
 let reconnectTimer = null
@@ -38,6 +40,18 @@ function clearTelemetry() {
     }
     telemetry.value = null
     telemetryState.value = 'waiting'
+    pingMs.value = null
+    pingState.value = 'waiting'
+}
+
+function acceptPing(message) {
+    const value = message?.ping_ms
+    if (value !== null && (!Number.isFinite(value) || value < 0)) {
+        console.warn('[backend] Ignored invalid ping message:', message)
+        return
+    }
+    pingMs.value = value
+    pingState.value = value === null ? 'unavailable' : 'live'
 }
 
 function acceptReceive(message) {
@@ -87,6 +101,8 @@ function connect() {
                 console.error('[backend]', lastError.value)
             } else if (message.type === 'receive') {
                 acceptReceive(message)
+            } else if (message.type === 'ping') {
+                acceptPing(message)
             }
         } catch (error) {
             console.warn('[backend] Ignored invalid WebSocket response:', error)
@@ -133,6 +149,8 @@ export function useBackendConnection() {
         lastError: readonly(lastError),
         telemetry: readonly(telemetry),
         telemetryState: readonly(telemetryState),
+        pingMs: readonly(pingMs),
+        pingState: readonly(pingState),
         streamUrl,
         connect,
         disconnect,

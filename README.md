@@ -2,7 +2,7 @@
 
 All-in-one camera and control UI for a differential-drive robot, designed for the Steam Deck.
 
-The application consists of a FastAPI backend that handles camera capture, binary UDP command encoding, a 50 Hz command sender, and battery telemetry reception, plus an Electron + Vue 3 frontend that provides the gamepad/touch/keyboard UI and battery status.
+The application consists of a FastAPI backend that handles camera capture, binary UDP command encoding, a 50 Hz command sender, battery telemetry reception, and host ping measurements, plus an Electron + Vue 3 frontend that provides the gamepad/touch/keyboard UI and telemetry HUD.
 
 ## Repository Layout
 

@@ -40,6 +40,14 @@ Robot telemetry uses the same WebSocket in the backend-to-renderer direction:
 
 The frontend accepts integer battery values in `0..100`, marks telemetry live on receipt, and marks it stale after two seconds without another valid packet.
 
+The backend also periodically measures ICMP host latency to the configured UDP destination and broadcasts it through the same WebSocket:
+
+```json
+{"type":"ping","ping_ms":12.4}
+```
+
+When the UDP destination is disabled or unreachable, `ping_ms` is `null`. The Home HUD displays this value as `Ping`; it is a host reachability measurement, not command-datagram RTT. Exact UDP command latency requires a robot acknowledgement or sequence ID, which is not part of the current packet schema.
+
 ## UDP Scheduling
 
 FastAPI caches the encoded command and sends it every 20 ms (50 Hz) while at least one UI WebSocket is connected and a complete UDP destination is enabled. Empty host plus port `0` disables sends. The final UI disconnect resets controls to schema defaults. No final stop datagram is sent; the robot must stop motion through a receive-timeout watchdog.
@@ -128,7 +136,7 @@ For each field the backend checks:
 
 If validation fails, the backend replies with `{ "type": "error", "message": "..." }` and does not update the packet.
 
-Battery telemetry is implemented. Command acknowledgement, sequence IDs, exact RTT, and loss are not implemented.
+Battery telemetry and host ping are implemented. Command acknowledgement, sequence IDs, exact UDP command RTT, and loss are not implemented.
 
 ## Adding a receive UDP packet
 

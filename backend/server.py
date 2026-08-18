@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import socket
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -17,6 +18,9 @@ import utils
 
 LOGGER = logging.getLogger(__name__)
 UDP_SEND_HZ = 50
+PING_INTERVAL_S = 2.0
+PING_TIMEOUT_S = 1.0
+PING_VALUE_PATTERN = re.compile(r"time[=<]([0-9]+(?:\.[0-9]+)?)\s*ms")
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "packets-schema.json"
 with SCHEMA_PATH.open(encoding="utf-8") as schema_file:
@@ -54,10 +58,21 @@ runtime = RuntimeState(
 )
 
 
+# os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+#     "rtsp_transport;udp|fflags;nobuffer|flags;low_delay"
+# )
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
     "rtsp_transport;udp|fflags;nobuffer|flags;low_delay"
 )
-
+# os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+#     "rtsp_transport;tcp|"  # TCP prevents dropped packets from causing decode stalls
+#     "fflags;nobuffer|"
+#     "flags;low_delay|"
+#     "strict;experimental|"
+#     "analyzeduration;0|"  # Skip stream analysis
+#     "probesize;32|"  # Drastically reduce probe size
+#     "sync;ext"  # Sync to external clock
+# )
 
 video_stream = MjpegStream(runtime.config.camera_url, logger=LOGGER)
 
@@ -131,6 +146,54 @@ async def broadcast_telemetry(packet: dict[str, Any]) -> None:
             for websocket in tuple(runtime.clients)
         )
     )
+
+
+async def broadcast_ping(ping_ms: float | None) -> None:
+    if not runtime.clients:
+        return
+
+    await asyncio.gather(
+        *(
+            send_client_message(
+                websocket,
+                {"type": "ping", "ping_ms": ping_ms},
+            )
+            for websocket in tuple(runtime.clients)
+        )
+    )
+
+
+async def udp_ping_loop() -> None:
+    """Measure reachability of the configured UDP destination for the HUD."""
+    while True:
+        if runtime.clients:
+            if not runtime.udp_enabled:
+                await broadcast_ping(None)
+                await asyncio.sleep(PING_INTERVAL_S)
+                continue
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    "ping",
+                    "-n",
+                    "-c",
+                    "1",
+                    "-W",
+                    str(int(PING_TIMEOUT_S)),
+                    runtime.config.udp_ip,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                output, _ = await asyncio.wait_for(
+                    process.communicate(), timeout=PING_TIMEOUT_S + 0.5
+                )
+                match = PING_VALUE_PATTERN.search(output.decode(errors="replace"))
+                ping_ms = (
+                    float(match.group(1)) if process.returncode == 0 and match else None
+                )
+            except (OSError, TimeoutError):
+                ping_ms = None
+            await broadcast_ping(ping_ms)
+        await asyncio.sleep(PING_INTERVAL_S)
 
 
 async def udp_loop() -> None:
@@ -256,6 +319,7 @@ async def lifespan(_app: FastAPI):
     udp_tasks = (
         asyncio.create_task(udp_loop(), name="udp-sender"),
         asyncio.create_task(udp_receive_loop(), name="udp-receiver"),
+        asyncio.create_task(udp_ping_loop(), name="udp-ping"),
     )
     try:
         yield

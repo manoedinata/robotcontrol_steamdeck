@@ -9,7 +9,7 @@ import { useBackendConnection } from '../composables/useBackendConnection'
 
 const { cameraUrl } = useSettings()
 const { gamepadName } = useGamepad()
-const { connectionState, telemetry, telemetryState } = useBackendConnection()
+const { telemetry, telemetryState, pingMs, pingState } = useBackendConnection()
 const cameraState = ref('idle')
 
 const gamepadStatusLabel = computed(() => gamepadName.value
@@ -24,11 +24,12 @@ const deviceAddress = computed(() => {
   }
 })
 
-const backendStatusLabel = computed(() => ({
-  connected: 'Connected',
-  connecting: 'Connecting',
-  disconnected: 'Disconnected',
-}[connectionState.value] || 'Unavailable'))
+const pingLabel = computed(() => pingMs.value === null ? '--' : `${Math.round(pingMs.value)} ms`)
+const pingStatusLabel = computed(() => ({
+  live: `UDP ping ${pingLabel.value}`,
+  unavailable: 'UDP ping unavailable',
+  waiting: 'Waiting for UDP ping',
+}[pingState.value]))
 
 const batteryLevel = computed(() => telemetry.value?.battery_level)
 const batteryLabel = computed(() => batteryLevel.value === undefined
@@ -72,14 +73,14 @@ const statusLabel = computed(() => {
 
       <div class="telemetry-divider" aria-hidden="true"></div>
 
-      <div class="udp-telemetry" :title="backendStatusLabel">
+      <div class="udp-telemetry" :title="pingStatusLabel">
         <div class="connection-telemetry">
           <Server :size="20" aria-hidden="true" />
-          <span class="telemetry-ip">Backend</span>
-          <LoaderCircle v-if="connectionState === 'connecting'" class="connection-spinner" :size="14"
-            aria-hidden="true" />
-          <span v-else class="connection-dot" :class="connectionState" aria-hidden="true"></span>
-          <span class="visually-hidden">Backend: {{ backendStatusLabel }}</span>
+          <span class="telemetry-ip">Ping</span>
+          <span class="telemetry-value ping-value">{{ pingLabel }}</span>
+          <LoaderCircle v-if="pingState === 'waiting'" class="connection-spinner" :size="14" aria-hidden="true" />
+          <span v-else class="connection-dot" :class="{ connected: pingState === 'live' }" aria-hidden="true"></span>
+          <span class="visually-hidden">{{ pingStatusLabel }}</span>
         </div>
       </div>
     </div>

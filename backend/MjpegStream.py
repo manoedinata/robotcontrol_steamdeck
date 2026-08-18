@@ -5,7 +5,7 @@ import asyncio
 import logging
 
 RTSP_RECONNECT_DELAY_S = 1.0
-JPEG_QUALITY = 60
+JPEG_QUALITY = 100
 MJPEG_BOUNDARY = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
 
 
@@ -103,10 +103,10 @@ class MjpegStream:
                     capture = cv2.VideoCapture(
                         capture_url,
                         cv2.CAP_FFMPEG,
-                        params=[
-                            cv2.CAP_PROP_HW_ACCELERATION,
-                            cv2.VIDEO_ACCELERATION_ANY,
-                        ],
+                        # params=[
+                        #     cv2.CAP_PROP_HW_ACCELERATION,
+                        #     cv2.VIDEO_ACCELERATION_ANY,
+                        # ],
                     )
 
                     capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)

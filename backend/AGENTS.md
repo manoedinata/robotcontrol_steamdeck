@@ -26,6 +26,7 @@ This directory is the sole owner of UDP and camera transport. Electron is only a
 - Send cached binary UDP bytes at 50 Hz only while a controls WebSocket is connected and UDP is enabled.
 - Reset controls to schema defaults after the final controls WebSocket disconnects.
 - Decode exact telemetry datagrams from `packet_types.receive` and broadcast `{ "type": "receive", "packet": { ... } }` to every connected UI.
+- Periodically measure ICMP latency to the configured UDP destination and broadcast `{ "type": "ping", "ping_ms": number | null }` to connected UIs. This is host reachability, not command acknowledgement RTT.
 - Keep blocking OpenCV capture off the asyncio event loop and idle when `camera_url` is empty.
 - Share one camera capture/JPEG encoder among HTTP stream subscribers.
 - Run one Uvicorn worker because runtime state is process-local.

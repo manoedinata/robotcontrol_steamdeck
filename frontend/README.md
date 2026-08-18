@@ -10,6 +10,7 @@ A Steam Deck-oriented Electron and Vue UI for viewing the backend MJPEG camera s
 - Configurable linear Y and angular theta limits
 - Settings drawer and built-in gamepad-navigable keyboard
 - Automatic backend WebSocket reconnect and current-state replay
+- Host ping latency to the configured UDP destination in the Home HUD
 - Live/stale robot battery percentage in the Home HUD
 - Persistent camera source, RTSP credentials, UDP command destination, telemetry listening port, velocity, and keyboard settings
 
@@ -58,6 +59,8 @@ For a single container that launches both frontend and backend from Steam, see t
 `useControlState.js` owns the generic reactive packet object and coalesces changes to one publication per animation frame. Camera rendering points an HTML `<img>` directly at backend `/stream`.
 
 The backend broadcasts received telemetry as `{"type":"receive","packet":{"battery_level":75}}`. The renderer validates the percentage and marks the value stale after two seconds without another packet.
+
+The backend also broadcasts host reachability as `{"type":"ping","ping_ms":12.4}` (or `null` when disabled/unreachable); the Home HUD displays it as `Ping`. This is not exact command-datagram RTT because the current robot protocol has no acknowledgement or sequence ID.
 
 ## Documentation
 
