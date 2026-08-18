@@ -267,7 +267,7 @@ async def broadcast_telemetry(packet: dict[str, Any]) -> None:
         *(
             send_client_message(
                 websocket,
-                {"type": "telemetry", "packet": packet},
+                {"type": "receive", "packet": packet},
             )
             for websocket in tuple(runtime.clients)
         )
@@ -373,7 +373,7 @@ async def udp_receive_loop() -> None:
                 continue
 
             try:
-                packet = utils.decode_binary_packet(payload, PACKET_SCHEMA, "telemetry")
+                packet = utils.decode_binary_packet(payload, PACKET_SCHEMA, "receive")
             except (TypeError, ValueError, KeyError) as error:
                 now = loop.time()
                 if now - last_error_log >= 1.0:
@@ -478,7 +478,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         f"clients={len(runtime.clients)}",
                         flush=True,
                     )
-                elif message_type == "control":
+                elif message_type == "send":
                     packet = incoming_data.get("packet", {})
                     if not isinstance(packet, dict):
                         raise ValueError("packet must be an object")
@@ -487,7 +487,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.packet_payload = encode_packet(next_packet)
                     runtime.current_packet = next_packet
                 else:
-                    raise ValueError("message type must be 'config' or 'control'")
+                    raise ValueError("message type must be 'config' or 'send'")
             except (TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
                 if not await send_client_message(
                     websocket, {"type": "error", "message": str(error)}

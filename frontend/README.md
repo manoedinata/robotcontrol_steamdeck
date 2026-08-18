@@ -52,12 +52,12 @@ For a single container that launches both frontend and backend from Steam, see t
 ```
 
 ```json
-{"type":"control","packet":{"vy":0,"vtheta":0}}
+{"type":"send","packet":{"vy":0,"vtheta":0}}
 ```
 
 `useControlState.js` owns the generic reactive packet object and coalesces changes to one publication per animation frame. Camera rendering points an HTML `<img>` directly at backend `/stream`.
 
-The backend broadcasts received telemetry as `{"type":"telemetry","packet":{"battery_level":75}}`. The renderer validates the percentage and marks the value stale after two seconds without another packet.
+The backend broadcasts received telemetry as `{"type":"receive","packet":{"battery_level":75}}`. The renderer validates the percentage and marks the value stale after two seconds without another packet.
 
 ## Documentation
 

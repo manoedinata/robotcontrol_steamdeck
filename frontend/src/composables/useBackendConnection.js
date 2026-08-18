@@ -28,7 +28,7 @@ function send(message) {
 
 function sendCurrentState() {
     if (latestConfig) send({ type: 'config', config: latestConfig })
-    if (latestPacket) send({ type: 'control', packet: latestPacket })
+    if (latestPacket) send({ type: 'send', packet: latestPacket })
 }
 
 function clearTelemetry() {
@@ -85,7 +85,7 @@ function connect() {
             if (message.type === 'error') {
                 lastError.value = message.message || 'Backend rejected a message.'
                 console.error('[backend]', lastError.value)
-            } else if (message.type === 'telemetry') {
+            } else if (message.type === 'receive') {
                 acceptTelemetry(message)
             }
         } catch (error) {
@@ -124,7 +124,7 @@ function updateConfig(config) {
 
 function updateControl(packet) {
     latestPacket = { ...packet }
-    send({ type: 'control', packet: latestPacket })
+    send({ type: 'send', packet: latestPacket })
 }
 
 export function useBackendConnection() {

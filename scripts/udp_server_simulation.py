@@ -21,7 +21,7 @@ UDP_PORT = 8888
 
 def load_packet_layout() -> tuple[bytes, struct.Struct, list[str]]:
     with SCHEMA_PATH.open(encoding="utf-8") as schema_file:
-        command = json.load(schema_file)["packet_types"]["command"]
+        command = json.load(schema_file)["packet_types"]["send"]
 
     byte_order = {"little": "<", "big": ">"}[command["byte_order"]]
     fields = command["fields"]

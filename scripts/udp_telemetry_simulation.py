@@ -19,7 +19,7 @@ WIRE_FORMATS = {
 
 def encode_battery_level(battery_level: int) -> bytes:
     with SCHEMA_PATH.open(encoding="utf-8") as schema_file:
-        telemetry = json.load(schema_file)["packet_types"]["telemetry"]
+        telemetry = json.load(schema_file)["packet_types"]["receive"]
 
     fields = telemetry["fields"]
     if [field["name"] for field in fields] != ["battery_level"]:

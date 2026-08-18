@@ -35,8 +35,8 @@ The default backend base URL is `http://127.0.0.1:8000`; `VITE_BACKEND_URL` may 
 WebSocket messages are separated by `type`:
 
 - `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_url" } }`
-- `{ "type": "control", "packet": { ...schemaFields } }`
-- Backend telemetry uses `{ "type": "telemetry", "packet": { "battery_level": 0..100 } }`.
+- `{ "type": "send", "packet": { ...schemaFields } }`
+- Backend telemetry uses `{ "type": "receive", "packet": { "battery_level": 0..100 } }`.
 - Backend errors use `{ "type": "error", "message": "..." }`.
 
 Reconnect automatically and replay latest config before latest control state. Components must not create their own sockets.

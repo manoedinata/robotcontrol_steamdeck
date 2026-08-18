@@ -1,7 +1,7 @@
 {
     "version": 1,
     "packet_types": {
-        "command": {
+        "send": {
             "byte_order": "little",
             "header": "ITS",
             "fields": [
@@ -23,7 +23,7 @@
                 }
             ]
         },
-        "telemetry": {
+        "receive": {
             "byte_order": "little",
             "header": "ITS",
             "fields": [

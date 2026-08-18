@@ -33,14 +33,14 @@ def hz_to_ms(hz: float) -> float:
     return hz_to_s(hz) * 1000.0
 
 
-def packet_schema(schema: dict, packet_type: str = "command") -> dict:
+def packet_schema(schema: dict, packet_type: str = "send") -> dict:
     try:
         return schema["packet_types"][packet_type]
     except KeyError as error:
         raise ValueError(f"Unknown packet type: {packet_type}") from error
 
 
-def generate_default_state(schema: dict, packet_type: str = "command") -> dict:
+def generate_default_state(schema: dict, packet_type: str = "send") -> dict:
     """Return the default state for a binary packet schema."""
     fields = packet_schema(schema, packet_type)["fields"]
     return {
@@ -56,7 +56,7 @@ def default_for_wire_type(wire_type: str) -> int | float:
 
 
 def validate_packet_values(
-    packet: dict[str, Any], schema: dict, packet_type: str = "command"
+    packet: dict[str, Any], schema: dict, packet_type: str = "send"
 ) -> None:
     """Validate names, primitive types, and numeric ranges from the schema."""
     fields = {
@@ -88,7 +88,7 @@ def validate_packet_values(
             raise ValueError(f"Field {name!r} exceeds its maximum")
 
 
-def packet_struct(schema: dict, packet_type: str = "command") -> struct.Struct:
+def packet_struct(schema: dict, packet_type: str = "send") -> struct.Struct:
     definition = packet_schema(schema, packet_type)
     try:
         byte_order = {"little": "<", "big": ">"}[definition["byte_order"]]
@@ -101,7 +101,7 @@ def packet_struct(schema: dict, packet_type: str = "command") -> struct.Struct:
 
 
 def encode_binary_packet(
-    packet: dict[str, Any], schema: dict, packet_type: str = "command"
+    packet: dict[str, Any], schema: dict, packet_type: str = "send"
 ) -> bytes:
     """Encode a complete packet using schema order and byte order."""
     definition = packet_schema(schema, packet_type)

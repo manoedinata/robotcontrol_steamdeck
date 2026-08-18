@@ -25,7 +25,7 @@ This directory is the sole owner of UDP and camera transport. Electron is only a
 - Supported wire types are `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `float32`, and `float64`.
 - Send cached binary UDP bytes at 50 Hz only while a controls WebSocket is connected and UDP is enabled.
 - Reset controls to schema defaults after the final controls WebSocket disconnects.
-- Decode exact telemetry datagrams from `packet_types.telemetry` and broadcast `{ "type": "telemetry", "packet": { ... } }` to every connected UI.
+- Decode exact telemetry datagrams from `packet_types.receive` and broadcast `{ "type": "receive", "packet": { ... } }` to every connected UI.
 - Keep blocking OpenCV capture off the asyncio event loop and idle when `camera_url` is empty.
 - Share one camera capture/JPEG encoder among HTTP stream subscribers.
 - Run one Uvicorn worker because runtime state is process-local.

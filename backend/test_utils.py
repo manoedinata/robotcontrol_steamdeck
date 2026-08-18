@@ -5,7 +5,7 @@ import utils
 
 SCHEMA = {
     "packet_types": {
-        "command": {
+        "send": {
             "byte_order": "little",
             "header": "ITS",
             "fields": [
@@ -25,7 +25,7 @@ SCHEMA = {
                 },
             ],
         },
-        "telemetry": {
+        "receive": {
             "byte_order": "little",
             "header": "ITS",
             "fields": [
@@ -79,7 +79,7 @@ class BinaryPacketTests(unittest.TestCase):
                 utils.validate_packet_values({"vy": value}, SCHEMA)
 
     def test_decoder_uses_named_schema_and_exact_layout(self) -> None:
-        packet = utils.decode_binary_packet(b"ITS\x4b", SCHEMA, "telemetry")
+        packet = utils.decode_binary_packet(b"ITS\x4b", SCHEMA, "receive")
 
         self.assertEqual(packet, {"battery_level": 75})
 
@@ -88,11 +88,11 @@ class BinaryPacketTests(unittest.TestCase):
 
         for payload in invalid_payloads:
             with self.subTest(payload=payload), self.assertRaises(ValueError):
-                utils.decode_binary_packet(payload, SCHEMA, "telemetry")
+                utils.decode_binary_packet(payload, SCHEMA, "receive")
 
     def test_decoder_applies_schema_bounds(self) -> None:
         with self.assertRaises(ValueError):
-            utils.decode_binary_packet(b"ITS\xff", SCHEMA, "telemetry")
+            utils.decode_binary_packet(b"ITS\xff", SCHEMA, "receive")
 
     def test_unknown_packet_type_and_wire_type_are_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -100,7 +100,7 @@ class BinaryPacketTests(unittest.TestCase):
 
         invalid_schema = {
             "packet_types": {
-                "telemetry": {
+                "receive": {
                     "byte_order": "little",
                     "header": "ITS",
                     "fields": [{"name": "value", "type": "string"}],
@@ -108,7 +108,7 @@ class BinaryPacketTests(unittest.TestCase):
             }
         }
         with self.assertRaises(ValueError):
-            utils.decode_binary_packet(b"ITS", invalid_schema, "telemetry")
+            utils.decode_binary_packet(b"ITS", invalid_schema, "receive")
 
 
 if __name__ == "__main__":

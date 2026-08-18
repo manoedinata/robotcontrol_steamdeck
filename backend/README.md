@@ -17,7 +17,7 @@ Configuration message (RTSP credentials may be supplied as URL-encoded userinfo)
 Control messages may update any subset of schema fields:
 
 ```json
-{"type":"control","packet":{"vy":1.5,"vtheta":-0.25}}
+{"type":"send","packet":{"vy":1.5,"vtheta":-0.25}}
 ```
 
 Invalid messages receive `{"type":"error","message":"..."}` without closing the connection. Empty `udp_host` plus port `0` disables UDP. Empty `camera_url` leaves camera capture idle.
@@ -25,7 +25,7 @@ Invalid messages receive `{"type":"error","message":"..."}` without closing the 
 Valid robot telemetry is broadcast to all connected UIs:
 
 ```json
-{"type":"telemetry","packet":{"battery_level":75}}
+{"type":"receive","packet":{"battery_level":75}}
 ```
 
 ## Binary UDP Schema
