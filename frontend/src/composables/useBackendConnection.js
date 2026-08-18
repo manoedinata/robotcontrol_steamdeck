@@ -40,7 +40,7 @@ function clearTelemetry() {
     telemetryState.value = 'waiting'
 }
 
-function acceptTelemetry(message) {
+function acceptReceive(message) {
     const batteryLevel = message?.packet?.battery_level
     if (!Number.isInteger(batteryLevel) || batteryLevel < 0 || batteryLevel > 100) {
         console.warn('[backend] Ignored invalid telemetry message:', message)
@@ -86,7 +86,7 @@ function connect() {
                 lastError.value = message.message || 'Backend rejected a message.'
                 console.error('[backend]', lastError.value)
             } else if (message.type === 'receive') {
-                acceptTelemetry(message)
+                acceptReceive(message)
             }
         } catch (error) {
             console.warn('[backend] Ignored invalid WebSocket response:', error)

@@ -129,3 +129,61 @@ For each field the backend checks:
 If validation fails, the backend replies with `{ "type": "error", "message": "..." }` and does not update the packet.
 
 Battery telemetry is implemented. Command acknowledgement, sequence IDs, exact RTT, and loss are not implemented.
+
+## Adding a receive UDP packet
+
+Receive packets use the independent `packet_types.receive` schema entry. The backend listens for these datagrams on `udp_listen_port`, decodes them, and broadcasts the decoded fields through the existing WebSocket as a `receive` message:
+
+```json
+{
+  "type": "receive",
+  "packet": {
+    "battery_level": 75
+  }
+}
+```
+
+To add a new receive packet or field, update each layer in this order.
+
+### 1. Declare the receive layout in the shared schema
+
+Edit [`packets-schema.json`](../../packets-schema.json) and append the field to `packet_types.receive.fields`. Define the wire type, field name, and any validation bounds. Field order determines the binary layout and must match the robot's packet encoder.
+
+Example: add a motor temperature in degrees Celsius as a signed 16-bit integer:
+
+```json
+{
+  "name": "motor_temperature",
+  "type": "int16",
+  "role": "motorTemperature",
+  "unit": "celsius",
+  "min": -40,
+  "max": 150
+}
+```
+
+The receive packet will now contain the `ITS` header, the existing `battery_level` byte, and the two-byte little-endian `motor_temperature` field. The backend requires the datagram header and total length to match the schema exactly.
+
+### 2. Confirm backend decoding
+
+The UDP receiver in [`backend/server.py`](../../backend/server.py) already decodes the complete packet with `decode_binary_packet(..., "receive")`. The generic codec in [`backend/utils.py`](../../backend/utils.py) derives field types, byte order, field order, and bounds from the schema, so no decoder change is needed for a normal new field.
+
+If the new packet is a separate receive packet with a different layout rather than an additional field, add another named entry under `packet_types` and update the receiver to select that packet type. Do not overload `packet_types.receive` with incompatible layouts.
+
+### 3. Broadcast and validate it in the frontend
+
+The backend broadcasts the decoded packet through the existing `/ws/controls` connection using `type: "receive"`. Update [`frontend/src/composables/useBackendConnection.js`](../src/composables/useBackendConnection.js) if the new fields require validation, normalization, or a dedicated reactive state object.
+
+For a simple numeric field, extend the accepted packet shape in `acceptReceive` and expose it through the composable. Then bind the value to the relevant HUD or view. Keep malformed or out-of-range values rejected rather than displaying untrusted WebSocket data.
+
+### 4. Update the simulator and tests
+
+Update [`scripts/udp_telemetry_simulation.py`](../../scripts/udp_telemetry_simulation.py) to encode the new field from `packet_types.receive`, or add a dedicated simulator when the packet has a different purpose. Add codec coverage in [`backend/test_utils.py`](../../backend/test_utils.py) for:
+
+- Correct field order and byte encoding.
+- Successful decoding of representative values.
+- Wrong header and exact-length rejection.
+- Minimum and maximum bounds.
+- Invalid wire values or malformed packets.
+
+Run the backend tests from `backend/` with `python -m unittest test_utils`, then build the frontend with `npm run build` after changing the WebSocket consumer or UI.
