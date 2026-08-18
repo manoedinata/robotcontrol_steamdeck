@@ -11,9 +11,9 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 - `src/App.vue`: persistent command shell, backend connection lifecycle, and Settings drawer state.
 - `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition.
 - `src/views/SettingsView.vue`: camera source, UDP destination, velocity limits, and keyboard settings.
-- `src/components/CameraFeed.vue`: backend MJPEG `<img>` and reconnect state.
+- `src/components/CameraFeed.vue`: backend WebRTC `<video>` negotiation and reconnect state.
 - `src/components/ControllerPanel.vue`: Y/theta input mapping and generic packet updates.
-- `src/composables/useBackendConnection.js`: singleton typed WebSocket transport, telemetry freshness, reconnect, replay, and backend stream URL.
+- `src/composables/useBackendConnection.js`: singleton typed WebSocket transport, telemetry freshness, reconnect, replay, and backend WebRTC signaling URL.
 - `src/composables/useControlState.js`: generic reactive command packet and frame-coalesced publication.
 - `src/composables/useSettings.js`: shared persisted settings and backend config synchronization.
 - `../packets-schema.json`: backend-owned binary UDP command layout.
@@ -71,11 +71,11 @@ Preserve this persisted contract:
 }
 ```
 
-Empty UDP host and port `0` disable transmission. The camera form supports HTTP and RTSP selections, preserves RTSP credentials in separate persisted fields, and does not preserve query/fragment data. Credentials are included only in the transient authenticated `camera_url` sent to the backend. Keep `useSettings.js` as the renderer source of truth.
+Empty UDP host and port `0` disable transmission. The camera form supports RTSP only, preserves credentials in separate persisted fields, and does not preserve query/fragment data. Credentials are included only in the transient authenticated `camera_url` sent to the backend. Keep `useSettings.js` as the renderer source of truth.
 
 ### Camera
 
-`CameraFeed.vue` must consume backend `/stream`; it never receives the configured source directly. Empty camera settings show idle. Image errors retry every two seconds. Do not restore Electron camera relays or bundled ffmpeg.
+`CameraFeed.vue` must negotiate backend `/offer`; it never contacts the configured source directly. Empty camera settings show idle. Peer errors retry every two seconds and peers are closed on URL changes/unmount. Do not restore Electron camera relays.
 
 ### UI and Navigation
 

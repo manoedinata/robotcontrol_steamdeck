@@ -5,10 +5,10 @@
 - All connected UIs share one UDP destination, camera source, and control packet.
 - Robot telemetry currently exposes only battery percentage. The HUD also shows ICMP host latency to the configured UDP destination, but command acknowledgement, sequence IDs, exact UDP command RTT, RX rate, and loss are not implemented.
 - UDP is connectionless; robot motion shutdown depends on its receive-timeout watchdog.
-- Camera output is re-encoded to MJPEG through OpenCV, which uses CPU and more bandwidth than compressed H.264/H.265 forwarding.
-- OpenCV camera protocol/codec support and buffering behavior vary by platform.
+- Camera playback requires a reachable RTSP source and FFmpeg/PyAV support through `aiortc`.
+- WebRTC ICE is currently configured for local Steam Deck/container playback; remote NAT traversal is not provided.
 - RTSP credentials are supported, but are stored in the local Electron settings file as plain text; protect access to that file.
-- The Settings form does not expose HTTPS or preserve URL queries and fragments.
+- The Settings form supports RTSP only and does not preserve URL queries or fragments.
 - `VITE_BACKEND_URL` is build-time configuration, and non-default endpoints require a matching Content Security Policy update.
 - Gamepad axis indices assume a conventional Steam Deck/gamepad mapping.
 - The built-in keyboard cannot disable Steam's global `Steam + X` overlay.

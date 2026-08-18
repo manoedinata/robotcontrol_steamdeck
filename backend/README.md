@@ -1,11 +1,11 @@
 # Steam Deck Robot Monitor Backend
 
-FastAPI owns robot and camera transport for the Steam Deck UI. Vue sends configuration and control state over a local WebSocket; the backend sends commands at 50 Hz, receives battery telemetry on a separate UDP port, and exposes the configured camera as HTTP MJPEG.
+FastAPI owns robot and camera transport for the Steam Deck UI. Vue sends configuration and control state over a local WebSocket; the backend sends commands at 50 Hz, receives battery telemetry on a separate UDP port, and converts the configured RTSP camera to local WebRTC.
 
 ## Endpoints
 
 - `WS /ws/controls`: typed configuration and control messages.
-- `GET /stream`: `multipart/x-mixed-replace` MJPEG for an HTML `<img>`.
+- `POST /offer`: WebRTC SDP signaling for a receive-only video peer.
 - `GET /health`: readiness probe used by the Docker entrypoint and external health checks.
 
 Configuration message (RTSP credentials may be supplied as URL-encoded userinfo):
@@ -62,7 +62,7 @@ The project image bundles the backend with the frontend. Inside the container th
 
 UDP transmission runs only while at least one controls WebSocket is connected and a complete destination is enabled. Disconnecting the final UI resets all controls to schema defaults. The app sends no special final stop datagram; the robot must enforce a UDP receive-timeout watchdog.
 
-Camera capture starts on demand for the first `/stream` subscriber. One background OpenCV worker captures and JPEG-encodes frames for all subscribers, reconnects after failures, responds to runtime URL changes, and stops after the final viewer disconnects.
+Each `/offer` creates an aiortc peer and RTSP media player. Peers and players are closed when the connection fails, the camera URL changes, or FastAPI shuts down. The current deployment assumes the renderer and backend share the Steam Deck host; no STUN/TURN service is configured.
 
 ## Validation
 
@@ -85,6 +85,6 @@ docker run --rm --network host -v "$PWD/..:/app" -w /app/backend \
 
 - Runtime state is shared by all connected UIs and requires one Uvicorn worker.
 - Telemetry currently contains only battery percentage; acknowledgement, sequence IDs, RTT, and loss are not implemented.
-- MJPEG re-encoding uses CPU and more bandwidth than forwarding compressed H.264/H.265.
-- OpenCV support and `CAP_PROP_BUFFERSIZE` behavior vary by platform.
+- WebRTC requires a reachable RTSP source and FFmpeg support through the `aiortc`/PyAV dependencies.
+- The current WebRTC ICE configuration is intended for local host/container playback only.
 - RTSP credentials are supplied in `camera_url` userinfo and should not be written to logs.

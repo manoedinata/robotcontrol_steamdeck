@@ -1,11 +1,11 @@
 # Steam Deck Robot Monitor Frontend
 
-A Steam Deck-oriented Electron and Vue UI for viewing the backend MJPEG camera stream and controlling a differential-drive robot. Electron is only the desktop shell and settings store. Python/FastAPI owns camera capture, binary UDP command transmission, and robot telemetry reception.
+A Steam Deck-oriented Electron and Vue UI for viewing the backend WebRTC camera stream and controlling a differential-drive robot. Electron is only the desktop shell and settings store. Python/FastAPI owns RTSP camera transport, binary UDP command transmission, and robot telemetry reception.
 
 ## Features
 
 - Camera-first frameless UI for the Steam Deck's 1280x800 viewport
-- HTTP, HTTPS, and RTSP camera sources through backend `GET /stream`, with optional RTSP credentials
+- RTSP camera source through backend WebRTC signaling, with optional credentials
 - Pointer, touch, Steam Deck, and compatible gamepad controls
 - Configurable linear Y and angular theta limits
 - Settings drawer and built-in gamepad-navigable keyboard

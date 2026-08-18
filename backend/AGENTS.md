@@ -6,7 +6,8 @@ This directory is the sole owner of UDP and camera transport. Electron is only a
 
 ## Structure
 
-- `server.py`: FastAPI lifecycle, typed controls/telemetry WebSocket, UDP sender/receiver, and shared camera-to-MJPEG stream.
+- `server.py`: FastAPI lifecycle, typed controls/telemetry WebSocket, UDP sender/receiver, and WebRTC signaling endpoint.
+- `WebRTCStream.py`: per-peer RTSP media players and WebRTC lifecycle cleanup.
 - `settings.py`: mutable runtime destination and camera configuration.
 - `utils.py`: schema-derived packet defaults, validation, timing, binary encoding, and decoding.
 - `test_utils.py`: focused tests for binary layout and validation.
@@ -27,8 +28,8 @@ This directory is the sole owner of UDP and camera transport. Electron is only a
 - Reset controls to schema defaults after the final controls WebSocket disconnects.
 - Decode exact telemetry datagrams from `packet_types.receive` and broadcast `{ "type": "receive", "packet": { ... } }` to every connected UI.
 - Periodically measure ICMP latency to the configured UDP destination and broadcast `{ "type": "ping", "ping_ms": number | null }` to connected UIs. This is host reachability, not command acknowledgement RTT.
-- Keep blocking OpenCV capture off the asyncio event loop and idle when `camera_url` is empty.
-- Share one camera capture/JPEG encoder among HTTP stream subscribers.
+- Camera sources are RTSP URLs; an empty `camera_url` keeps playback idle.
+- Create and clean up one aiortc RTSP media player per WebRTC offer. Close all peers on URL changes and shutdown.
 - Run one Uvicorn worker because runtime state is process-local.
 - Container builds set `PYTHONPATH=/app/backend`; do not rely on the working directory for backend module imports.
 

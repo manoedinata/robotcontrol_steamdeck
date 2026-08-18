@@ -4,7 +4,7 @@ The Settings drawer stores camera source, UDP destination, velocity limits, and 
 
 ## Fields
 
-- Camera stream type: HTTP or RTSP.
+- Camera stream type: RTSP.
 - Camera source IP, port, and optional subpath.
 - Optional RTSP username and password.
 - UDP command target host/port and telemetry listening port.
@@ -31,7 +31,7 @@ Empty UDP host and port `0` disable command transmission. `udpListenPort` remain
 
 ## Camera Path
 
-The configured `cameraUrl` is sent to the backend as `camera_url`. FastAPI opens HTTP, HTTPS, or RTSP sources through OpenCV and exposes the result as MJPEG at `/stream`. `CameraFeed.vue` renders only this backend endpoint with `<img>`; it does not contact the source camera or Electron relay directly.
+The configured `cameraUrl` is sent to the backend as `camera_url`. FastAPI opens the RTSP source through aiortc/PyAV and exposes a receive-only WebRTC peer through `POST /offer`. `CameraFeed.vue` negotiates only with this backend endpoint and renders the returned media track in `<video>`; it does not contact the source camera or Electron relay directly.
 
 The renderer retries `/stream` two seconds after image errors. Camera state is connected only after the image begins loading successfully. Camera source URLs are not logged in full because they may contain credentials.
 

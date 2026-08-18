@@ -4,7 +4,7 @@ This repository contains a Steam Deck robot monitor: a FastAPI backend for camer
 
 ## Scope Boundaries
 
-- `backend/` owns WebSocket, HTTP, UDP send/receive, binary packet encoding/decoding, and OpenCV camera capture.
+- `backend/` owns WebSocket, HTTP, UDP send/receive, binary packet encoding/decoding, and RTSP-to-WebRTC camera transport.
 - `frontend/` owns the user interface, input handling, and renderer-side settings shape.
 - `packaging/` owns Docker image build and the Steam launcher script.
 - `packets-schema.json` is the single source of truth for the binary UDP command layout.

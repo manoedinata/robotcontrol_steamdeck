@@ -8,12 +8,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-import os
 
+from aiortc import RTCSessionDescription
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse
 import settings as settings_module
-from MjpegStream import MjpegStream
+from WebRTCStream import WebRTCStream
 import utils
 
 LOGGER = logging.getLogger(__name__)
@@ -58,23 +58,7 @@ runtime = RuntimeState(
 )
 
 
-# os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-#     "rtsp_transport;udp|fflags;nobuffer|flags;low_delay"
-# )
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-    "rtsp_transport;udp|fflags;nobuffer|flags;low_delay"
-)
-# os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-#     "rtsp_transport;tcp|"  # TCP prevents dropped packets from causing decode stalls
-#     "fflags;nobuffer|"
-#     "flags;low_delay|"
-#     "strict;experimental|"
-#     "analyzeduration;0|"  # Skip stream analysis
-#     "probesize;32|"  # Drastically reduce probe size
-#     "sync;ext"  # Sync to external clock
-# )
-
-video_stream = MjpegStream(runtime.config.camera_url, logger=LOGGER)
+video_stream = WebRTCStream(runtime.config.camera_url, logger=LOGGER)
 
 
 def validate_config(config: dict[str, Any]) -> tuple[str, int, int, str, bool]:
@@ -112,10 +96,9 @@ def validate_config(config: dict[str, Any]) -> tuple[str, int, int, str, bool]:
         raise ValueError("udp_listen_port must be in the range 1..65535")
     parsed_camera_url = urlparse(camera_url)
     if camera_url and (
-        parsed_camera_url.scheme not in {"http", "https", "rtsp"}
-        or not parsed_camera_url.hostname
+        parsed_camera_url.scheme != "rtsp" or not parsed_camera_url.hostname
     ):
-        raise ValueError("camera_url must be a valid HTTP, HTTPS, or RTSP URL")
+        raise ValueError("camera_url must be a valid RTSP URL")
     return udp_host, udp_port, udp_listen_port, camera_url, udp_enabled
 
 
@@ -329,7 +312,7 @@ async def lifespan(_app: FastAPI):
         for task in udp_tasks:
             with suppress(asyncio.CancelledError):
                 await task
-        video_stream.close()
+        await video_stream.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -341,19 +324,30 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/stream")
-async def video_feed(request: Request) -> StreamingResponse:
-    async def frames_generator():
-        async for frame in video_stream.frames():
-            # If the Vue UI tab is closed, break the infinite loop
-            if await request.is_disconnected():
-                break
-            yield frame
+@app.post("/offer")
+async def video_offer(request: Request) -> JSONResponse:
+    try:
+        params = await request.json()
+        if not isinstance(params, dict):
+            raise ValueError("WebRTC offer must be an object")
+        sdp = params.get("sdp")
+        offer_type = params.get("type")
+        if not isinstance(sdp, str) or not isinstance(offer_type, str):
+            raise ValueError("WebRTC offer requires string sdp and type fields")
 
-    return StreamingResponse(
-        frames_generator(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-    )
+        answer = await video_stream.create_answer(
+            RTCSessionDescription(sdp=sdp, type=offer_type)
+        )
+        return JSONResponse(
+            {"sdp": answer.sdp, "type": answer.type},
+        )
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    except Exception as error:
+        LOGGER.warning("WebRTC offer failed: %s", error)
+        return JSONResponse(
+            {"error": "Unable to open the camera stream"}, status_code=503
+        )
 
 
 @app.websocket("/ws/controls")
@@ -393,7 +387,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.config.udp_listen_port = udp_listen_port
                     runtime.config.camera_url = camera_url
                     runtime.udp_enabled = udp_enabled
-                    video_stream.update_url(camera_url)
+                    await video_stream.update_url(camera_url)
                     print(
                         "UDP config accepted: "
                         f"enabled={udp_enabled} destination="

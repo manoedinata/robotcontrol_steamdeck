@@ -20,7 +20,7 @@ const {
   saveSettings,
 } = useSettings()
 
-const streamType = ref('http')
+const streamType = ref('rtsp')
 const sourceIp = ref('')
 const port = ref('')
 const subpath = ref('')
@@ -97,7 +97,7 @@ function handleInputKeydown(event, fieldName) {
 
 function populateCameraFields(url) {
   if (!url) {
-    streamType.value = 'http'
+    streamType.value = 'rtsp'
     sourceIp.value = ''
     port.value = ''
     subpath.value = ''
@@ -108,7 +108,7 @@ function populateCameraFields(url) {
 
   try {
     const parsedUrl = new URL(url)
-    streamType.value = parsedUrl.protocol === 'rtsp:' ? 'rtsp' : 'http'
+    streamType.value = 'rtsp'
     sourceIp.value = parsedUrl.hostname
     port.value = parsedUrl.port
     subpath.value = parsedUrl.pathname
@@ -228,7 +228,7 @@ defineExpose({ saveBeforeClose })
         <Camera :size="20" aria-hidden="true" />
         <div>
           <h2>Camera feed</h2>
-          <p>Configure the camera stream source.</p>
+          <p>Configure the RTSP camera source.</p>
         </div>
       </div>
 
@@ -236,14 +236,9 @@ defineExpose({ saveBeforeClose })
         <fieldset class="settings-field settings-field-type">
           <legend>Stream type</legend>
           <div class="stream-type-options">
-            <label class="stream-type-option" for="stream-type-http">
-              <input id="stream-type-http" v-model="streamType" type="radio" value="http" name="stream-type"
-                data-gamepad-control />
-              <span>HTTP</span>
-            </label>
             <label class="stream-type-option" for="stream-type-rtsp">
               <input id="stream-type-rtsp" v-model="streamType" type="radio" value="rtsp" name="stream-type"
-                data-gamepad-control />
+                data-gamepad-control checked />
               <span>RTSP</span>
             </label>
           </div>

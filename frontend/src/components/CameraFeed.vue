@@ -6,17 +6,18 @@ import { useBackendConnection } from '../composables/useBackendConnection'
 
 const emit = defineEmits(['statusChange'])
 
-// Renders the backend MJPEG endpoint. The configured source URL is sent to the
-// backend through settings and is only used here to decide idle/retry state.
+// Negotiates a receive-only WebRTC peer with the backend. The configured source
+// URL is sent through settings and is only used here to decide idle/retry state.
 const { cameraUrl } = useSettings()
-const { streamUrl } = useBackendConnection()
+const { signalingUrl } = useBackendConnection()
 
-const cameraSource = ref('')
+const videoElement = ref(null)
 const cameraState = ref('idle')
 const cameraError = ref(null)
 const RECONNECT_DELAY_MS = 2000
 let connectionRequest = 0
 let reconnectTimer = null
+let peerConnection = null
 
 function clearReconnectTimer() {
   if (reconnectTimer !== null) {
@@ -35,13 +36,25 @@ function scheduleReconnect() {
   }, RECONNECT_DELAY_MS)
 }
 
-function connectCamera(nextUrl, preserveErrorState = false) {
+async function closePeer() {
+  const peer = peerConnection
+  peerConnection = null
+  if (!peer) return
+
+  peer.ontrack = null
+  peer.onconnectionstatechange = null
+  peer.close()
+  if (videoElement.value) videoElement.value.srcObject = null
+}
+
+async function connectCamera(nextUrl, preserveErrorState = false) {
   connectionRequest += 1
+  const requestId = connectionRequest
   const nextSource = nextUrl.trim()
 
   if (!nextSource) {
     clearReconnectTimer()
-    cameraSource.value = ''
+    await closePeer()
     cameraState.value = 'idle'
     cameraError.value = null
     return
@@ -51,37 +64,57 @@ function connectCamera(nextUrl, preserveErrorState = false) {
     cameraState.value = 'loading'
     cameraError.value = null
   }
-  cameraSource.value = ''
+  await closePeer()
   console.info('[camera] Loading camera stream', {
     protocol: nextSource.split(':', 1)[0],
     reconnecting: preserveErrorState,
   })
 
-  const separator = streamUrl.includes('?') ? '&' : '?'
-  cameraSource.value = `${streamUrl}${separator}attempt=${connectionRequest}`
+  const peer = new RTCPeerConnection()
+  peerConnection = peer
+  peer.addTransceiver('video', { direction: 'recvonly' })
+  peer.ontrack = (event) => {
+    if (peerConnection !== peer || requestId !== connectionRequest) return
+    videoElement.value.srcObject = event.streams[0] || new MediaStream([event.track])
+    cameraState.value = 'connected'
+    cameraError.value = null
+    clearReconnectTimer()
+  }
+  peer.onconnectionstatechange = () => {
+    if (peerConnection !== peer || requestId !== connectionRequest) return
+    if (['failed', 'closed', 'disconnected'].includes(peer.connectionState)) {
+      handleCameraError('WebRTC connection closed.')
+    }
+  }
+
+  try {
+    const offer = await peer.createOffer()
+    await peer.setLocalDescription(offer)
+    const response = await fetch(signalingUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sdp: peer.localDescription.sdp,
+        type: peer.localDescription.type,
+      }),
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}))
+      throw new Error(error.error || `WebRTC signaling failed (${response.status})`)
+    }
+    await peer.setRemoteDescription(await response.json())
+  } catch (error) {
+    if (peerConnection !== peer || requestId !== connectionRequest) return
+    await closePeer()
+    handleCameraError(error.message || 'WebRTC camera connection failed.')
+  }
 }
 
-function handleCameraReady(event) {
-  clearReconnectTimer()
-  cameraState.value = 'connected'
-  cameraError.value = null
-  console.info('[camera] Stream ready', {
-    width: event.currentTarget.naturalWidth,
-    height: event.currentTarget.naturalHeight,
-  })
-}
-
-function handleCameraError(event) {
-  const image = event.currentTarget
-  const detail = 'Image or MJPEG stream could not be loaded.'
-
+function handleCameraError(detail = 'WebRTC camera stream could not be loaded.') {
   cameraState.value = 'error'
   cameraError.value = detail
   console.error('[camera] Stream failed', {
     protocol: cameraUrl.value.split(':', 1)[0] || 'unknown',
-    complete: image.complete,
-    naturalWidth: image.naturalWidth,
-    naturalHeight: image.naturalHeight,
   })
   scheduleReconnect()
 }
@@ -95,14 +128,15 @@ watch(cameraState, (state) => emit('statusChange', state), { immediate: true })
 onUnmounted(() => {
   clearReconnectTimer()
   connectionRequest += 1
+  void closePeer()
 })
 </script>
 
 <template>
   <section class="camera-section">
     <div class="camera-viewport">
-      <img v-if="cameraSource" :src="cameraSource" alt="Live IP camera feed" @load="handleCameraReady"
-        @error="handleCameraError" />
+      <video v-show="cameraState === 'connected'" ref="videoElement" autoplay muted playsinline
+        aria-label="Live RTSP camera feed" />
       <div v-if="cameraState !== 'connected'" class="camera-message">
         <!-- Error: Unplug icon, else Camera icon -->
         <Camera v-if="cameraState !== 'error'" :size="34" aria-hidden="true" />

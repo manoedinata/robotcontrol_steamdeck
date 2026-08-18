@@ -14,7 +14,7 @@ const telemetry = ref(null)
 const telemetryState = ref('waiting')
 const pingMs = ref(null)
 const pingState = ref('waiting')
-const streamUrl = new URL('/stream', backendUrl).toString()
+const signalingUrl = new URL('/offer', backendUrl).toString()
 let socket = null
 let reconnectTimer = null
 let telemetryTimer = null
@@ -151,7 +151,7 @@ export function useBackendConnection() {
         telemetryState: readonly(telemetryState),
         pingMs: readonly(pingMs),
         pingState: readonly(pingState),
-        streamUrl,
+        signalingUrl,
         connect,
         disconnect,
         updateConfig,
