@@ -5,6 +5,7 @@ import signal
 import subprocess
 import tempfile
 from contextlib import suppress
+from socket import timeout as SocketTimeout
 from urllib.parse import urlencode
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -97,6 +98,7 @@ class _Go2RtcStream:
 
     STREAM_NAME = "robot-camera"
     API_URL = "http://127.0.0.1:1984"
+    API_TIMEOUT_SECONDS = 15
 
     def __init__(self, camera_url: str, logger: logging.Logger) -> None:
         self._logger = logger
@@ -118,7 +120,7 @@ class _Go2RtcStream:
             method=method,
             headers={"Content-Type": content_type} if body is not None else {},
         )
-        with urlopen(request, timeout=3) as response:
+        with urlopen(request, timeout=_Go2RtcStream.API_TIMEOUT_SECONDS) as response:
             return response.read()
 
     async def _api_request(
@@ -127,10 +129,21 @@ class _Go2RtcStream:
         path: str,
         body: bytes | None = None,
         content_type: str = "application/json",
+        phase: str = "go2rtc API request",
     ) -> bytes:
-        return await asyncio.to_thread(
-            self._request, method, f"{self.API_URL}{path}", body, content_type
-        )
+        try:
+            return await asyncio.to_thread(
+                self._request, method, f"{self.API_URL}{path}", body, content_type
+            )
+        except (OSError, SocketTimeout) as error:
+            self._logger.warning(
+                "go2rtc %s failed for %s %s: %s",
+                phase,
+                method,
+                path.split("?", 1)[0],
+                error,
+            )
+            raise
 
     async def _start(self) -> None:
         binary = os.environ.get("GO2RTC_BINARY", "go2rtc")
@@ -138,11 +151,12 @@ class _Go2RtcStream:
             process = subprocess.Popen(
                 [binary, "-config", self._create_config_file()],
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                stdout=None,
+                stderr=None,
                 start_new_session=True,
             )
         except OSError as error:
+            self._logger.error("Failed to start go2rtc backend: %s", error)
             raise RuntimeError(
                 f"go2rtc backend is unavailable: could not start {binary!r}"
             ) from error
@@ -153,7 +167,7 @@ class _Go2RtcStream:
                 await self._stop_process()
                 raise RuntimeError("go2rtc backend exited during startup")
             try:
-                await self._api_request("GET", "/api")
+                await self._api_request("GET", "/api", phase="startup health check")
                 return
             except (OSError, URLError):
                 await asyncio.sleep(0.1)
@@ -196,7 +210,11 @@ class _Go2RtcStream:
         if self._process is None or self._process.poll() is not None:
             await self._start()
         query = urlencode({"name": self.STREAM_NAME, "src": camera_url})
-        await self._api_request("PUT", f"/api/streams?{query}")
+        await self._api_request(
+            "PUT",
+            f"/api/streams?{query}",
+            phase="RTSP stream registration",
+        )
         self._camera_url = camera_url
 
     async def update_url(self, camera_url: str) -> None:
@@ -219,6 +237,7 @@ class _Go2RtcStream:
                 f"/api/webrtc?src={self.STREAM_NAME}",
                 body,
                 "application/sdp",
+                "WebRTC SDP exchange",
             )
             return RTCSessionDescription(
                 sdp=answer_sdp.decode(),

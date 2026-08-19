@@ -52,6 +52,13 @@
     padding: 18px;
 }
 
+.camera-backend-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    padding: 0 18px 18px;
+}
+
 .velocity-settings-row,
 .udp-settings-row {
     display: grid;

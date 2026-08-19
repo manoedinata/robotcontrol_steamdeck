@@ -26,6 +26,27 @@ function clearReconnectTimer() {
   }
 }
 
+function waitForIceGatheringComplete(peer, timeoutMs = 5000) {
+  if (peer.iceGatheringState === 'complete') return Promise.resolve()
+
+  return new Promise((resolve) => {
+    let timeoutId = null
+
+    const finish = () => {
+      peer.removeEventListener('icegatheringstatechange', handleStateChange)
+      if (timeoutId !== null) clearTimeout(timeoutId)
+      resolve()
+    }
+
+    const handleStateChange = () => {
+      if (peer.iceGatheringState === 'complete') finish()
+    }
+
+    peer.addEventListener('icegatheringstatechange', handleStateChange)
+    timeoutId = setTimeout(finish, timeoutMs)
+  })
+}
+
 function scheduleReconnect() {
   clearReconnectTimer()
   if (!cameraUrl.value.trim()) return
@@ -90,6 +111,10 @@ async function connectCamera(nextUrl, preserveErrorState = false) {
   try {
     const offer = await peer.createOffer()
     await peer.setLocalDescription(offer)
+    await waitForIceGatheringComplete(peer)
+
+    if (peerConnection !== peer || requestId !== connectionRequest) return
+
     const response = await fetch(signalingUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
