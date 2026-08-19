@@ -1,6 +1,6 @@
 # Steam Deck Robot Monitor Backend
 
-FastAPI owns robot and camera transport for the Steam Deck UI. Vue sends configuration and control state over a local WebSocket; the backend sends commands at 50 Hz, receives battery telemetry on a separate UDP port, and converts the configured RTSP camera to local WebRTC through the selected camera backend.
+FastAPI owns robot transport and RTSP camera transport for the Steam Deck UI. Vue sends configuration and control state over a local WebSocket; the backend sends commands at 50 Hz, receives battery telemetry on a separate UDP port, and converts RTSP to local WebRTC through the selected camera backend. Direct camera WebSocket H.264 playback bypasses this camera path and sends an empty `camera_url` to keep RTSP idle.
 
 ## Endpoints
 

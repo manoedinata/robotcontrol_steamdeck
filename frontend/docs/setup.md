@@ -4,7 +4,8 @@
 
 - Node.js `22+` and npm
 - Python 3.10+, FastAPI, Uvicorn, and OpenCV Python
-- A reachable RTSP camera when camera display is needed
+- A reachable RTSP camera or camera WebSocket endpoint when camera display is needed
+- Electron/Chromium WebCodecs H.264 support for direct WebSocket camera mode
 - A UDP robot endpoint when command transmission is needed
 - Docker or Podman (for the bundled Steam container path)
 

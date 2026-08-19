@@ -6,11 +6,13 @@ import { useBackendConnection } from './useBackendConnection'
 const DEFAULT_MAX_VELOCITY = 10
 const DEFAULT_UDP_LISTEN_PORT = 8889
 const DEFAULT_CAMERA_BACKEND = 'go2rtc'
+const DEFAULT_CAMERA_TYPE = 'rtsp'
 
 // Shared reactive settings state. A single module-level instance keeps the
 // camera URL and velocity limits in sync across every view without prop
 // drilling.
 const cameraUrl = ref('')
+const cameraType = ref(DEFAULT_CAMERA_TYPE)
 const cameraUsername = ref('')
 const cameraPassword = ref('')
 const cameraBackend = ref(DEFAULT_CAMERA_BACKEND)
@@ -42,7 +44,8 @@ function syncBackendConfig() {
         udp_host: udpHost.value.trim(),
         udp_port: udpPort.value,
         udp_listen_port: udpListenPort.value,
-        camera_url: buildBackendCameraUrl(),
+        // Direct camera WebSockets bypass the backend camera transport.
+        camera_url: cameraType.value === 'websocket' ? '' : buildBackendCameraUrl(),
         camera_backend: cameraBackend.value,
     })
 }
@@ -64,8 +67,12 @@ function parseStoredCameraSettings(settings) {
         // Keep malformed legacy values visible in Settings for correction.
     }
 
+    const storedType = settings?.cameraType
+        ?? (sourceUrl.toLowerCase().startsWith('ws:') ? 'websocket' : DEFAULT_CAMERA_TYPE)
+
     return {
         url: normalizedUrl,
+        type: storedType === 'websocket' ? 'websocket' : DEFAULT_CAMERA_TYPE,
         username: settings?.cameraUsername ?? embeddedUsername,
         password: settings?.cameraPassword ?? embeddedPassword,
     }
@@ -74,6 +81,7 @@ function parseStoredCameraSettings(settings) {
 function applySettings(settings) {
     const cameraSettings = parseStoredCameraSettings(settings)
     cameraUrl.value = cameraSettings.url
+    cameraType.value = cameraSettings.type
     cameraUsername.value = cameraSettings.username
     cameraPassword.value = cameraSettings.password
     cameraBackend.value = settings?.cameraBackend ?? DEFAULT_CAMERA_BACKEND
@@ -112,6 +120,7 @@ export function useSettings() {
 
     return {
         cameraUrl: readonly(cameraUrl),
+        cameraType: readonly(cameraType),
         cameraUsername: readonly(cameraUsername),
         cameraPassword: readonly(cameraPassword),
         cameraBackend: readonly(cameraBackend),

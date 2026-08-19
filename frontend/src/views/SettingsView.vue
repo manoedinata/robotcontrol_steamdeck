@@ -9,6 +9,7 @@ const emit = defineEmits(['close'])
 
 const {
   cameraUrl,
+  cameraType,
   cameraUsername,
   cameraPassword,
   cameraBackend,
@@ -21,7 +22,7 @@ const {
   saveSettings,
 } = useSettings()
 
-const streamType = ref('rtsp')
+const streamType = ref(cameraType.value)
 const sourceIp = ref('')
 const port = ref('')
 const subpath = ref('')
@@ -99,7 +100,7 @@ function handleInputKeydown(event, fieldName) {
 
 function populateCameraFields(url) {
   if (!url) {
-    streamType.value = 'rtsp'
+    streamType.value = cameraType.value
     sourceIp.value = ''
     port.value = ''
     subpath.value = ''
@@ -110,7 +111,7 @@ function populateCameraFields(url) {
 
   try {
     const parsedUrl = new URL(url)
-    streamType.value = 'rtsp'
+    streamType.value = parsedUrl.protocol.toLowerCase() === 'ws:' ? 'websocket' : 'rtsp'
     sourceIp.value = parsedUrl.hostname
     port.value = parsedUrl.port
     subpath.value = parsedUrl.pathname
@@ -132,6 +133,10 @@ function decodeUrlComponent(value) {
 
 watch(cameraUrl, (nextUrl) => {
   populateCameraFields(nextUrl)
+}, { immediate: true })
+
+watch(cameraType, (next) => {
+  streamType.value = next
 }, { immediate: true })
 
 watch(cameraUsername, (next) => {
@@ -187,10 +192,11 @@ async function persistSettings({ focusSave = false } = {}) {
 
   try {
     const path = subpath.value.trim().replace(/^\/+/, '')
-    const cameraUrl = `${streamType.value}://${sourceIp.value.trim()}:${port.value}${path ? `/${path}` : ''}`
+    const cameraUrl = `${streamType.value === 'websocket' ? 'ws' : 'rtsp'}://${sourceIp.value.trim()}:${port.value}${streamType.value === 'rtsp' && path ? `/${path}` : ''}`
 
     await saveSettings({
       cameraUrl,
+      cameraType: streamType.value,
       cameraUsername: streamType.value === 'rtsp' ? username.value : '',
       cameraPassword: streamType.value === 'rtsp' ? password.value : '',
       cameraBackend: backend.value,
@@ -235,7 +241,7 @@ defineExpose({ saveBeforeClose })
         <Camera :size="20" aria-hidden="true" />
         <div>
           <h2>Camera feed</h2>
-          <p>Configure the RTSP camera source.</p>
+          <p>Configure the camera source and transport.</p>
         </div>
       </div>
 
@@ -247,6 +253,11 @@ defineExpose({ saveBeforeClose })
               <input id="stream-type-rtsp" v-model="streamType" type="radio" value="rtsp" name="stream-type"
                 data-gamepad-control checked />
               <span>RTSP</span>
+            </label>
+            <label class="stream-type-option" for="stream-type-websocket">
+              <input id="stream-type-websocket" v-model="streamType" type="radio" value="websocket" name="stream-type"
+                data-gamepad-control />
+              <span>WebSocket</span>
             </label>
           </div>
         </fieldset>
@@ -267,7 +278,7 @@ defineExpose({ saveBeforeClose })
             @click="openKeyboard('port')" @keydown="handleInputKeydown($event, 'port')" />
         </div>
 
-        <div class="settings-field settings-field-subpath">
+        <div v-if="streamType === 'rtsp'" class="settings-field settings-field-subpath">
           <label for="stream-subpath">Subpath <span>(optional)</span></label>
           <input id="stream-subpath" v-model.trim="subpath" class="form-control" type="text"
             :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" placeholder="video" autocomplete="off"
@@ -292,7 +303,7 @@ defineExpose({ saveBeforeClose })
         </div>
       </div>
 
-      <div class="camera-backend-row">
+      <div v-if="streamType === 'rtsp'" class="camera-backend-row">
         <div class="settings-field">
           <label for="camera-backend">WebRTC backend</label>
           <select id="camera-backend" v-model="backend" class="form-select" data-gamepad-control>

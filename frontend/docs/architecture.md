@@ -9,8 +9,8 @@ Vue renderer                    Electron main                 FastAPI backend
 -------------                   -------------                 ---------------
 Camera/control UI               BrowserWindow                WS /ws/controls
 Gamepad and touch input  <IPC>  Settings JSON                Binary UDP at 50 Hz
-Typed WebSocket client          Exit/lifecycle               POST /offer (WebRTC)
-Battery telemetry HUD                                       UDP telemetry receiver
+Typed WebSocket client          Exit/lifecycle               POST /offer (RTSP WebRTC)
+Direct camera WebSocket + H.264 canvas                    UDP telemetry receiver
 ```
 
 ### Docker / Steam deployment
@@ -30,7 +30,7 @@ Host Steam
                    +-- /app/config bind-mounted from host
 ```
 
-Electron has no robot or camera transport code. It exposes only `quitApp()`, `loadSettings()`, and `saveSettings(settings)` through a context-isolated preload. `nodeIntegration` remains disabled.
+Electron has no robot or camera relay transport code. The renderer may connect directly to the configured camera WebSocket and decode H.264 through WebCodecs; RTSP remains backend-owned. Electron exposes only `quitApp()`, `loadSettings()`, and `saveSettings(settings)` through a context-isolated preload. `nodeIntegration` remains disabled.
 
 Vue owns input interpretation and UI state. `useBackendConnection.js` owns one WebSocket, reconnects every two seconds, replays latest configuration and control state after connection, and tracks live/stale telemetry. `useControlState.js` owns the packet object and coalesces reactive updates per animation frame. `useSettings.js` persists the frontend settings shape, including the telemetry listening port, keeps RTSP credentials separate from the source URL, and translates them into backend configuration.
 

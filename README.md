@@ -1,6 +1,6 @@
 # Steam Deck Robot Monitor
 
-All-in-one RTSP camera and control UI for a differential-drive robot, designed for the Steam Deck.
+All-in-one camera and control UI for a differential-drive robot, designed for the Steam Deck. Camera input supports RTSP through backend WebRTC and direct camera WebSocket H.264 playback.
 
 The application consists of a FastAPI backend that handles camera transport, binary UDP command encoding, a 50 Hz command sender, battery telemetry reception, and host ping measurements, plus an Electron + Vue 3 frontend that provides the gamepad/touch/keyboard UI and telemetry HUD.
 
@@ -109,4 +109,4 @@ docker run --rm --network host -v "$PWD:/app" -w /app/backend \
 	steamdeck-robot-monitor:latest python -m unittest test_utils
 ```
 
-Interactive runtime validation should be performed by the user on the target device. Camera playback requires a reachable RTSP source; FastAPI converts it to local WebRTC for the Electron renderer through the selected camera backend.
+Interactive runtime validation should be performed by the user on the target device. RTSP playback requires a reachable RTSP source and is converted to local WebRTC by FastAPI. WebSocket playback requires a reachable camera WebSocket endpoint and an Electron build with WebCodecs H.264 support; the renderer sends `PlayStream2` and decodes frames directly.

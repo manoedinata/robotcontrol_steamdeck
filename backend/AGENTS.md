@@ -2,7 +2,7 @@
 
 ## Scope
 
-This directory is the sole owner of UDP and camera transport. Electron is only a UI shell and settings store; Vue communicates with this backend through local WebSocket and HTTP endpoints.
+This directory is the sole owner of UDP and RTSP camera transport. Electron is only a UI shell and settings store; Vue communicates with this backend through local WebSocket and HTTP endpoints. Direct camera WebSocket H.264 playback is renderer-owned and sends an empty backend `camera_url`.
 
 ## Structure
 

@@ -11,7 +11,8 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 - `src/App.vue`: persistent command shell, backend connection lifecycle, and Settings drawer state.
 - `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition.
 - `src/views/SettingsView.vue`: camera source, UDP destination, velocity limits, and keyboard settings.
-- `src/components/CameraFeed.vue`: backend WebRTC `<video>` negotiation and reconnect state.
+- `src/components/CameraFeed.vue`: RTSP backend WebRTC negotiation or direct camera WebSocket playback and reconnect state.
+- `src/composables/useCameraWebSocket.js`: direct camera WebSocket handshake and WebCodecs H.264 canvas playback.
 - `src/components/ControllerPanel.vue`: Y/theta input mapping and generic packet updates.
 - `src/composables/useBackendConnection.js`: singleton typed WebSocket transport, telemetry freshness, reconnect, replay, and backend WebRTC signaling URL.
 - `src/composables/useControlState.js`: generic reactive command packet and frame-coalesced publication.
@@ -59,6 +60,7 @@ Preserve this persisted contract:
 
 ```json
 {
+  "cameraType": "rtsp",
   "cameraUrl": "rtsp://192.168.1.20:554/video",
   "cameraUsername": "",
   "cameraPassword": "",
@@ -72,11 +74,11 @@ Preserve this persisted contract:
 }
 ```
 
-Empty UDP host and port `0` disable transmission. The camera form supports RTSP only, preserves credentials in separate persisted fields, and does not preserve query/fragment data. Credentials are included only in the transient authenticated `camera_url` sent to the backend. Keep `useSettings.js` as the renderer source of truth.
+Empty UDP host and port `0` disable transmission. The camera form supports RTSP and direct camera WebSocket mode. RTSP preserves credentials in separate persisted fields and sends them only in the transient authenticated `camera_url` sent to the backend. WebSocket mode stores `ws://<IP>:<port>` and sends an empty `camera_url` so the backend does not open RTSP. Keep `useSettings.js` as the renderer source of truth.
 
 ### Camera
 
-`CameraFeed.vue` must negotiate backend `/offer`; it never contacts the configured source or go2rtc directly. Empty camera settings show idle. Peer errors retry every two seconds and peers are closed on URL/backend changes and unmount. The selectable `cameraBackend` setting is sent as `camera_backend`; supported values are `go2rtc` and `aiortc`, with `go2rtc` as the default. Do not silently fall back between selected backends or restore Electron camera relays.
+`CameraFeed.vue` negotiates backend `/offer` only for RTSP. In WebSocket mode it connects directly to the configured camera, sends `PlayStream2`, and decodes H.264 through WebCodecs into a canvas. Empty camera settings show idle. Errors retry every two seconds and active transports are closed on URL/mode changes and unmount. The selectable `cameraBackend` setting remains for RTSP; supported values are `go2rtc` and `aiortc`, with `go2rtc` as the default. Do not silently fall back between selected backends or add Electron camera relays.
 
 ### UI and Navigation
 
