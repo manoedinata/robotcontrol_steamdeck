@@ -1,4 +1,5 @@
 const DEFAULT_CODEC = 'avc1.42E01E'
+const MAX_DECODE_QUEUE_SIZE = 2
 
 function findNalTypes(bytes) {
     const types = []
@@ -33,6 +34,8 @@ export function useCameraWebSocket(canvasElement, onStateChange) {
     let nextTimestamp = createTimestamp()
     let closed = false
     let connectionGeneration = 0
+    let waitingForKeyFrame = false
+    let pendingKeyFrame = null
 
     function report(state, error = null) {
         onStateChange(state, error)
@@ -46,12 +49,16 @@ export function useCameraWebSocket(canvasElement, onStateChange) {
         decoder?.close()
         decoder = null
         renderContext = null
+        waitingForKeyFrame = false
+        pendingKeyFrame = null
     }
 
     async function connect(url) {
         close()
         const generation = connectionGeneration
         closed = false
+        waitingForKeyFrame = false
+        pendingKeyFrame = null
         if (!url) {
             report('idle')
             return
@@ -64,6 +71,30 @@ export function useCameraWebSocket(canvasElement, onStateChange) {
         renderContext = canvasElement.value.getContext('2d', { alpha: false })
         if (!renderContext) throw new Error('Camera canvas could not be initialized.')
         report('loading')
+
+        function submitFrame(bytes, keyFrame) {
+            if (closed || !decoder || decoder.state === 'closed') return false
+            if (decoder.decodeQueueSize >= MAX_DECODE_QUEUE_SIZE) return false
+
+            decoder.decode(new EncodedVideoChunk({
+                type: keyFrame ? 'key' : 'delta',
+                timestamp: nextTimestamp(),
+                data: bytes,
+            }))
+            return true
+        }
+
+        function submitPendingKeyFrame() {
+            if (!pendingKeyFrame || !decoder || decoder.decodeQueueSize >= MAX_DECODE_QUEUE_SIZE) return
+            const bytes = pendingKeyFrame
+            pendingKeyFrame = null
+            try {
+                if (submitFrame(bytes, true)) waitingForKeyFrame = false
+                else pendingKeyFrame = bytes
+            } catch (error) {
+                report('error', error.message || 'Camera keyframe could not be decoded.')
+            }
+        }
 
         decoder = new VideoDecoder({
             output: (frame) => {
@@ -78,6 +109,7 @@ export function useCameraWebSocket(canvasElement, onStateChange) {
                 renderContext.drawImage(frame, 0, 0, canvasElement.value.width, canvasElement.value.height)
                 frame.close()
                 report('connected')
+                queueMicrotask(submitPendingKeyFrame)
             },
             error: (error) => {
                 if (!closed) report('error', error.message || 'H.264 decoder failed.')
@@ -107,12 +139,22 @@ export function useCameraWebSocket(canvasElement, onStateChange) {
                 if (socket !== nextSocket || closed || typeof event.data === 'string') return
                 const bytes = new Uint8Array(event.data)
                 if (!bytes.length || decoder?.state === 'closed') return
+                const keyFrame = isKeyFrame(bytes)
+
+                if (waitingForKeyFrame) {
+                    if (keyFrame) pendingKeyFrame = bytes
+                    submitPendingKeyFrame()
+                    return
+                }
+
+                if (decoder.decodeQueueSize >= MAX_DECODE_QUEUE_SIZE) {
+                    waitingForKeyFrame = true
+                    if (keyFrame) pendingKeyFrame = bytes
+                    return
+                }
+
                 try {
-                    decoder.decode(new EncodedVideoChunk({
-                        type: isKeyFrame(bytes) ? 'key' : 'delta',
-                        timestamp: nextTimestamp(),
-                        data: bytes,
-                    }))
+                    submitFrame(bytes, keyFrame)
                 } catch (error) {
                     report('error', error.message || 'Camera frame could not be decoded.')
                 }
