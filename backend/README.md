@@ -1,6 +1,6 @@
 # Steam Deck Robot Monitor Backend
 
-FastAPI owns robot and camera transport for the Steam Deck UI. Vue sends configuration and control state over a local WebSocket; the backend sends commands at 50 Hz, receives battery telemetry on a separate UDP port, and converts the configured RTSP camera to local WebRTC.
+FastAPI owns robot and camera transport for the Steam Deck UI. Vue sends configuration and control state over a local WebSocket; the backend sends commands at 50 Hz, receives battery telemetry on a separate UDP port, and converts the configured RTSP camera to local WebRTC through the selected camera backend.
 
 ## Endpoints
 
@@ -11,7 +11,7 @@ FastAPI owns robot and camera transport for the Steam Deck UI. Vue sends configu
 Configuration message (RTSP credentials may be supplied as URL-encoded userinfo):
 
 ```json
-{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"udp_listen_port":8889,"camera_url":"rtsp://user:password@camera/stream"}}
+{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"udp_listen_port":8889,"camera_url":"rtsp://user:password@camera/stream","camera_backend":"go2rtc"}}
 ```
 
 Control messages may update any subset of schema fields:
@@ -62,7 +62,9 @@ The project image bundles the backend with the frontend. Inside the container th
 
 UDP transmission runs only while at least one controls WebSocket is connected and a complete destination is enabled. Disconnecting the final UI resets all controls to schema defaults. The app sends no special final stop datagram; the robot must enforce a UDP receive-timeout watchdog.
 
-Each `/offer` creates an aiortc peer and RTSP media player. Peers and players are closed when the connection fails, the camera URL changes, or FastAPI shuts down. The current deployment assumes the renderer and backend share the Steam Deck host; no STUN/TURN service is configured.
+`camera_backend` defaults to `go2rtc`; `aiortc` remains available as an explicit alternative. With go2rtc, FastAPI starts a localhost-only go2rtc process on demand, configures the named `robot-camera` stream, and proxies `/offer` SDP to go2rtc. The go2rtc API listens on `127.0.0.1:1984` and WebRTC media uses port `8555`. Set `GO2RTC_BINARY` to override the executable path during local development. A selected but unavailable go2rtc binary reports a camera error and does not silently fall back to aiortc.
+
+With aiortc, each `/offer` creates an aiortc peer and RTSP media player. Camera backends are closed when the camera URL/backend changes or FastAPI shuts down. The current deployment assumes the renderer and backend share the Steam Deck host; no STUN/TURN service is configured.
 
 ## Validation
 
@@ -85,6 +87,6 @@ docker run --rm --network host -v "$PWD/..:/app" -w /app/backend \
 
 - Runtime state is shared by all connected UIs and requires one Uvicorn worker.
 - Telemetry currently contains only battery percentage; acknowledgement, sequence IDs, RTT, and loss are not implemented.
-- WebRTC requires a reachable RTSP source and FFmpeg support through the `aiortc`/PyAV dependencies.
+- WebRTC requires a reachable RTSP source. go2rtc is bundled in Docker and may use FFmpeg for codec conversion; local development requires `GO2RTC_BINARY` or a `go2rtc` executable on `PATH`.
 - The current WebRTC ICE configuration is intended for local host/container playback only.
 - RTSP credentials are supplied in `camera_url` userinfo and should not be written to logs.

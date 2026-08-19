@@ -4,6 +4,11 @@
 
 FROM python:3.12-slim-bookworm
 
+ARG GO2RTC_VERSION=1.9.14
+ARG TARGETARCH
+ARG GO2RTC_SHA256_AMD64=32d616af226bd731678ffde328b94cfb94e30339bfefc469cfb76323144615a6
+ARG GO2RTC_SHA256_ARM64=359fabade8a7a51e81a55fe6df6b0ef81764a5e1d63179577534eaaa71904b50
+
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -13,6 +18,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     # The renderer should connect to the backend at the same host.
     VITE_BACKEND_URL=http://127.0.0.1:8000 \
     APP_SETTINGS_DIR=/app/config
+
+# Change APT mirror to kartolo.sby.datautama.net.id
+RUN sed -i 's|http://deb.debian.org/debian|https://kartolo.sby.datautama.net.id/debian|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's|http://deb.debian.org/debian|https://kartolo.sby.datautama.net.id/debian|g' /etc/apt/sources.list
 
 # Install runtime dependencies:
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -49,6 +58,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# go2rtc is a single static binary. Docker's TARGETARCH selects the matching
+# Steam Deck/container architecture while GO2RTC_VERSION keeps upgrades explicit.
+RUN case "${TARGETARCH:-amd64}" in \
+    amd64) GO2RTC_ARCH=amd64; GO2RTC_SHA256="${GO2RTC_SHA256_AMD64}" ;; \
+    arm64) GO2RTC_ARCH=arm64; GO2RTC_SHA256="${GO2RTC_SHA256_ARM64}" ;; \
+    *) echo "Unsupported go2rtc architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fL --retry 3 \
+    "https://github.com/AlexxIT/go2rtc/releases/download/v${GO2RTC_VERSION}/go2rtc_linux_${GO2RTC_ARCH}" \
+    -o /usr/local/bin/go2rtc \
+    && echo "${GO2RTC_SHA256}  /usr/local/bin/go2rtc" | sha256sum -c - \
+    && chmod 0755 /usr/local/bin/go2rtc \
+    && /usr/local/bin/go2rtc --version
 
 # Install Node.js 22 LTS alongside the system python base image.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \

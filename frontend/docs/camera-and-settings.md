@@ -7,6 +7,7 @@ The Settings drawer stores camera source, UDP destination, velocity limits, and 
 - Camera stream type: RTSP.
 - Camera source IP, port, and optional subpath.
 - Optional RTSP username and password.
+- Camera backend: `go2rtc` (default) or `aiortc`.
 - UDP command target host/port and telemetry listening port.
 - Maximum linear Y and angular theta velocity, `0.1..100`.
 - Built-in on-screen keyboard toggle.
@@ -15,9 +16,10 @@ The persisted contract remains:
 
 ```json
 {
-  "cameraUrl": "http://192.168.1.20:8080/video",
+  "cameraUrl": "rtsp://192.168.1.20:554/video",
   "cameraUsername": "",
   "cameraPassword": "",
+  "cameraBackend": "go2rtc",
   "maxYVelocity": 10,
   "maxThetaVelocity": 10,
   "udpHost": "192.168.1.30",
@@ -31,9 +33,9 @@ Empty UDP host and port `0` disable command transmission. `udpListenPort` remain
 
 ## Camera Path
 
-The configured `cameraUrl` is sent to the backend as `camera_url`. FastAPI opens the RTSP source through aiortc/PyAV and exposes a receive-only WebRTC peer through `POST /offer`. `CameraFeed.vue` negotiates only with this backend endpoint and renders the returned media track in `<video>`; it does not contact the source camera or Electron relay directly.
+The configured `cameraUrl` and `cameraBackend` are sent to the backend as `camera_url` and `camera_backend`. With the default `go2rtc` backend, FastAPI starts a local go2rtc process on demand, configures the named RTSP stream, and proxies receive-only WebRTC signaling through `POST /offer`. `aiortc` remains available as an explicit alternative. `CameraFeed.vue` negotiates only with FastAPI and renders the returned media track in `<video>`; it does not contact go2rtc, the source camera, or an Electron relay directly.
 
-The renderer retries `/stream` two seconds after image errors. Camera state is connected only after the image begins loading successfully. Camera source URLs are not logged in full because they may contain credentials.
+Camera errors are surfaced by the WebRTC connection and retried by the existing camera lifecycle. Camera source URLs are not logged in full because they may contain credentials. Local development can override the go2rtc executable with `GO2RTC_BINARY`; Docker bundles a pinned, checksum-verified binary.
 
 ## Built-in Keyboard
 

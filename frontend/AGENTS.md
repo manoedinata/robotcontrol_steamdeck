@@ -34,7 +34,7 @@ The default backend base URL is `http://127.0.0.1:8000`; `VITE_BACKEND_URL` may 
 
 WebSocket messages are separated by `type`:
 
-- `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_url" } }`
+- `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_url", "camera_backend" } }`
 - `{ "type": "send", "packet": { ...schemaFields } }`
 - Backend telemetry uses `{ "type": "receive", "packet": { "battery_level": 0..100 } }`.
 - Backend host reachability uses `{ "type": "ping", "ping_ms": number | null }`; the value measures ICMP latency to the configured UDP destination, not command-datagram RTT.
@@ -59,9 +59,10 @@ Preserve this persisted contract:
 
 ```json
 {
-  "cameraUrl": "http://192.168.1.20:8080/video",
+  "cameraUrl": "rtsp://192.168.1.20:554/video",
   "cameraUsername": "",
   "cameraPassword": "",
+  "cameraBackend": "go2rtc",
   "maxYVelocity": 10,
   "maxThetaVelocity": 10,
   "udpHost": "192.168.1.30",
@@ -75,7 +76,7 @@ Empty UDP host and port `0` disable transmission. The camera form supports RTSP 
 
 ### Camera
 
-`CameraFeed.vue` must negotiate backend `/offer`; it never contacts the configured source directly. Empty camera settings show idle. Peer errors retry every two seconds and peers are closed on URL changes/unmount. Do not restore Electron camera relays.
+`CameraFeed.vue` must negotiate backend `/offer`; it never contacts the configured source or go2rtc directly. Empty camera settings show idle. Peer errors retry every two seconds and peers are closed on URL/backend changes and unmount. The selectable `cameraBackend` setting is sent as `camera_backend`; supported values are `go2rtc` and `aiortc`, with `go2rtc` as the default. Do not silently fall back between selected backends or restore Electron camera relays.
 
 ### UI and Navigation
 

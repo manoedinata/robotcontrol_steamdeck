@@ -52,17 +52,26 @@ runtime = RuntimeState(
         udp_port=8888,
         udp_listen_port=8889,
         camera_url="rtsp://admin:password@127.0.0.1:554/stream",
+        camera_backend="go2rtc",
     ),
     current_packet=default_packet,
     packet_payload=encode_packet(default_packet),
 )
 
 
-video_stream = WebRTCStream(runtime.config.camera_url, logger=LOGGER)
+video_stream = WebRTCStream(
+    runtime.config.camera_url, logger=LOGGER, backend=runtime.config.camera_backend
+)
 
 
-def validate_config(config: dict[str, Any]) -> tuple[str, int, int, str, bool]:
-    allowed_keys = {"udp_host", "udp_port", "udp_listen_port", "camera_url"}
+def validate_config(config: dict[str, Any]) -> tuple[str, int, int, str, str, bool]:
+    allowed_keys = {
+        "udp_host",
+        "udp_port",
+        "udp_listen_port",
+        "camera_url",
+        "camera_backend",
+    }
     unknown_keys = set(config) - allowed_keys
     if unknown_keys:
         raise ValueError(f"Unknown config fields: {sorted(unknown_keys)}")
@@ -73,6 +82,7 @@ def validate_config(config: dict[str, Any]) -> tuple[str, int, int, str, bool]:
         "udp_listen_port", runtime.config.udp_listen_port
     )
     camera_url_value = config.get("camera_url", runtime.config.camera_url)
+    camera_backend_value = config.get("camera_backend", runtime.config.camera_backend)
     if not isinstance(udp_host_value, str):
         raise ValueError("udp_host must be a string")
     if isinstance(udp_port_value, bool) or not isinstance(udp_port_value, int):
@@ -83,6 +93,11 @@ def validate_config(config: dict[str, Any]) -> tuple[str, int, int, str, bool]:
         raise ValueError("udp_listen_port must be an integer")
     if not isinstance(camera_url_value, str):
         raise ValueError("camera_url must be a string")
+    if not isinstance(camera_backend_value, str) or camera_backend_value not in {
+        "go2rtc",
+        "aiortc",
+    }:
+        raise ValueError("camera_backend must be 'go2rtc' or 'aiortc'")
 
     udp_host = udp_host_value.strip()
     udp_port = udp_port_value
@@ -99,7 +114,14 @@ def validate_config(config: dict[str, Any]) -> tuple[str, int, int, str, bool]:
         parsed_camera_url.scheme != "rtsp" or not parsed_camera_url.hostname
     ):
         raise ValueError("camera_url must be a valid RTSP URL")
-    return udp_host, udp_port, udp_listen_port, camera_url, udp_enabled
+    return (
+        udp_host,
+        udp_port,
+        udp_listen_port,
+        camera_url,
+        camera_backend_value,
+        udp_enabled,
+    )
 
 
 async def send_client_message(websocket: WebSocket, message: dict[str, Any]) -> bool:
@@ -380,14 +402,16 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         udp_port,
                         udp_listen_port,
                         camera_url,
+                        camera_backend,
                         udp_enabled,
                     ) = validate_config(config)
                     runtime.config.udp_ip = udp_host
                     runtime.config.udp_port = udp_port
                     runtime.config.udp_listen_port = udp_listen_port
                     runtime.config.camera_url = camera_url
+                    runtime.config.camera_backend = camera_backend
                     runtime.udp_enabled = udp_enabled
-                    await video_stream.update_url(camera_url)
+                    await video_stream.update_config(camera_url, camera_backend)
                     print(
                         "UDP config accepted: "
                         f"enabled={udp_enabled} destination="
@@ -405,7 +429,13 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.current_packet = next_packet
                 else:
                     raise ValueError("message type must be 'config' or 'send'")
-            except (TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
+            except (
+                TypeError,
+                ValueError,
+                KeyError,
+                RuntimeError,
+                json.JSONDecodeError,
+            ) as error:
                 if not await send_client_message(
                     websocket, {"type": "error", "message": str(error)}
                 ):

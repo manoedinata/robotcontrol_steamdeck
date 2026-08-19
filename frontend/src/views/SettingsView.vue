@@ -11,6 +11,7 @@ const {
   cameraUrl,
   cameraUsername,
   cameraPassword,
+  cameraBackend,
   maxYVelocity,
   maxThetaVelocity,
   udpHost,
@@ -26,6 +27,7 @@ const port = ref('')
 const subpath = ref('')
 const username = ref(cameraUsername.value)
 const password = ref(cameraPassword.value)
+const backend = ref(cameraBackend.value)
 const maxY = ref(maxYVelocity.value)
 const maxTheta = ref(maxThetaVelocity.value)
 const targetHost = ref(udpHost.value)
@@ -140,6 +142,10 @@ watch(cameraPassword, (next) => {
   password.value = next
 }, { immediate: true })
 
+watch(cameraBackend, (next) => {
+  backend.value = next
+}, { immediate: true })
+
 watch(maxYVelocity, (next) => {
   maxY.value = next
 }, { immediate: true })
@@ -187,6 +193,7 @@ async function persistSettings({ focusSave = false } = {}) {
       cameraUrl,
       cameraUsername: streamType.value === 'rtsp' ? username.value : '',
       cameraPassword: streamType.value === 'rtsp' ? password.value : '',
+      cameraBackend: backend.value,
       maxYVelocity: Number.parseFloat(maxY.value),
       maxThetaVelocity: Number.parseFloat(maxTheta.value),
       udpHost: targetHost.value.trim(),
@@ -282,6 +289,16 @@ defineExpose({ saveBeforeClose })
             :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" autocomplete="current-password"
             data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('password')"
             @keydown="handleInputKeydown($event, 'password')" />
+        </div>
+      </div>
+
+      <div class="camera-backend-row">
+        <div class="settings-field">
+          <label for="camera-backend">WebRTC backend</label>
+          <select id="camera-backend" v-model="backend" class="form-select" data-gamepad-control>
+            <option value="go2rtc">go2rtc</option>
+            <option value="aiortc">aiortc</option>
+          </select>
         </div>
       </div>
 

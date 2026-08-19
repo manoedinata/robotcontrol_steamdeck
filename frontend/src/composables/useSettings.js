@@ -5,6 +5,7 @@ import { useBackendConnection } from './useBackendConnection'
 // a sensible value before settings load and if the bridge is unavailable.
 const DEFAULT_MAX_VELOCITY = 10
 const DEFAULT_UDP_LISTEN_PORT = 8889
+const DEFAULT_CAMERA_BACKEND = 'go2rtc'
 
 // Shared reactive settings state. A single module-level instance keeps the
 // camera URL and velocity limits in sync across every view without prop
@@ -12,6 +13,7 @@ const DEFAULT_UDP_LISTEN_PORT = 8889
 const cameraUrl = ref('')
 const cameraUsername = ref('')
 const cameraPassword = ref('')
+const cameraBackend = ref(DEFAULT_CAMERA_BACKEND)
 const maxYVelocity = ref(DEFAULT_MAX_VELOCITY)
 const maxThetaVelocity = ref(DEFAULT_MAX_VELOCITY)
 const udpHost = ref('')
@@ -41,6 +43,7 @@ function syncBackendConfig() {
         udp_port: udpPort.value,
         udp_listen_port: udpListenPort.value,
         camera_url: buildBackendCameraUrl(),
+        camera_backend: cameraBackend.value,
     })
 }
 
@@ -73,6 +76,7 @@ function applySettings(settings) {
     cameraUrl.value = cameraSettings.url
     cameraUsername.value = cameraSettings.username
     cameraPassword.value = cameraSettings.password
+    cameraBackend.value = settings?.cameraBackend ?? DEFAULT_CAMERA_BACKEND
     maxYVelocity.value = settings?.maxYVelocity ?? DEFAULT_MAX_VELOCITY
     maxThetaVelocity.value = settings?.maxThetaVelocity ?? DEFAULT_MAX_VELOCITY
     udpHost.value = settings?.udpHost ?? ''
@@ -110,6 +114,7 @@ export function useSettings() {
         cameraUrl: readonly(cameraUrl),
         cameraUsername: readonly(cameraUsername),
         cameraPassword: readonly(cameraPassword),
+        cameraBackend: readonly(cameraBackend),
         maxYVelocity: readonly(maxYVelocity),
         maxThetaVelocity: readonly(maxThetaVelocity),
         udpHost: readonly(udpHost),

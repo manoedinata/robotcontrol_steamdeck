@@ -23,6 +23,7 @@ Host Steam
            +-- container
                    +-- docker-entrypoint.sh
                    |       +-- uvicorn backend on 127.0.0.1:8000
+                   |               +-- managed go2rtc on 127.0.0.1:1984 / WebRTC :8555
                    |       +-- wait for /health
                    |       +-- Electron frontend on same host
                    |
@@ -33,7 +34,7 @@ Electron has no robot or camera transport code. It exposes only `quitApp()`, `lo
 
 Vue owns input interpretation and UI state. `useBackendConnection.js` owns one WebSocket, reconnects every two seconds, replays latest configuration and control state after connection, and tracks live/stale telemetry. `useControlState.js` owns the packet object and coalesces reactive updates per animation frame. `useSettings.js` persists the frontend settings shape, including the telemetry listening port, keeps RTSP credentials separate from the source URL, and translates them into backend configuration.
 
-FastAPI owns network configuration, schema-driven packet validation/encoding/decoding, the 50 Hz command task, the independently bound telemetry receiver, RTSP media players, and WebRTC signaling. `packets-schema.json` at the repository root is the binary packet source of truth.
+FastAPI owns network configuration, schema-driven packet validation/encoding/decoding, the 50 Hz command task, the independently bound telemetry receiver, camera backend selection, and WebRTC signaling. The default go2rtc backend is a FastAPI-managed localhost child process; aiortc remains an explicit in-process alternative. `packets-schema.json` at the repository root is the binary packet source of truth.
 
 The Docker image uses host networking so the frontend renderer continues to connect to `http://127.0.0.1:8000` without cross-container DNS. The entrypoint starts both processes, waits for backend readiness via `GET /health`, and shuts them down together when Electron exits. Settings are persisted in a bind-mounted host directory controlled by `APP_SETTINGS_DIR`.
 

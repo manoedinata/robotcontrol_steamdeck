@@ -2,7 +2,7 @@
 
 All-in-one RTSP camera and control UI for a differential-drive robot, designed for the Steam Deck.
 
-The application consists of a FastAPI backend that handles camera capture, binary UDP command encoding, a 50 Hz command sender, battery telemetry reception, and host ping measurements, plus an Electron + Vue 3 frontend that provides the gamepad/touch/keyboard UI and telemetry HUD.
+The application consists of a FastAPI backend that handles camera transport, binary UDP command encoding, a 50 Hz command sender, battery telemetry reception, and host ping measurements, plus an Electron + Vue 3 frontend that provides the gamepad/touch/keyboard UI and telemetry HUD.
 
 ## Repository Layout
 
@@ -72,6 +72,8 @@ Inside the image, `/usr/local/bin/docker-entrypoint.sh`:
 3. Starts Electron (`/app/frontend/main.js`) with the production renderer bundle
 4. Shuts down both processes together when Electron exits
 
+The image also bundles pinned, checksum-verified go2rtc binaries for `amd64` and `arm64`. FastAPI starts go2rtc on demand for the default `go2rtc` camera backend, using localhost API port `1984` and WebRTC listener port `8555`. The renderer still uses only FastAPI `POST /offer`. Select `aiortc` explicitly in Settings when that backend is required; there is no automatic fallback. For local development, `GO2RTC_BINARY` overrides the executable path.
+
 Settings are written under `/app/config`, which the launcher bind-mounts from the host config directory. Set `APP_SETTINGS_DIR` inside the container to change the settings path.
 
 ## Documentation
@@ -107,4 +109,4 @@ docker run --rm --network host -v "$PWD:/app" -w /app/backend \
 	steamdeck-robot-monitor:latest python -m unittest test_utils
 ```
 
-Interactive runtime validation should be performed by the user on the target device. Camera playback requires a reachable RTSP source; FastAPI converts it to local WebRTC for the Electron renderer.
+Interactive runtime validation should be performed by the user on the target device. Camera playback requires a reachable RTSP source; FastAPI converts it to local WebRTC for the Electron renderer through the selected camera backend.
