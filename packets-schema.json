@@ -9,7 +9,7 @@
                     "name": "pwm",
                     "type": "int8",
                     "role": "yVelocity",
-                    "default": -100,
+                    "default": 0,
                     "min": -100,
                     "max": 100
                 },
@@ -17,7 +17,7 @@
                     "name": "steering",
                     "type": "int8",
                     "role": "thetaVelocity",
-                    "default": -100,
+                    "default": 0,
                     "min": -100,
                     "max": 100
                 },
@@ -43,6 +43,32 @@
                     "unit": "percent",
                     "min": 0,
                     "max": 100
+                },
+                {
+                    "name": "padding_1",
+                    "type": "uint8",
+                    "role": "padding",
+                    "count": 15,
+                    "default": 0,
+                    "min": 0,
+                    "max": 255
+                },
+                {
+                    "name": "counter",
+                    "type": "uint32",
+                    "role": "telemetryCounter",
+                    "default": 0,
+                    "min": 0,
+                    "max": 4294967295
+                },
+                {
+                    "name": "padding_2",
+                    "type": "uint8",
+                    "role": "padding",
+                    "count": 41,
+                    "default": 0,
+                    "min": 0,
+                    "max": 255
                 }
             ]
         }
