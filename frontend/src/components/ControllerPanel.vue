@@ -35,7 +35,10 @@ function applyDeadZone(value, threshold = 0.12) {
 }
 
 function publishVelocity() {
-  updatePacket({ vy: yVelocity.value, vtheta: thetaVelocity.value })
+  updatePacket({
+    pwm: Math.round(yVelocity.value),
+    steering: Math.round(thetaVelocity.value),
+  })
 }
 
 watch([yVelocity, thetaVelocity], publishVelocity, { immediate: true })

@@ -2,8 +2,8 @@ import { readonly, reactive, watch } from 'vue'
 import { useBackendConnection } from './useBackendConnection'
 
 const packet = reactive({
-    vy: 0,
-    vtheta: 0,
+    pwm: 0,
+    steering: 0,
 })
 let publishFrame = null
 

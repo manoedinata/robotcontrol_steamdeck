@@ -3,29 +3,38 @@
     "packet_types": {
         "send": {
             "byte_order": "little",
-            "header": "ITS",
+            "header": "its",
             "fields": [
                 {
-                    "name": "vy",
-                    "type": "float32",
+                    "name": "pwm",
+                    "type": "int8",
                     "role": "yVelocity",
-                    "default": 0.0,
-                    "min": -100.0,
-                    "max": 100.0
+                    "default": -100,
+                    "min": -100,
+                    "max": 100
                 },
                 {
-                    "name": "vtheta",
-                    "type": "float32",
+                    "name": "steering",
+                    "type": "int8",
                     "role": "thetaVelocity",
-                    "default": 0.0,
-                    "min": -100.0,
-                    "max": 100.0
+                    "default": -100,
+                    "min": -100,
+                    "max": 100
+                },
+                {
+                    "name": "padding",
+                    "type": "uint8",
+                    "role": "padding",
+                    "count": 59,
+                    "default": 0,
+                    "min": 0,
+                    "max": 255
                 }
             ]
         },
         "receive": {
             "byte_order": "little",
-            "header": "ITS",
+            "header": "its",
             "fields": [
                 {
                     "name": "battery_level",

@@ -4,6 +4,8 @@ import { useBackendConnection } from './useBackendConnection'
 // Default velocity cap; mirrors the main-process default so the renderer shows
 // a sensible value before settings load and if the bridge is unavailable.
 const DEFAULT_MAX_VELOCITY = 10
+const DEFAULT_UDP_HOST = '127.0.0.1'
+const DEFAULT_UDP_PORT = 8888
 const DEFAULT_UDP_LISTEN_PORT = 8889
 const DEFAULT_CAMERA_BACKEND = 'go2rtc'
 const DEFAULT_CAMERA_TYPE = 'rtsp'
@@ -18,8 +20,8 @@ const cameraPassword = ref('')
 const cameraBackend = ref(DEFAULT_CAMERA_BACKEND)
 const maxYVelocity = ref(DEFAULT_MAX_VELOCITY)
 const maxThetaVelocity = ref(DEFAULT_MAX_VELOCITY)
-const udpHost = ref('')
-const udpPort = ref(0)
+const udpHost = ref(DEFAULT_UDP_HOST)
+const udpPort = ref(DEFAULT_UDP_PORT)
 const udpListenPort = ref(DEFAULT_UDP_LISTEN_PORT)
 const useOnScreenKeyboard = ref(true)
 let loaded = false
@@ -87,8 +89,8 @@ function applySettings(settings) {
     cameraBackend.value = settings?.cameraBackend ?? DEFAULT_CAMERA_BACKEND
     maxYVelocity.value = settings?.maxYVelocity ?? DEFAULT_MAX_VELOCITY
     maxThetaVelocity.value = settings?.maxThetaVelocity ?? DEFAULT_MAX_VELOCITY
-    udpHost.value = settings?.udpHost ?? ''
-    udpPort.value = settings?.udpPort ?? 0
+    udpHost.value = settings?.udpHost ?? DEFAULT_UDP_HOST
+    udpPort.value = settings?.udpPort ?? DEFAULT_UDP_PORT
     udpListenPort.value = settings?.udpListenPort ?? DEFAULT_UDP_LISTEN_PORT
     useOnScreenKeyboard.value = settings?.useOnScreenKeyboard ?? true
     syncBackendConfig()

@@ -52,10 +52,9 @@ class BinaryPacketTests(unittest.TestCase):
         self.assertEqual(payload[:3], b"ITS")
         self.assertEqual(struct.unpack("<fH", payload[3:]), (1.5, 7))
 
-    def test_unknown_missing_and_out_of_range_fields_are_rejected(self) -> None:
+    def test_unknown_and_out_of_range_fields_are_rejected(self) -> None:
         invalid_packets = (
             {"vy": 0.0, "mode": 2, "extra": 1},
-            {"vy": 0.0},
             {"vy": 101.0, "mode": 2},
             {"vy": 0.0, "mode": -1},
         )
@@ -63,6 +62,13 @@ class BinaryPacketTests(unittest.TestCase):
         for packet in invalid_packets:
             with self.subTest(packet=packet), self.assertRaises(ValueError):
                 utils.encode_binary_packet(packet, SCHEMA)
+
+    def test_missing_fields_use_schema_defaults(self) -> None:
+        payload = utils.encode_binary_packet({"vy": 0.0}, SCHEMA)
+
+        self.assertEqual(len(payload), 9)
+        self.assertEqual(payload[:3], b"ITS")
+        self.assertEqual(struct.unpack("<fH", payload[3:]), (0.0, 2))
 
     def test_integer_fields_reject_floats_and_booleans(self) -> None:
         for value in (1.25, True):

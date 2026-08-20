@@ -55,6 +55,17 @@ def default_for_wire_type(wire_type: str) -> int | float:
     return 0.0 if wire_type.startswith("float") else 0
 
 
+def _field_count(field: dict[str, Any]) -> int:
+    count = field.get("count")
+    return int(count) if count is not None else 1
+
+
+def _expand_field(field: dict[str, Any]) -> list[dict[str, Any]]:
+    if "count" in field:
+        return [field] * field["count"]
+    return [field]
+
+
 def validate_packet_values(
     packet: dict[str, Any], schema: dict, packet_type: str = "send"
 ) -> None:
@@ -69,23 +80,26 @@ def validate_packet_values(
     for name, value in packet.items():
         field = fields[name]
         wire_type = field["type"]
+        count = _field_count(field)
         if wire_type not in WIRE_TYPES:
             raise ValueError(f"Unsupported wire type: {wire_type}")
         expected_type = WIRE_TYPES[wire_type][2]
-        valid_type = (
-            isinstance(value, (int, float))
-            if expected_type is float
-            else isinstance(value, int)
-        )
-        if isinstance(value, bool) or not valid_type:
-            type_name = "number" if expected_type is float else "integer"
-            raise ValueError(f"Field {name!r} must be a {type_name}")
-        if isinstance(value, float) and not math.isfinite(value):
-            raise ValueError(f"Field {name!r} must be finite")
-        if "min" in field and value < field["min"]:
-            raise ValueError(f"Field {name!r} is below its minimum")
-        if "max" in field and value > field["max"]:
-            raise ValueError(f"Field {name!r} exceeds its maximum")
+        values_to_check = value if count > 1 and isinstance(value, list) else [value]
+        for item in values_to_check:
+            valid_type = (
+                isinstance(item, (int, float))
+                if expected_type is float
+                else isinstance(item, int)
+            )
+            if isinstance(item, bool) or not valid_type:
+                type_name = "number" if expected_type is float else "integer"
+                raise ValueError(f"Field {name!r} must be a {type_name}")
+            if isinstance(item, float) and not math.isfinite(item):
+                raise ValueError(f"Field {name!r} must be finite")
+            if "min" in field and item < field["min"]:
+                raise ValueError(f"Field {name!r} is below its minimum")
+            if "max" in field and item > field["max"]:
+                raise ValueError(f"Field {name!r} exceeds its maximum")
 
 
 def packet_struct(schema: dict, packet_type: str = "send") -> struct.Struct:
@@ -93,7 +107,9 @@ def packet_struct(schema: dict, packet_type: str = "send") -> struct.Struct:
     try:
         byte_order = {"little": "<", "big": ">"}[definition["byte_order"]]
         format_codes = "".join(
-            WIRE_TYPES[field["type"]][0] for field in definition["fields"]
+            WIRE_TYPES[field["type"]][0]
+            for field in definition["fields"]
+            for _ in range(_field_count(field))
         )
     except KeyError as error:
         raise ValueError(f"Invalid {packet_type!r} packet schema: {error}") from error
@@ -112,9 +128,23 @@ def encode_binary_packet(
     values = []
     for field in definition["fields"]:
         name = field["name"]
+        count = _field_count(field)
         if name not in packet:
-            raise ValueError(f"Missing packet field: {name}")
-        values.append(packet[name])
+            default = field.get("default", default_for_wire_type(field["type"]))
+            values.extend([default] * count)
+        else:
+            value = packet[name]
+            if count > 1:
+                if isinstance(value, list):
+                    if len(value) != count:
+                        raise ValueError(
+                            f"Field {name!r} must be a list of length {count}"
+                        )
+                    values.extend(value)
+                else:
+                    values.extend([value] * count)
+            else:
+                values.append(value)
 
     try:
         payload.extend(value_struct.pack(*values))
@@ -149,8 +179,16 @@ def decode_binary_packet(
     except struct.error as error:
         raise ValueError(f"Could not decode {packet_type!r} packet: {error}") from error
 
-    packet = dict(
-        zip((field["name"] for field in definition["fields"]), values, strict=True)
-    )
-    validate_packet_values(packet, schema, packet_type)
-    return packet
+    decoded: dict[str, Any] = {}
+    index = 0
+    for field in definition["fields"]:
+        count = _field_count(field)
+        name = field["name"]
+        if count > 1:
+            decoded[name] = list(values[index : index + count])
+        else:
+            decoded[name] = values[index]
+        index += count
+
+    validate_packet_values(decoded, schema, packet_type)
+    return decoded

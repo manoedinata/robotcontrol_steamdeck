@@ -39,6 +39,7 @@ class RuntimeState:
     packet_payload: bytes
     udp_enabled: bool = False
     clients: dict[WebSocket, asyncio.Lock] = field(default_factory=dict)
+    udp_socket: socket.socket | None = None
 
 
 def encode_packet(packet: dict[str, Any]) -> bytes:
@@ -203,8 +204,6 @@ async def udp_ping_loop() -> None:
 
 async def udp_loop() -> None:
     """Send the latest controls at a stable rate while a UI is connected."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setblocking(False)
     loop = asyncio.get_running_loop()
     interval = utils.hz_to_s(UDP_SEND_HZ)
     next_send = loop.time()
@@ -212,9 +211,17 @@ async def udp_loop() -> None:
 
     try:
         while True:
-            if runtime.clients and runtime.udp_enabled:
+            if runtime.clients and runtime.udp_enabled and runtime.udp_socket:
                 try:
-                    sock.sendto(
+                    # LOGGER.info(
+                    #     "Sending UDP packet to %s:%s, payload=%s",
+                    #     runtime.config.udp_ip,
+                    #     runtime.config.udp_port,
+                    #     runtime.packet_payload,
+                    # )
+
+                    # Send using the shared, bound socket
+                    runtime.udp_socket.sendto(
                         runtime.packet_payload,
                         (runtime.config.udp_ip, runtime.config.udp_port),
                     )
@@ -245,8 +252,6 @@ async def udp_loop() -> None:
     except Exception as e:
         # CRITICAL: Catch any other errors so the task doesn't die silently
         LOGGER.error("UDP loop crashed unexpectedly: %s", e)
-    finally:
-        sock.close()
 
 
 async def udp_receive_loop() -> None:
@@ -266,6 +271,7 @@ async def udp_receive_loop() -> None:
                 sock.setblocking(False)
                 try:
                     sock.bind(("0.0.0.0", configured_port))
+                    runtime.udp_socket = sock  # <-- Share the socket here
                 except OSError as error:
                     sock.close()
                     sock = None
@@ -298,6 +304,13 @@ async def udp_receive_loop() -> None:
                 sock = None
                 bound_port = None
                 continue
+
+            LOGGER.warning(
+                "Received UDP telemetry from %s:%s, payload=%s",
+                address[0],
+                address[1],
+                payload,
+            )
 
             try:
                 packet = utils.decode_binary_packet(payload, PACKET_SCHEMA, "receive")
