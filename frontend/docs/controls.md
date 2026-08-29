@@ -23,3 +23,5 @@ On the Home view, both sticks retain robot-control behavior; interface navigatio
 | Right stick right | Positive theta velocity |
 
 The Gamepad API reads left-stick Y from `axes[1]` and right-stick X from `axes[2]`. Each value is normalized to `-1..+1` and scaled by its configured limit. Hardware input uses a `0.12` dead zone; pointer and touch input do not. Sideways translation is intentionally absent for the differential-drive robot.
+
+When Y velocity is negative, `ControllerPanel.vue` negates theta before sending it, so steering stays relative to the driver's view while reversing. The displayed theta value is the pre-negation input; the backend sends whatever the renderer publishes without further transformation.

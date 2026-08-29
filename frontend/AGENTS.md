@@ -51,6 +51,7 @@ Current control mapping remains:
 
 - Left stick vertical axis controls `vy`; up is positive.
 - Right stick horizontal axis controls `vtheta`; right is positive.
+- Theta is negated before publishing when `vy` is negative, so steering stays driver-relative while reversing.
 - Gamepad dead zone is `0.12`; pointer/touch has no dead zone.
 - Velocity is scaled by `maxYVelocity` and `maxThetaVelocity`, default `10`, bounded `0.1..100` in Settings.
 

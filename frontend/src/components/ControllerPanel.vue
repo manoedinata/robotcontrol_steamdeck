@@ -35,9 +35,13 @@ function applyDeadZone(value, threshold = 0.12) {
 }
 
 function publishVelocity() {
+  const y = Math.round(yVelocity.value)
+  const theta = Math.round(thetaVelocity.value)
   updatePacket({
-    pwm: Math.round(yVelocity.value),
-    steering: Math.round(thetaVelocity.value),
+    pwm: y,
+    // Reversing while driving backwards keeps steering relative to the driver's
+    // view instead of the robot's heading.
+    steering: y < 0 ? -theta : theta,
   })
 }
 
