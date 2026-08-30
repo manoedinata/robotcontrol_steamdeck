@@ -2,12 +2,14 @@
 
 ## Interface Navigation
 
-| Input      | Action                                                                     |
-| ---------- | -------------------------------------------------------------------------- |
-| D-pad      | Select Settings or Exit, or move within Settings and the built-in keyboard |
-| A          | Open Settings, activate a focused control, or press a keyboard key         |
-| B          | Close Settings, or cancel the built-in keyboard                            |
-| Left stick | Navigate the built-in keyboard only                                        |
+| Input      | Action                                                                                   |
+| ---------- | ---------------------------------------------------------------------------------------- |
+| D-pad      | Select Settings or Exit, or move within Settings and the built-in keyboard               |
+| A          | Open Settings, activate a focused control, or press a keyboard key                       |
+| B          | Switch to the next camera source on Home; close Settings or cancel the built-in keyboard |
+| Left stick | Navigate the built-in keyboard only                                                      |
+
+B only switches cameras when more than one source is configured and no modal dialog is open, so Settings and the built-in keyboard keep their cancel behavior.
 
 The camera and robot controller remain mounted while Settings is open. Focus moves spatially, remains visible while the drawer scrolls, and returns to the originating control when the keyboard closes. Saving restores focus to the Save button. Held directional input repeats after an initial delay.
 

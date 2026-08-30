@@ -1,4 +1,4 @@
-import { readonly, ref } from 'vue'
+import { computed, readonly, ref } from 'vue'
 import { useBackendConnection } from './useBackendConnection'
 
 // Default velocity cap; mirrors the main-process default so the renderer shows
@@ -9,14 +9,18 @@ const DEFAULT_UDP_PORT = 8888
 const DEFAULT_UDP_LISTEN_PORT = 8889
 const DEFAULT_CAMERA_BACKEND = 'go2rtc'
 const DEFAULT_CAMERA_TYPE = 'rtsp'
+const EMPTY_CAMERA_SOURCE = Object.freeze({
+    url: '',
+    type: DEFAULT_CAMERA_TYPE,
+    username: '',
+    password: '',
+})
 
 // Shared reactive settings state. A single module-level instance keeps the
-// camera URL and velocity limits in sync across every view without prop
+// camera sources and velocity limits in sync across every view without prop
 // drilling.
-const cameraUrl = ref('')
-const cameraType = ref(DEFAULT_CAMERA_TYPE)
-const cameraUsername = ref('')
-const cameraPassword = ref('')
+const cameraSources = ref([{ ...EMPTY_CAMERA_SOURCE }])
+const activeCameraIndex = ref(0)
 const cameraBackend = ref(DEFAULT_CAMERA_BACKEND)
 const maxYVelocity = ref(DEFAULT_MAX_VELOCITY)
 const maxThetaVelocity = ref(DEFAULT_MAX_VELOCITY)
@@ -26,6 +30,13 @@ const udpListenPort = ref(DEFAULT_UDP_LISTEN_PORT)
 const useOnScreenKeyboard = ref(true)
 let loaded = false
 const { updateConfig } = useBackendConnection()
+
+// The active source drives the live feed; the others stay configured but idle.
+const activeCamera = computed(() => cameraSources.value[activeCameraIndex.value] ?? EMPTY_CAMERA_SOURCE)
+const cameraUrl = computed(() => activeCamera.value.url)
+const cameraType = computed(() => activeCamera.value.type)
+const cameraUsername = computed(() => activeCamera.value.username)
+const cameraPassword = computed(() => activeCamera.value.password)
 
 function buildBackendCameraUrl() {
     const sourceUrl = cameraUrl.value.trim()
@@ -52,8 +63,10 @@ function syncBackendConfig() {
     })
 }
 
-function parseStoredCameraSettings(settings) {
-    const sourceUrl = settings?.cameraUrl ?? ''
+// Accepts both the per-source shape and the legacy top-level single-camera keys
+// so existing settings.json files keep working.
+function normalizeCameraSource(source) {
+    const sourceUrl = source?.url ?? source?.cameraUrl ?? ''
     let normalizedUrl = sourceUrl
     let embeddedUsername = ''
     let embeddedPassword = ''
@@ -69,23 +82,36 @@ function parseStoredCameraSettings(settings) {
         // Keep malformed legacy values visible in Settings for correction.
     }
 
-    const storedType = settings?.cameraType
+    const storedType = source?.type
+        ?? source?.cameraType
         ?? (sourceUrl.toLowerCase().startsWith('ws:') ? 'websocket' : DEFAULT_CAMERA_TYPE)
 
     return {
         url: normalizedUrl,
         type: storedType === 'websocket' ? 'websocket' : DEFAULT_CAMERA_TYPE,
-        username: settings?.cameraUsername ?? embeddedUsername,
-        password: settings?.cameraPassword ?? embeddedPassword,
+        username: source?.username ?? source?.cameraUsername ?? embeddedUsername,
+        password: source?.password ?? source?.cameraPassword ?? embeddedPassword,
     }
 }
 
+function parseStoredCameraSources(settings) {
+    const stored = Array.isArray(settings?.cameraSources) && settings.cameraSources.length
+        ? settings.cameraSources
+        // Legacy shape: a single camera in top-level cameraUrl/cameraType keys.
+        : [settings ?? {}]
+
+    return stored.map(normalizeCameraSource)
+}
+
+function clampCameraIndex(index) {
+    const count = cameraSources.value.length
+    if (!count) return 0
+    return Math.max(0, Math.min(count - 1, Number.isInteger(index) ? index : 0))
+}
+
 function applySettings(settings) {
-    const cameraSettings = parseStoredCameraSettings(settings)
-    cameraUrl.value = cameraSettings.url
-    cameraType.value = cameraSettings.type
-    cameraUsername.value = cameraSettings.username
-    cameraPassword.value = cameraSettings.password
+    cameraSources.value = parseStoredCameraSources(settings)
+    activeCameraIndex.value = clampCameraIndex(settings?.activeCameraIndex ?? 0)
     cameraBackend.value = settings?.cameraBackend ?? DEFAULT_CAMERA_BACKEND
     maxYVelocity.value = settings?.maxYVelocity ?? DEFAULT_MAX_VELOCITY
     maxThetaVelocity.value = settings?.maxThetaVelocity ?? DEFAULT_MAX_VELOCITY
@@ -94,6 +120,18 @@ function applySettings(settings) {
     udpListenPort.value = settings?.udpListenPort ?? DEFAULT_UDP_LISTEN_PORT
     useOnScreenKeyboard.value = settings?.useOnScreenKeyboard ?? true
     syncBackendConfig()
+}
+
+function selectCamera(index) {
+    const count = cameraSources.value.length
+    if (!count) return
+    // Wrap so repeated Circle presses cycle through every configured source.
+    activeCameraIndex.value = ((index % count) + count) % count
+    syncBackendConfig()
+}
+
+function switchCamera(offset = 1) {
+    selectCamera(activeCameraIndex.value + offset)
 }
 
 async function loadSettings() {
@@ -121,10 +159,12 @@ export function useSettings() {
     }
 
     return {
-        cameraUrl: readonly(cameraUrl),
-        cameraType: readonly(cameraType),
-        cameraUsername: readonly(cameraUsername),
-        cameraPassword: readonly(cameraPassword),
+        cameraSources: readonly(cameraSources),
+        activeCameraIndex: readonly(activeCameraIndex),
+        cameraUrl,
+        cameraType,
+        cameraUsername,
+        cameraPassword,
         cameraBackend: readonly(cameraBackend),
         maxYVelocity: readonly(maxYVelocity),
         maxThetaVelocity: readonly(maxThetaVelocity),
@@ -132,6 +172,8 @@ export function useSettings() {
         udpPort: readonly(udpPort),
         udpListenPort: readonly(udpListenPort),
         useOnScreenKeyboard: readonly(useOnScreenKeyboard),
+        selectCamera,
+        switchCamera,
         saveSettings,
         reloadSettings: loadSettings,
     }

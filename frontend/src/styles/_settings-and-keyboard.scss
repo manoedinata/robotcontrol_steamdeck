@@ -52,6 +52,33 @@
     padding: 18px;
 }
 
+.camera-source-group {
+    border-bottom: 1px solid #dee2e6;
+}
+
+.camera-source-group.active {
+    background: #f2f9f5;
+}
+
+.camera-source-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 18px 0;
+    font-size: 0.875rem;
+}
+
+.camera-source-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.camera-add-row {
+    padding: 14px 18px;
+}
+
 .camera-viewport video,
 .camera-viewport canvas {
     width: 100%;

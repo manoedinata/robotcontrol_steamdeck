@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Battery, Camera, Gamepad2, LoaderCircle, Server } from '@lucide/vue'
 import CameraFeed from '../components/CameraFeed.vue'
 import ControllerPanel from '../components/ControllerPanel.vue'
@@ -7,14 +7,35 @@ import { useGamepad } from '../composables/useGamepad'
 import { useSettings } from '../composables/useSettings'
 import { useBackendConnection } from '../composables/useBackendConnection'
 
-const { cameraUrl } = useSettings()
-const { gamepadName } = useGamepad()
+const { cameraUrl, cameraSources, activeCameraIndex, switchCamera } = useSettings()
+const { gamepadName, registerHandler } = useGamepad()
 const { telemetry, telemetryState, pingMs, pingState } = useBackendConnection()
 const cameraState = ref('idle')
+let unregisterGamepadHandler
+
+// Circle cycles the live camera source. Priority above the action bar so the
+// switch works wherever focus sits on the home screen, but modal dialogs
+// (settings, on-screen keyboard) keep their own cancel handling.
+function handleGamepadAction(action) {
+  if (action !== 'cancel' || cameraSources.value.length < 2) return false
+  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return false
+  switchCamera(1)
+  return true
+}
+
+onMounted(() => {
+  unregisterGamepadHandler = registerHandler(handleGamepadAction, 20)
+})
+
+onBeforeUnmount(() => unregisterGamepadHandler?.())
 
 const gamepadStatusLabel = computed(() => gamepadName.value
   ? 'Connected'
   : 'Disconnected. Press any button to activate')
+
+const cameraLabel = computed(() => cameraSources.value.length > 1
+  ? `Camera ${activeCameraIndex.value + 1}/${cameraSources.value.length}`
+  : 'Camera')
 
 const deviceAddress = computed(() => {
   try {
@@ -65,7 +86,8 @@ const statusLabel = computed(() => {
         <div class="connection-telemetry">
           <Camera :size="20" aria-hidden="true" />
           <span class="telemetry-ip">{{ deviceAddress }}</span>
-          <span class="visually-hidden">Camera {{ statusLabel }}</span>
+          <span v-if="cameraSources.length > 1" class="telemetry-value">{{ cameraLabel }}</span>
+          <span class="visually-hidden">{{ cameraLabel }} {{ statusLabel }}</span>
           <LoaderCircle v-if="cameraState === 'loading'" class="connection-spinner" :size="14" aria-hidden="true" />
           <span v-else class="connection-dot" :class="cameraState" aria-hidden="true"></span>
         </div>

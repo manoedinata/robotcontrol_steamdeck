@@ -1,6 +1,6 @@
 <script setup>
-import { nextTick, ref, watch } from 'vue'
-import { Camera, Gauge, Keyboard, Network, Save } from '@lucide/vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { Camera, Gauge, Keyboard, Network, Plus, Save, Trash2 } from '@lucide/vue'
 import OnScreenKeyboard from '../components/OnScreenKeyboard.vue'
 import { useSettingsGamepadNavigation } from '../composables/useSettingsGamepadNavigation'
 import { useSettings } from '../composables/useSettings'
@@ -8,10 +8,8 @@ import { useSettings } from '../composables/useSettings'
 const emit = defineEmits(['close'])
 
 const {
-  cameraUrl,
-  cameraType,
-  cameraUsername,
-  cameraPassword,
+  cameraSources,
+  activeCameraIndex,
   cameraBackend,
   maxYVelocity,
   maxThetaVelocity,
@@ -19,15 +17,12 @@ const {
   udpPort,
   udpListenPort,
   useOnScreenKeyboard,
+  selectCamera,
   saveSettings,
 } = useSettings()
 
-const streamType = ref(cameraType.value)
-const sourceIp = ref('')
-const port = ref('')
-const subpath = ref('')
-const username = ref(cameraUsername.value)
-const password = ref(cameraPassword.value)
+// One editable form row per configured camera source.
+const cameras = ref([])
 const backend = ref(cameraBackend.value)
 const maxY = ref(maxYVelocity.value)
 const maxTheta = ref(maxThetaVelocity.value)
@@ -43,12 +38,15 @@ let keyboardReturnControl = null
 let saveQueue = Promise.resolve(true)
 const { focusSaveControl } = useSettingsGamepadNavigation(activeKeyboard, () => emit('close'))
 
-const keyboardFields = {
+const cameraKeyboardFields = {
   sourceIp: { label: 'Source IP', layout: 'ip', maxLength: 253 },
   port: { label: 'Port', layout: 'integer', maxLength: 5 },
   subpath: { label: 'Stream subpath', layout: 'text', maxLength: 256 },
   username: { label: 'RTSP username', layout: 'credential', maxLength: 128 },
   password: { label: 'RTSP password', layout: 'credential', maxLength: 256, sensitive: true },
+}
+
+const keyboardFields = {
   maxY: { label: 'Max Y-velocity', layout: 'decimal', maxLength: 5 },
   maxTheta: { label: 'Max Theta-velocity', layout: 'decimal', maxLength: 5 },
   targetHost: { label: 'UDP target host', layout: 'hostname', maxLength: 253 },
@@ -56,12 +54,46 @@ const keyboardFields = {
   listenPort: { label: 'UDP telemetry listen port', layout: 'integer', maxLength: 5 },
 }
 
-const fieldValues = { sourceIp, port, subpath, username, password, maxY, maxTheta, targetHost, targetPort, listenPort }
+const fieldValues = { maxY, maxTheta, targetHost, targetPort, listenPort }
+
+// Camera fields are addressed as `camera:<index>:<field>` so the on-screen
+// keyboard can target any source in the list.
+function cameraField(index, field) {
+  return `camera:${index}:${field}`
+}
+
+function parseFieldName(name) {
+  const [prefix, index, field] = name.split(':')
+  if (prefix !== 'camera') return null
+  return { index: Number(index), field }
+}
+
+function readField(name) {
+  const target = parseFieldName(name)
+  return target ? cameras.value[target.index]?.[target.field] : fieldValues[name].value
+}
+
+function writeField(name, value) {
+  const target = parseFieldName(name)
+  if (target) cameras.value[target.index][target.field] = value
+  else fieldValues[name].value = value
+}
+
+function describeField(name) {
+  const target = parseFieldName(name)
+  if (!target) return keyboardFields[name]
+  const descriptor = cameraKeyboardFields[target.field]
+  return { ...descriptor, label: `Camera ${target.index + 1} ${descriptor.label}` }
+}
+
+const activeKeyboardValue = computed(() => activeKeyboard.value
+  ? String(readField(activeKeyboard.value.name) ?? '')
+  : '')
 
 function openKeyboard(fieldName) {
   if (!oskEnabled.value) return
   keyboardReturnControl = document.activeElement
-  activeKeyboard.value = { name: fieldName, ...keyboardFields[fieldName] }
+  activeKeyboard.value = { name: fieldName, ...describeField(fieldName) }
 }
 
 async function closeKeyboard() {
@@ -76,8 +108,7 @@ function cancelKeyboard() {
 }
 
 async function commitKeyboardValue(value) {
-  const fieldName = activeKeyboard.value.name
-  fieldValues[fieldName].value = value
+  writeField(activeKeyboard.value.name, value)
   await closeKeyboard()
   await nextTick()
   await saveCameraSettings()
@@ -98,53 +129,45 @@ function handleInputKeydown(event, fieldName) {
   }
 }
 
-function populateCameraFields(url) {
-  if (!url) {
-    streamType.value = cameraType.value
-    sourceIp.value = ''
-    port.value = ''
-    subpath.value = ''
-    username.value = ''
-    password.value = ''
-    return
+function createCameraForm(source = {}) {
+  const form = {
+    streamType: source.type ?? 'rtsp',
+    sourceIp: '',
+    port: '',
+    subpath: '',
+    username: source.username ?? '',
+    password: source.password ?? '',
   }
 
+  if (!source.url) return form
+
   try {
-    const parsedUrl = new URL(url)
-    streamType.value = parsedUrl.protocol.toLowerCase() === 'ws:' ? 'websocket' : 'rtsp'
-    sourceIp.value = parsedUrl.hostname
-    port.value = parsedUrl.port
-    subpath.value = parsedUrl.pathname
-    subpath.value = subpath.value.startsWith('/') ? subpath.value : "/" + subpath.value
-    username.value = decodeUrlComponent(parsedUrl.username)
-    password.value = decodeUrlComponent(parsedUrl.password)
+    const parsedUrl = new URL(source.url)
+    form.streamType = parsedUrl.protocol.toLowerCase() === 'ws:' ? 'websocket' : 'rtsp'
+    form.sourceIp = parsedUrl.hostname
+    form.port = parsedUrl.port
+    form.subpath = parsedUrl.pathname.startsWith('/') ? parsedUrl.pathname : `/${parsedUrl.pathname}`
   } catch (error) {
     console.error('Could not parse the saved camera URL:', error)
   }
+
+  return form
 }
 
-function decodeUrlComponent(value) {
-  try {
-    return decodeURIComponent(value)
-  } catch {
-    return value
-  }
+function addCamera() {
+  cameras.value.push(createCameraForm())
 }
 
-watch(cameraUrl, (nextUrl) => {
-  populateCameraFields(nextUrl)
-}, { immediate: true })
+async function removeCamera(index) {
+  // Keep at least one row so the form always has an editable source.
+  if (cameras.value.length <= 1) return
+  cameras.value.splice(index, 1)
+  if (activeCameraIndex.value >= cameras.value.length) selectCamera(cameras.value.length - 1)
+  await saveCameraSettings()
+}
 
-watch(cameraType, (next) => {
-  streamType.value = next
-}, { immediate: true })
-
-watch(cameraUsername, (next) => {
-  username.value = next
-}, { immediate: true })
-
-watch(cameraPassword, (next) => {
-  password.value = next
+watch(cameraSources, (sources) => {
+  cameras.value = sources.map(createCameraForm)
 }, { immediate: true })
 
 watch(cameraBackend, (next) => {
@@ -191,14 +214,21 @@ async function persistSettings({ focusSave = false } = {}) {
   settingsMessage.value = ''
 
   try {
-    const path = subpath.value.trim().replace(/^\/+/, '')
-    const cameraUrl = `${streamType.value === 'websocket' ? 'ws' : 'rtsp'}://${sourceIp.value.trim()}:${port.value}${streamType.value === 'rtsp' && path ? `/${path}` : ''}`
+    const cameraSourcePayload = cameras.value.map((camera) => {
+      const path = camera.subpath.trim().replace(/^\/+/, '')
+      const scheme = camera.streamType === 'websocket' ? 'ws' : 'rtsp'
+
+      return {
+        url: `${scheme}://${camera.sourceIp.trim()}:${camera.port}${camera.streamType === 'rtsp' && path ? `/${path}` : ''}`,
+        type: camera.streamType,
+        username: camera.streamType === 'rtsp' ? camera.username : '',
+        password: camera.streamType === 'rtsp' ? camera.password : '',
+      }
+    })
 
     await saveSettings({
-      cameraUrl,
-      cameraType: streamType.value,
-      cameraUsername: streamType.value === 'rtsp' ? username.value : '',
-      cameraPassword: streamType.value === 'rtsp' ? password.value : '',
+      cameraSources: cameraSourcePayload,
+      activeCameraIndex: Math.min(activeCameraIndex.value, cameraSourcePayload.length - 1),
       cameraBackend: backend.value,
       maxYVelocity: Number.parseFloat(maxY.value),
       maxThetaVelocity: Number.parseFloat(maxTheta.value),
@@ -240,70 +270,99 @@ defineExpose({ saveBeforeClose })
       <div class="settings-panel-heading">
         <Camera :size="20" aria-hidden="true" />
         <div>
-          <h2>Camera feed</h2>
-          <p>Configure the camera source and transport.</p>
+          <h2>Camera feeds</h2>
+          <p>Configure one or more camera sources. Press Circle on the gamepad to switch the live feed.</p>
         </div>
       </div>
 
-      <div class="camera-settings-row">
-        <fieldset class="settings-field settings-field-type">
-          <legend>Stream type</legend>
-          <div class="stream-type-options">
-            <label class="stream-type-option" for="stream-type-rtsp">
-              <input id="stream-type-rtsp" v-model="streamType" type="radio" value="rtsp" name="stream-type"
-                data-gamepad-control checked />
-              <span>RTSP</span>
-            </label>
-            <label class="stream-type-option" for="stream-type-websocket">
-              <input id="stream-type-websocket" v-model="streamType" type="radio" value="websocket" name="stream-type"
-                data-gamepad-control />
-              <span>WebSocket</span>
-            </label>
+      <div v-for="(camera, index) in cameras" :key="index" class="camera-source-group"
+        :class="{ active: index === activeCameraIndex }">
+        <div class="camera-source-header">
+          <strong>Camera {{ index + 1 }}<span v-if="index === activeCameraIndex"> (live)</span></strong>
+          <div class="camera-source-actions">
+            <button v-if="index !== activeCameraIndex" class="btn btn-secondary btn-sm" type="button"
+              :aria-label="`Show camera ${index + 1}`" data-gamepad-control @click="selectCamera(index)">
+              Show
+            </button>
+            <button v-if="cameras.length > 1" class="btn btn-secondary btn-sm" type="button"
+              :aria-label="`Remove camera ${index + 1}`" data-gamepad-control @click="removeCamera(index)">
+              <Trash2 :size="15" aria-hidden="true" />
+            </button>
           </div>
-        </fieldset>
-
-        <div class="settings-field settings-field-source">
-          <label for="source-ip">Source IP</label>
-          <input id="source-ip" v-model.trim="sourceIp" class="form-control" type="text"
-            :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" placeholder="192.168.1.20"
-            autocomplete="off" required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
-            @click="openKeyboard('sourceIp')" @keydown="handleInputKeydown($event, 'sourceIp')" />
         </div>
 
-        <div class="settings-field settings-field-port">
-          <label for="source-port">Port</label>
-          <input id="source-port" v-model="port" class="form-control" type="number"
-            :inputmode="oskEnabled ? 'none' : 'numeric'" :readonly="oskEnabled" min="1" max="65535" placeholder="8080"
-            required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
-            @click="openKeyboard('port')" @keydown="handleInputKeydown($event, 'port')" />
-        </div>
+        <div class="camera-settings-row">
+          <fieldset class="settings-field settings-field-type">
+            <legend>Stream type</legend>
+            <div class="stream-type-options">
+              <label class="stream-type-option" :for="`stream-type-rtsp-${index}`">
+                <input :id="`stream-type-rtsp-${index}`" v-model="camera.streamType" type="radio" value="rtsp"
+                  :name="`stream-type-${index}`" data-gamepad-control />
+                <span>RTSP</span>
+              </label>
+              <label class="stream-type-option" :for="`stream-type-websocket-${index}`">
+                <input :id="`stream-type-websocket-${index}`" v-model="camera.streamType" type="radio" value="websocket"
+                  :name="`stream-type-${index}`" data-gamepad-control />
+                <span>WebSocket</span>
+              </label>
+            </div>
+          </fieldset>
 
-        <div v-if="streamType === 'rtsp'" class="settings-field settings-field-subpath">
-          <label for="stream-subpath">Subpath <span>(optional)</span></label>
-          <input id="stream-subpath" v-model.trim="subpath" class="form-control" type="text"
-            :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" placeholder="video" autocomplete="off"
-            data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('subpath')"
-            @keydown="handleInputKeydown($event, 'subpath')" />
-        </div>
+          <div class="settings-field settings-field-source">
+            <label :for="`source-ip-${index}`">Source IP</label>
+            <input :id="`source-ip-${index}`" v-model.trim="camera.sourceIp" class="form-control" type="text"
+              :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" placeholder="192.168.1.20"
+              autocomplete="off" required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
+              @click="openKeyboard(cameraField(index, 'sourceIp'))"
+              @keydown="handleInputKeydown($event, cameraField(index, 'sourceIp'))" />
+          </div>
 
-        <div v-if="streamType === 'rtsp'" class="settings-field settings-field-credential">
-          <label for="camera-username">Username <span>(optional)</span></label>
-          <input id="camera-username" v-model="username" class="form-control" type="text"
-            :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" autocomplete="username"
-            data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('username')"
-            @keydown="handleInputKeydown($event, 'username')" />
-        </div>
+          <div class="settings-field settings-field-port">
+            <label :for="`source-port-${index}`">Port</label>
+            <input :id="`source-port-${index}`" v-model="camera.port" class="form-control" type="number"
+              :inputmode="oskEnabled ? 'none' : 'numeric'" :readonly="oskEnabled" min="1" max="65535" placeholder="8080"
+              required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
+              @click="openKeyboard(cameraField(index, 'port'))"
+              @keydown="handleInputKeydown($event, cameraField(index, 'port'))" />
+          </div>
 
-        <div v-if="streamType === 'rtsp'" class="settings-field settings-field-credential">
-          <label for="camera-password">Password <span>(optional)</span></label>
-          <input id="camera-password" v-model="password" class="form-control" type="password"
-            :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" autocomplete="current-password"
-            data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('password')"
-            @keydown="handleInputKeydown($event, 'password')" />
+          <div v-if="camera.streamType === 'rtsp'" class="settings-field settings-field-subpath">
+            <label :for="`stream-subpath-${index}`">Subpath <span>(optional)</span></label>
+            <input :id="`stream-subpath-${index}`" v-model.trim="camera.subpath" class="form-control" type="text"
+              :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" placeholder="video" autocomplete="off"
+              data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
+              @click="openKeyboard(cameraField(index, 'subpath'))"
+              @keydown="handleInputKeydown($event, cameraField(index, 'subpath'))" />
+          </div>
+
+          <div v-if="camera.streamType === 'rtsp'" class="settings-field settings-field-credential">
+            <label :for="`camera-username-${index}`">Username <span>(optional)</span></label>
+            <input :id="`camera-username-${index}`" v-model="camera.username" class="form-control" type="text"
+              :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" autocomplete="username"
+              data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
+              @click="openKeyboard(cameraField(index, 'username'))"
+              @keydown="handleInputKeydown($event, cameraField(index, 'username'))" />
+          </div>
+
+          <div v-if="camera.streamType === 'rtsp'" class="settings-field settings-field-credential">
+            <label :for="`camera-password-${index}`">Password <span>(optional)</span></label>
+            <input :id="`camera-password-${index}`" v-model="camera.password" class="form-control" type="password"
+              :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" autocomplete="current-password"
+              data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
+              @click="openKeyboard(cameraField(index, 'password'))"
+              @keydown="handleInputKeydown($event, cameraField(index, 'password'))" />
+          </div>
         </div>
       </div>
 
-      <div v-if="streamType === 'rtsp'" class="camera-backend-row">
+      <div class="camera-add-row">
+        <button class="btn btn-secondary" type="button" data-gamepad-control @click="addCamera">
+          <Plus :size="16" aria-hidden="true" />
+          Add camera source
+        </button>
+      </div>
+
+      <div v-if="cameras.some((camera) => camera.streamType === 'rtsp')" class="camera-backend-row">
         <div class="settings-field">
           <label for="camera-backend">WebRTC backend</label>
           <select id="camera-backend" v-model="backend" class="form-select" data-gamepad-control>
@@ -407,7 +466,6 @@ defineExpose({ saveBeforeClose })
 
     <OnScreenKeyboard v-if="activeKeyboard" :key="activeKeyboard.name" :layout="activeKeyboard.layout"
       :max-length="activeKeyboard.maxLength" :title="activeKeyboard.label" :sensitive="activeKeyboard.sensitive"
-      :value="String(fieldValues[activeKeyboard.name].value ?? '')" @cancel="cancelKeyboard"
-      @done="commitKeyboardValue" />
+      :value="activeKeyboardValue" @cancel="cancelKeyboard" @done="commitKeyboardValue" />
   </section>
 </template>

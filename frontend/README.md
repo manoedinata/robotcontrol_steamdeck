@@ -5,14 +5,15 @@ A Steam Deck-oriented Electron and Vue UI for viewing a camera stream and contro
 ## Features
 
 - Camera-first frameless UI for the Steam Deck's 1280x800 viewport
-- RTSP camera source through backend WebRTC signaling, with optional credentials and selectable go2rtc/aiortc backend
+- RTSP camera sources through backend WebRTC signaling, with optional credentials and selectable go2rtc/aiortc backend
+- Multiple configurable camera sources, cycled live with B (Circle)
 - Pointer, touch, Steam Deck, and compatible gamepad controls
 - Configurable linear Y and angular theta limits
 - Settings drawer and built-in gamepad-navigable keyboard
 - Automatic backend WebSocket reconnect and current-state replay
 - Host ping latency to the configured UDP destination in the Home HUD
 - Live/stale robot battery percentage in the Home HUD
-- Persistent camera source, RTSP credentials, camera backend, UDP command destination, telemetry listening port, velocity, and keyboard settings
+- Persistent camera sources, RTSP credentials, camera backend, UDP command destination, telemetry listening port, velocity, and keyboard settings
 
 ## Quick Start
 

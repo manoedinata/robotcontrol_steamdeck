@@ -4,9 +4,8 @@ The Settings drawer stores camera source, UDP destination, velocity limits, and 
 
 ## Fields
 
-- Camera stream type: RTSP or direct WebSocket.
-- Camera source IP, port, and optional subpath.
-- Optional RTSP username and password.
+- One or more camera sources, each with a stream type (RTSP or direct WebSocket), source IP, port, and optional subpath.
+- Optional RTSP username and password per source.
 - Camera backend: `go2rtc` (default) or `aiortc`.
 - UDP command target host/port and telemetry listening port.
 - Maximum linear Y and angular theta velocity, `0.1..100`.
@@ -16,10 +15,21 @@ The persisted contract remains:
 
 ```json
 {
-  "cameraType": "rtsp",
-  "cameraUrl": "rtsp://192.168.1.20:554/video",
-  "cameraUsername": "",
-  "cameraPassword": "",
+  "cameraSources": [
+    {
+      "type": "rtsp",
+      "url": "rtsp://192.168.1.20:554/video",
+      "username": "",
+      "password": ""
+    },
+    {
+      "type": "websocket",
+      "url": "ws://192.168.1.21:8080",
+      "username": "",
+      "password": ""
+    }
+  ],
+  "activeCameraIndex": 0,
   "cameraBackend": "go2rtc",
   "maxYVelocity": 10,
   "maxThetaVelocity": 10,
@@ -30,11 +40,15 @@ The persisted contract remains:
 }
 ```
 
-Empty UDP host and port `0` disable command transmission. `udpListenPort` remains required in `1..65535`, defaults to `8889`, and controls the backend telemetry bind port. The form requires a camera host and port, but the underlying backend accepts an empty camera URL and keeps capture idle. RTSP credentials are optional and persisted separately from `cameraUrl`; the backend receives them as URL-encoded userinfo in its transient `camera_url` configuration. The form does not expose HTTPS selection, query parameters, or fragments.
+Legacy files with top-level `cameraUrl`, `cameraType`, `cameraUsername`, and `cameraPassword` keys are read as a single source and rewritten into `cameraSources` on the next save.
+
+`activeCameraIndex` selects which source feeds the live view. Settings lists every source with a Show button, and pressing B (Circle) on the Home view cycles to the next source. Only the active source is connected; the others stay configured but idle. The backend receives configuration for the active source only.
+
+Empty UDP host and port `0` disable command transmission. `udpListenPort` remains required in `1..65535`, defaults to `8889`, and controls the backend telemetry bind port. The form requires a camera host and port, but the underlying backend accepts an empty camera URL and keeps capture idle. RTSP credentials are optional and persisted separately from each source `url`; the backend receives them as URL-encoded userinfo in its transient `camera_url` configuration. The form does not expose HTTPS selection, query parameters, or fragments.
 
 ## Camera Path
 
-For RTSP, the configured `cameraUrl` and `cameraBackend` are sent to the backend as `camera_url` and `camera_backend`. With the default `go2rtc` backend, FastAPI starts a local go2rtc process on demand, configures the named RTSP stream, and proxies receive-only WebRTC signaling through `POST /offer`. `aiortc` remains available as an explicit alternative. `CameraFeed.vue` negotiates only with FastAPI and renders the returned media track in `<video>`.
+For RTSP, the active source URL and `cameraBackend` are sent to the backend as `camera_url` and `camera_backend`. With the default `go2rtc` backend, FastAPI starts a local go2rtc process on demand, configures the named RTSP stream, and proxies receive-only WebRTC signaling through `POST /offer`. `aiortc` remains available as an explicit alternative. `CameraFeed.vue` negotiates only with FastAPI and renders the returned media track in `<video>`.
 
 For WebSocket mode, Settings stores `ws://<IP>:<port>`. The renderer connects directly to the camera, sends `PlayStream2`, ignores text status messages, and decodes binary H.264 messages with WebCodecs into a canvas. The backend receives an empty `camera_url`, which keeps the RTSP transport idle. This path minimizes latency by avoiding a localhost camera relay and transcode.
 

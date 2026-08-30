@@ -10,7 +10,7 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 - `electron-components/preload.js`: narrow `quitApp`, `loadSettings`, and `saveSettings` bridge.
 - `src/App.vue`: persistent command shell, backend connection lifecycle, and Settings drawer state.
 - `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition.
-- `src/views/SettingsView.vue`: camera source, UDP destination, velocity limits, and keyboard settings.
+- `src/views/SettingsView.vue`: camera sources, UDP destination, velocity limits, and keyboard settings.
 - `src/components/CameraFeed.vue`: RTSP backend WebRTC negotiation or direct camera WebSocket playback and reconnect state.
 - `src/composables/useCameraWebSocket.js`: direct camera WebSocket handshake and WebCodecs H.264 canvas playback.
 - `src/components/ControllerPanel.vue`: Y/theta input mapping and generic packet updates.
@@ -61,10 +61,11 @@ Preserve this persisted contract:
 
 ```json
 {
-  "cameraType": "rtsp",
-  "cameraUrl": "rtsp://192.168.1.20:554/video",
-  "cameraUsername": "",
-  "cameraPassword": "",
+  "cameraSources": [
+    { "type": "rtsp", "url": "rtsp://192.168.1.20:554/video", "username": "", "password": "" },
+    { "type": "websocket", "url": "ws://192.168.1.21:8080", "username": "", "password": "" }
+  ],
+  "activeCameraIndex": 0,
   "cameraBackend": "go2rtc",
   "maxYVelocity": 10,
   "maxThetaVelocity": 10,
@@ -75,7 +76,9 @@ Preserve this persisted contract:
 }
 ```
 
-Empty UDP host and port `0` disable transmission. The camera form supports RTSP and direct camera WebSocket mode. RTSP preserves credentials in separate persisted fields and sends them only in the transient authenticated `camera_url` sent to the backend. WebSocket mode stores `ws://<IP>:<port>` and sends an empty `camera_url` so the backend does not open RTSP. Keep `useSettings.js` as the renderer source of truth.
+Legacy top-level `cameraType`/`cameraUrl`/`cameraUsername`/`cameraPassword` files must keep loading as a single source and be rewritten into `cameraSources` on save.
+
+Empty UDP host and port `0` disable transmission. The camera form supports RTSP and direct camera WebSocket mode, one row per source, with at least one row always present. RTSP preserves credentials in separate persisted fields and sends them only in the transient authenticated `camera_url` sent to the backend. WebSocket mode stores `ws://<IP>:<port>` and sends an empty `camera_url` so the backend does not open RTSP. Only the source at `activeCameraIndex` is connected and synced to the backend; B (Circle) on the Home view cycles it. Keep `useSettings.js` as the renderer source of truth.
 
 ### Camera
 
