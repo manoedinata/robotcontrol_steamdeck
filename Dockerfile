@@ -23,8 +23,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN sed -i 's|http://deb.debian.org/debian|https://kartolo.sby.datautama.net.id/debian|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
     sed -i 's|http://deb.debian.org/debian|https://kartolo.sby.datautama.net.id/debian|g' /etc/apt/sources.list
 
-# Install runtime dependencies:
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Prevent Debian from automatically cleaning up the apt cache
+RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
+    echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
+# Install runtime dependencies using BuildKit cache mounts
+RUN --mount=type=cache,target=/var/lib/apt/lists \
+    --mount=type=cache,target=/var/cache/apt/archives \
+    apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     iputils-ping \
@@ -55,9 +61,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     libxext6 \
     libxrender1 \
-    tini \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    tini
 
 # go2rtc is a single static binary. Docker's TARGETARCH selects the matching
 # Steam Deck/container architecture while GO2RTC_VERSION keeps upgrades explicit.
@@ -73,11 +77,11 @@ RUN case "${TARGETARCH:-amd64}" in \
     && chmod 0755 /usr/local/bin/go2rtc \
     && /usr/local/bin/go2rtc --version
 
-# Install Node.js 22 LTS alongside the system python base image.
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Install Node.js 22 LTS alongside the system python base image, utilizing the apt cache.
+RUN --mount=type=cache,target=/var/lib/apt/lists \
+    --mount=type=cache,target=/var/cache/apt/archives \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs
 
 WORKDIR /app
 
@@ -87,13 +91,15 @@ WORKDIR /app
 
 # 1. Python Backend Dependencies
 COPY backend/requirements.txt ./backend/
-RUN pip install --no-cache-dir -r backend/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r backend/requirements.txt
 
 # 2. Node.js Frontend Dependencies
 COPY frontend/package.json ./frontend/
 # Note: Uncomment the line below if you use package-lock.json (recommended for consistent installs)
 # COPY frontend/package-lock.json ./frontend/
-RUN cd frontend && npm install
+RUN --mount=type=cache,target=/root/.npm \
+    cd frontend && npm install
 
 # -----------------------------------------------------------------------------
 # Runtime Setup
