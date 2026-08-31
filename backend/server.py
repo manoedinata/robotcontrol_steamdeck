@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from aiortc import RTCSessionDescription
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import JSONResponse
+from starlette.middleware.cors import CORSMiddleware
 import settings as settings_module
 from PTZController import PTZController, normalize_direction
 from WebRTCStream import WebRTCStream
@@ -454,6 +455,18 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# The renderer is served by Vite on a different origin during development
+# (http://127.0.0.1:5173), so signaling via POST /offer needs CORS headers.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 
 @app.get("/health")
