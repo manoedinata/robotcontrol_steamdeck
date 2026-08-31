@@ -13,11 +13,13 @@ from aiortc import RTCSessionDescription
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import JSONResponse
 import settings as settings_module
+from PTZController import PTZController, normalize_direction
 from WebRTCStream import WebRTCStream
 import utils
 
 LOGGER = logging.getLogger(__name__)
 UDP_SEND_HZ = 50
+PTZ_SEND_HZ = 5.0
 PING_INTERVAL_S = 2.0
 PING_TIMEOUT_S = 1.0
 PING_VALUE_PATTERN = re.compile(r"time[=<]([0-9]+(?:\.[0-9]+)?)\s*ms")
@@ -40,6 +42,11 @@ class RuntimeState:
     udp_enabled: bool = False
     clients: dict[WebSocket, asyncio.Lock] = field(default_factory=dict)
     udp_socket: socket.socket | None = None
+    ptz: PTZController | None = None
+    # Latest rotation request from any UI. None means "no button held", which
+    # the ptz loop turns into a continuous stop command (deadman behavior).
+    ptz_request: str | None = None
+    ptz_request_seq: int = 0
 
 
 def encode_packet(packet: dict[str, Any]) -> bytes:
@@ -65,13 +72,18 @@ video_stream = WebRTCStream(
 )
 
 
-def validate_config(config: dict[str, Any]) -> tuple[str, int, int, str, str, bool]:
+def validate_config(
+    config: dict[str, Any],
+) -> tuple[str, int, int, str, str, bool, str, str, str]:
     allowed_keys = {
         "udp_host",
         "udp_port",
         "udp_listen_port",
         "camera_url",
         "camera_backend",
+        "ptz_ip",
+        "ptz_username",
+        "ptz_password",
     }
     unknown_keys = set(config) - allowed_keys
     if unknown_keys:
@@ -84,6 +96,9 @@ def validate_config(config: dict[str, Any]) -> tuple[str, int, int, str, str, bo
     )
     camera_url_value = config.get("camera_url", runtime.config.camera_url)
     camera_backend_value = config.get("camera_backend", runtime.config.camera_backend)
+    ptz_ip_value = config.get("ptz_ip", runtime.config.ptz_ip)
+    ptz_username_value = config.get("ptz_username", runtime.config.ptz_username)
+    ptz_password_value = config.get("ptz_password", runtime.config.ptz_password)
     if not isinstance(udp_host_value, str):
         raise ValueError("udp_host must be a string")
     if isinstance(udp_port_value, bool) or not isinstance(udp_port_value, int):
@@ -99,11 +114,20 @@ def validate_config(config: dict[str, Any]) -> tuple[str, int, int, str, str, bo
         "aiortc",
     }:
         raise ValueError("camera_backend must be 'go2rtc' or 'aiortc'")
+    if not isinstance(ptz_ip_value, str):
+        raise ValueError("ptz_ip must be a string")
+    if not isinstance(ptz_username_value, str):
+        raise ValueError("ptz_username must be a string")
+    if not isinstance(ptz_password_value, str):
+        raise ValueError("ptz_password must be a string")
 
     udp_host = udp_host_value.strip()
     udp_port = udp_port_value
     udp_listen_port = udp_listen_port_value
     camera_url = camera_url_value.strip()
+    ptz_ip = ptz_ip_value.strip()
+    ptz_username = ptz_username_value.strip()
+    ptz_password = ptz_password_value
 
     udp_enabled = bool(udp_host or udp_port)
     if udp_enabled and (not udp_host or not 1 <= udp_port <= 65535):
@@ -122,6 +146,9 @@ def validate_config(config: dict[str, Any]) -> tuple[str, int, int, str, str, bo
         camera_url,
         camera_backend_value,
         udp_enabled,
+        ptz_ip,
+        ptz_username,
+        ptz_password,
     )
 
 
@@ -254,6 +281,81 @@ async def udp_loop() -> None:
         LOGGER.error("UDP loop crashed unexpectedly: %s", e)
 
 
+def sync_ptz_controller() -> None:
+    """Rebuild the PTZ controller when its settings change."""
+    ptz_ip = runtime.config.ptz_ip
+    if not ptz_ip:
+        if runtime.ptz is not None:
+            runtime.ptz = None
+            LOGGER.info("PTZ control disabled: no ptz_ip configured")
+        return
+
+    if runtime.ptz is None or runtime.ptz.ip != ptz_ip:
+        runtime.ptz = PTZController(
+            ip=ptz_ip,
+            username=runtime.config.ptz_username,
+            password=runtime.config.ptz_password,
+        )
+        LOGGER.info("PTZ control enabled for %s", ptz_ip)
+
+
+async def ptz_loop() -> None:
+    """Deadman loop for camera rotation.
+
+    Re-sends the latest rotation request (left/right/up/down) at a fixed rate
+    while a trigger is held, and continuously sends the ISAPI stop command
+    while no button is pressed. This keeps the camera from rotating forever
+    if a stop request from the UI is lost.
+    """
+    loop = asyncio.get_running_loop()
+    interval = utils.hz_to_s(PTZ_SEND_HZ)
+    next_send = loop.time()
+    last_error_log = 0.0
+    last_sent: str | None = None
+    pending_stop = True
+
+    try:
+        while True:
+            direction = runtime.ptz_request
+            controller = runtime.ptz
+            if controller is not None:
+                try:
+                    if direction is not None:
+                        await controller.move(direction)
+                    elif pending_stop or last_sent is not None:
+                        # Keep stopping until the camera acknowledges a stop,
+                        # so a lost stop request cannot leave it rotating.
+                        await controller.stop()
+                    last_sent = direction
+                except Exception as error:
+                    now = loop.time()
+                    if now - last_error_log >= 1.0:
+                        LOGGER.warning(
+                            "PTZ %s to %s failed: %s",
+                            "move " + str(direction) if direction else "stop",
+                            controller.ip,
+                            error,
+                        )
+                        last_error_log = now
+                    if direction is None:
+                        # Stop failed; retry on the next tick.
+                        pending_stop = True
+                else:
+                    if direction is None:
+                        pending_stop = False
+
+            next_send += interval
+            delay = next_send - loop.time()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            else:
+                next_send = loop.time()
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        LOGGER.error("PTZ loop crashed unexpectedly: %s", error)
+
+
 async def udp_receive_loop() -> None:
     """Receive schema-defined robot telemetry on the configured local port."""
     loop = asyncio.get_running_loop()
@@ -338,6 +440,7 @@ async def lifespan(_app: FastAPI):
         asyncio.create_task(udp_loop(), name="udp-sender"),
         asyncio.create_task(udp_receive_loop(), name="udp-receiver"),
         asyncio.create_task(udp_ping_loop(), name="udp-ping"),
+        asyncio.create_task(ptz_loop(), name="ptz-deadman"),
     )
     try:
         yield
@@ -417,6 +520,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         camera_url,
                         camera_backend,
                         udp_enabled,
+                        ptz_ip,
+                        ptz_username,
+                        ptz_password,
                     ) = validate_config(config)
                     runtime.config.udp_ip = udp_host
                     runtime.config.udp_port = udp_port
@@ -424,14 +530,27 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.config.camera_url = camera_url
                     runtime.config.camera_backend = camera_backend
                     runtime.udp_enabled = udp_enabled
+                    runtime.config.ptz_ip = ptz_ip
+                    runtime.config.ptz_username = ptz_username
+                    runtime.config.ptz_password = ptz_password
+                    sync_ptz_controller()
                     await video_stream.update_config(camera_url, camera_backend)
                     print(
                         "UDP config accepted: "
                         f"enabled={udp_enabled} destination="
                         f"{udp_host}:{udp_port} telemetry_port={udp_listen_port} "
+                        f"ptz_ip={ptz_ip or 'disabled'} "
                         f"clients={len(runtime.clients)}",
                         flush=True,
                     )
+                elif message_type == "ptz":
+                    # UI rotation request: "left", "right", "up", "down", or
+                    # null when no trigger is held (triggers continuous stop).
+                    direction = incoming_data.get("direction")
+                    if direction is not None:
+                        direction = normalize_direction(direction)
+                    runtime.ptz_request = direction
+                    runtime.ptz_request_seq += 1
                 elif message_type == "send":
                     packet = incoming_data.get("packet", {})
                     if not isinstance(packet, dict):
@@ -441,7 +560,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.packet_payload = encode_packet(next_packet)
                     runtime.current_packet = next_packet
                 else:
-                    raise ValueError("message type must be 'config' or 'send'")
+                    raise ValueError("message type must be 'config', 'send', or 'ptz'")
             except (
                 TypeError,
                 ValueError,
@@ -460,3 +579,5 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         if not runtime.clients:
             runtime.current_packet = utils.generate_default_state(PACKET_SCHEMA)
             runtime.packet_payload = encode_packet(runtime.current_packet)
+            # Last UI left; make sure the camera stops rotating.
+            runtime.ptz_request = None

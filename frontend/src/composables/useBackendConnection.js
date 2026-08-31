@@ -21,6 +21,7 @@ let telemetryTimer = null
 let shouldReconnect = false
 let latestConfig = null
 let latestPacket = null
+let latestPtzDirection = null
 
 function send(message) {
     if (socket?.readyState !== WebSocket.OPEN) return false
@@ -31,6 +32,7 @@ function send(message) {
 function sendCurrentState() {
     if (latestConfig) send({ type: 'config', config: latestConfig })
     if (latestPacket) send({ type: 'send', packet: latestPacket })
+    if (latestPtzDirection !== null) send({ type: 'ptz', direction: latestPtzDirection })
 }
 
 function clearTelemetry() {
@@ -143,6 +145,15 @@ function updateControl(packet) {
     send({ type: 'send', packet: latestPacket })
 }
 
+// Camera rotation request. `direction` is one of 'left' | 'right' | 'up' |
+// 'down' while a trigger is held, or null when none are held (the backend then
+// keeps sending the ISAPI stop command).
+function updatePtz(direction) {
+    if (latestPtzDirection === direction) return
+    latestPtzDirection = direction
+    send({ type: 'ptz', direction })
+}
+
 export function useBackendConnection() {
     return {
         connectionState: readonly(connectionState),
@@ -156,5 +167,6 @@ export function useBackendConnection() {
         disconnect,
         updateConfig,
         updateControl,
+        updatePtz,
     }
 }

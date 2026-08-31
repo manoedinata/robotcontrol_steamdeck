@@ -11,6 +11,7 @@ const {
   cameraSources,
   activeCameraIndex,
   cameraBackend,
+  ptzIp,
   maxYVelocity,
   maxThetaVelocity,
   udpHost,
@@ -24,6 +25,7 @@ const {
 // One editable form row per configured camera source.
 const cameras = ref([])
 const backend = ref(cameraBackend.value)
+const ptzAddress = ref(ptzIp.value)
 const maxY = ref(maxYVelocity.value)
 const maxTheta = ref(maxThetaVelocity.value)
 const targetHost = ref(udpHost.value)
@@ -52,9 +54,10 @@ const keyboardFields = {
   targetHost: { label: 'UDP target host', layout: 'hostname', maxLength: 253 },
   targetPort: { label: 'UDP target port', layout: 'integer', maxLength: 5 },
   listenPort: { label: 'UDP telemetry listen port', layout: 'integer', maxLength: 5 },
+  ptzAddress: { label: 'PTZ camera IP', layout: 'ip', maxLength: 253 },
 }
 
-const fieldValues = { maxY, maxTheta, targetHost, targetPort, listenPort }
+const fieldValues = { maxY, maxTheta, targetHost, targetPort, listenPort, ptzAddress }
 
 // Camera fields are addressed as `camera:<index>:<field>` so the on-screen
 // keyboard can target any source in the list.
@@ -174,6 +177,10 @@ watch(cameraBackend, (next) => {
   backend.value = next
 }, { immediate: true })
 
+watch(ptzIp, (next) => {
+  ptzAddress.value = next
+}, { immediate: true })
+
 watch(maxYVelocity, (next) => {
   maxY.value = next
 }, { immediate: true })
@@ -230,6 +237,7 @@ async function persistSettings({ focusSave = false } = {}) {
       cameraSources: cameraSourcePayload,
       activeCameraIndex: Math.min(activeCameraIndex.value, cameraSourcePayload.length - 1),
       cameraBackend: backend.value,
+      ptzIp: ptzAddress.value.trim(),
       maxYVelocity: Number.parseFloat(maxY.value),
       maxThetaVelocity: Number.parseFloat(maxTheta.value),
       udpHost: targetHost.value.trim(),
@@ -429,6 +437,24 @@ defineExpose({ saveBeforeClose })
             :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" min="0.1" max="100" step="0.1"
             placeholder="10" required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
             @click="openKeyboard('maxTheta')" @keydown="handleInputKeydown($event, 'maxTheta')" />
+        </div>
+      </div>
+
+      <div class="settings-panel-heading settings-panel-heading-divided">
+        <Camera :size="20" aria-hidden="true" />
+        <div>
+          <h2>Camera rotation (PTZ)</h2>
+          <p>Address of the camera that responds to rotation commands. LB/RB rotate left/right; LT/RT tilt down/up.</p>
+        </div>
+      </div>
+
+      <div class="udp-settings-row">
+        <div class="settings-field">
+          <label for="ptz-ip">PTZ camera IP <span>(optional)</span></label>
+          <input id="ptz-ip" v-model.trim="ptzAddress" class="form-control" type="text"
+            :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" placeholder="192.168.1.64"
+            autocomplete="off" data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
+            @click="openKeyboard('ptzAddress')" @keydown="handleInputKeydown($event, 'ptzAddress')" />
         </div>
       </div>
 
