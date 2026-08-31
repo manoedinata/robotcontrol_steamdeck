@@ -28,6 +28,22 @@ Valid robot telemetry is broadcast to all connected UIs:
 {"type":"receive","packet":{"battery_level":75}}
 ```
 
+## PTZ Control
+
+When `ptz_ip` is configured, the backend drives a PTZ camera's Hikvision ISAPI continuous-move endpoint on behalf of all connected UIs. `ptz_username` and `ptz_password` are optional and are tried as digest auth first, falling back to basic auth on a `401` response. Setting `ptz_ip` to an empty string disables PTZ and stops all camera HTTP traffic.
+
+The UI sends held PTZ requests over the controls WebSocket; `direction` and `zoom` are independent channels:
+
+```json
+{"type":"ptz","direction":"left","zoom":null}
+{"type":"ptz","direction":null,"zoom":"zoom-in"}
+```
+
+- `direction`: `"left"`, `"right"`, `"up"`, `"down"`, or `null`.
+- `zoom`: `"zoom-in"`, `"zoom-out"`, or `null`.
+
+A background loop resends the current command at 5 Hz and continuously sends stop commands while no request is active, so the camera always halts even if the UI disconnects or crashes. Failed stop commands are retried on the following tick. Camera movements map to ISAPI pan/tilt values and zoom to the ISAPI zoom channel; both use fixed speeds.
+
 ## Binary UDP Schema
 
 `../packets-schema.json` is the source of truth for the command header, endian, ordered fields, defaults, numeric types, and bounds. Supported field types are `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `float32`, and `float64`.

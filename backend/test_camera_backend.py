@@ -1,6 +1,11 @@
 import unittest
 
-from PTZController import direction_to_ptz_data, normalize_direction
+from PTZController import (
+    direction_to_ptz_data,
+    normalize_direction,
+    normalize_zoom,
+    zoom_to_ptz_data,
+)
 from server import validate_config
 
 
@@ -66,6 +71,37 @@ class PTZDirectionTests(unittest.TestCase):
         for direction in ("left", "right", "up", "down"):
             with self.subTest(direction=direction):
                 self.assertEqual(normalize_direction(direction), direction)
+
+
+class PTZZoomTests(unittest.TestCase):
+    def test_zoom_requests_map_to_zoom_axis(self) -> None:
+        self.assertIn(
+            "<pan>0</pan><tilt>0</tilt><zoom>60</zoom>",
+            zoom_to_ptz_data("zoom-in"),
+        )
+        self.assertIn(
+            "<pan>0</pan><tilt>0</tilt><zoom>-60</zoom>",
+            zoom_to_ptz_data("zoom-out"),
+        )
+
+    def test_zoom_speed_is_clamped(self) -> None:
+        self.assertIn("<zoom>100</zoom>", zoom_to_ptz_data("zoom-in", 500))
+        self.assertIn("<zoom>1</zoom>", zoom_to_ptz_data("zoom-out", -5))
+
+    def test_zoom_rejects_unknown_values(self) -> None:
+        for value in ("in", "wide", "", None, 3):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                zoom_to_ptz_data(value)
+
+    def test_normalize_zoom_rejects_unknown_values(self) -> None:
+        for value in ("in", "out", "", None, 3, "ZOOM-IN "):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                normalize_zoom(value)
+
+    def test_normalize_zoom_accepts_known_values(self) -> None:
+        for zoom in ("zoom-in", "zoom-out"):
+            with self.subTest(zoom=zoom):
+                self.assertEqual(normalize_zoom(zoom), zoom)
 
 
 if __name__ == "__main__":

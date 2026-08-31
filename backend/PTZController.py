@@ -1,7 +1,8 @@
 """Hikvision ISAPI PTZ control over HTTP.
 
-Translates rotation requests (left/right/up/down) into continuous PTZData XML
-PUT requests, mirroring the proven flow from camera_anyar/stream_camera.py.
+Translates rotation requests (left/right/up/down) and zoom requests
+(zoom-in/zoom-out) into continuous PTZData XML PUT requests, mirroring the
+proven flow from camera_anyar/stream_camera.py.
 """
 
 from __future__ import annotations
@@ -20,8 +21,10 @@ PTZ_SEND_HZ = 5.0
 REQUEST_TIMEOUT_S = 5.0
 
 MOVE_DIRECTIONS = ("left", "right", "up", "down")
+ZOOM_DIRECTIONS = ("zoom-in", "zoom-out")
 
 PTZ_SPEED = 60
+ZOOM_SPEED = 60
 
 PTZ_STOP_XML = (
     '<?xml version="1.0" encoding="UTF-8"?>'
@@ -52,6 +55,26 @@ def direction_to_ptz_data(direction: str, speed: int = PTZ_SPEED) -> str:
         f"<pan>{pan}</pan>"
         f"<tilt>{tilt}</tilt>"
         f"<zoom>0</zoom>"
+        "</PTZData>"
+    )
+
+
+def zoom_to_ptz_data(zoom: str, speed: int = ZOOM_SPEED) -> str:
+    """Build the continuous-move PTZData XML for a zoom request."""
+    speed = max(1, min(100, int(speed)))
+    if zoom == "zoom-in":
+        zoom_speed = speed
+    elif zoom == "zoom-out":
+        zoom_speed = -speed
+    else:
+        raise ValueError(f"Unknown PTZ zoom request: {zoom}")
+
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<PTZData xmlns="http://www.isapi.org/ver20/XMLSchema">'
+        "<pan>0</pan>"
+        "<tilt>0</tilt>"
+        f"<zoom>{zoom_speed}</zoom>"
         "</PTZData>"
     )
 
@@ -124,6 +147,12 @@ class PTZController:
         async with self._writer_lock:
             await self._put(xml)
 
+    async def zoom(self, zoom: str) -> None:
+        """Start (or keep) zooming in or out."""
+        xml = zoom_to_ptz_data(zoom)
+        async with self._writer_lock:
+            await self._put(xml)
+
     async def stop(self) -> None:
         """Send the zero-speed PTZData that halts continuous motion."""
         async with self._writer_lock:
@@ -140,3 +169,13 @@ def normalize_direction(value: Any) -> str:
             f"ptz direction must be one of {MOVE_DIRECTIONS}, got {direction!r}"
         )
     return direction
+
+
+def normalize_zoom(value: Any) -> str:
+    """Validate a zoom request coming from the UI."""
+    if not isinstance(value, str):
+        raise ValueError("ptz zoom must be a string")
+    zoom = value.strip().lower()
+    if zoom not in ZOOM_DIRECTIONS:
+        raise ValueError(f"ptz zoom must be one of {ZOOM_DIRECTIONS}, got {zoom!r}")
+    return zoom

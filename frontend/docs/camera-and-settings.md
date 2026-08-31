@@ -10,6 +10,7 @@ The Settings drawer stores camera source, UDP destination, velocity limits, and 
 - UDP command target host/port and telemetry listening port.
 - Maximum linear Y and angular theta velocity, `0.1..100`.
 - Built-in on-screen keyboard toggle.
+- Optional PTZ camera IP address for camera pan/tilt/zoom control.
 
 The persisted contract remains:
 
@@ -36,7 +37,8 @@ The persisted contract remains:
   "udpHost": "192.168.1.30",
   "udpPort": 5000,
   "udpListenPort": 8889,
-  "useOnScreenKeyboard": true
+  "useOnScreenKeyboard": true,
+  "ptzIp": ""
 }
 ```
 
@@ -53,6 +55,10 @@ For RTSP, the active source URL and `cameraBackend` are sent to the backend as `
 For WebSocket mode, Settings stores `ws://<IP>:<port>`. The renderer connects directly to the camera, sends `PlayStream2`, ignores text status messages, and decodes binary H.264 messages with WebCodecs into a canvas. The backend receives an empty `camera_url`, which keeps the RTSP transport idle. This path minimizes latency by avoiding a localhost camera relay and transcode.
 
 Camera errors are surfaced by the WebRTC connection and retried by the existing camera lifecycle. Camera source URLs are not logged in full because they may contain credentials. Local development can override the go2rtc executable with `GO2RTC_BINARY`; Docker bundles a pinned, checksum-verified binary.
+
+## PTZ Control
+
+`ptzIp` stores the IP of a PTZ-capable camera (Hikvision ISAPI compatible). When set, the renderer forwards it to FastAPI inside the `config` message as `ptz_ip` together with optional `ptz_username` and `ptz_password`; the backend then drives the camera's ISAPI continuous-move endpoint on behalf of all connected UIs. The address is optional: an empty value disables PTZ, hides nothing in the UI, and simply keeps the backend from issuing camera HTTP requests. Controller bindings are documented in `controls.md`.
 
 ## Built-in Keyboard
 

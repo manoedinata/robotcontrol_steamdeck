@@ -21,7 +21,7 @@ let telemetryTimer = null
 let shouldReconnect = false
 let latestConfig = null
 let latestPacket = null
-let latestPtzDirection = null
+let latestPtzRequest = null
 
 function send(message) {
     if (socket?.readyState !== WebSocket.OPEN) return false
@@ -32,7 +32,7 @@ function send(message) {
 function sendCurrentState() {
     if (latestConfig) send({ type: 'config', config: latestConfig })
     if (latestPacket) send({ type: 'send', packet: latestPacket })
-    if (latestPtzDirection !== null) send({ type: 'ptz', direction: latestPtzDirection })
+    if (latestPtzRequest !== null) send({ type: 'ptz', ...latestPtzRequest })
 }
 
 function clearTelemetry() {
@@ -145,13 +145,16 @@ function updateControl(packet) {
     send({ type: 'send', packet: latestPacket })
 }
 
-// Camera rotation request. `direction` is one of 'left' | 'right' | 'up' |
-// 'down' while a trigger is held, or null when none are held (the backend then
-// keeps sending the ISAPI stop command).
-function updatePtz(direction) {
-    if (latestPtzDirection === direction) return
-    latestPtzDirection = direction
-    send({ type: 'ptz', direction })
+// Camera PTZ request. `direction` is one of 'left' | 'right' | 'up' |
+// 'down' while a D-Pad button is held, `zoom` is 'in' | 'out' while RT/LT
+// is held, and both are null when nothing is held (the backend then keeps
+// sending the ISAPI stop command).
+function updatePtz(direction, zoom) {
+    const request = { direction: direction ?? null, zoom: zoom ?? null }
+    const previous = latestPtzRequest ?? { direction: null, zoom: null }
+    if (previous.direction === request.direction && previous.zoom === request.zoom) return
+    latestPtzRequest = request
+    send({ type: 'ptz', ...request })
 }
 
 export function useBackendConnection() {

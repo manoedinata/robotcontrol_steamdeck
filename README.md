@@ -2,7 +2,7 @@
 
 All-in-one camera and control UI for a differential-drive robot, designed for the Steam Deck. Camera input supports RTSP through backend WebRTC and direct camera WebSocket H.264 playback.
 
-The application consists of a FastAPI backend that handles camera transport, binary UDP command encoding, a 50 Hz command sender, battery telemetry reception, and host ping measurements, plus an Electron + Vue 3 frontend that provides the gamepad/touch/keyboard UI and telemetry HUD.
+The application consists of a FastAPI backend that handles camera transport, binary UDP command encoding, a 50 Hz command sender, battery telemetry reception, host ping measurements, and PTZ camera control (pan/tilt/zoom over ISAPI), plus an Electron + Vue 3 frontend that provides the gamepad/touch/keyboard UI and telemetry HUD.
 
 ## Repository Layout
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Simulated Hikvision ISAPI PTZ server for testing camera rotation.
+"""Simulated Hikvision ISAPI PTZ server for testing camera rotation and zoom.
 
 Accepts PUT requests to /ISAPI/PTZCtrl/channels/<channel>/continuous with
-PTZData XML bodies and logs each move/stop request. Intended to run locally
-while developing the Steam Deck robot monitor's PTZ integration.
+PTZData XML bodies and logs each move/zoom/stop request. Intended to run
+locally while developing the Steam Deck robot monitor's PTZ integration.
 
 Usage:
     python scripts/ptz_server.py --ip 127.0.0.1 --port 8080
@@ -41,11 +41,12 @@ class PTZHandler(SimpleHTTPRequestHandler):
 
         direction = self._parse_direction(body)
         if direction is None:
-            LOGGER.warning("PTZ stop received (pan=tilt=zoom=0)")
+            LOGGER.info("PTZ stop received (pan=tilt=zoom=0)")
             self._respond_stop()
             return
 
-        LOGGER.info("PTZ move received: %s", direction.upper())
+        action = "ZOOM" if direction.startswith("zoom") else "MOVE"
+        LOGGER.info("PTZ %s received: %s", action, direction.upper())
         self._respond_ok()
 
     def _is_ptz_endpoint(self) -> bool:

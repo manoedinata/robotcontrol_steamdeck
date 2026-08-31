@@ -14,8 +14,8 @@ import { usePTZState } from '../composables/usePTZState'
 // joystick components directly.
 const { maxYVelocity, maxThetaVelocity } = useSettings()
 const { updatePacket, resetPacket } = useControlState()
-const { resetDirection: resetPtzDirection, setDirection } = usePTZState()
-const { acquire: acquireGamepad, axes: gamepadAxes, gamepadName, shoulderButtons } = useGamepad()
+const { reset: resetPtz, setDirection, setZoom } = usePTZState()
+const { acquire: acquireGamepad, axes: gamepadAxes, gamepadName, shoulderButtons, dpadButtons } = useGamepad()
 
 const leftStickY = ref(0)
 const rightStickX = ref(0)
@@ -23,16 +23,25 @@ const draggedStick = ref(null)
 let animationFrame
 let releaseGamepad
 
-// Camera rotation mapping: LB -> left, RB -> right, LT -> down, RT -> up.
-// When multiple buttons are held at once the first in this priority order
-// wins, so the camera always gets exactly one direction.
-const PTZ_BUTTON_DIRECTIONS = { lb: 'left', rb: 'right', lt: 'down', rt: 'up' }
-const PTZ_BUTTON_ORDER = ['rt', 'lt', 'rb', 'lb']
+// Camera PTZ mapping: D-Pad moves the camera (up/down tilt, left/right pan)
+// and the triggers zoom (RT zoom-in, LT zoom-out). When several D-Pad
+// buttons are held at once the first in this priority order wins, so the
+// camera always gets exactly one rotation direction; zoom is independent
+// and combines with any rotation.
+const PTZ_DPAD_ORDER = ['up', 'down', 'left', 'right']
 
 const ptzDirection = computed(() => {
+  const buttons = dpadButtons.value
+  if (!buttons?.up && !buttons?.down && !buttons?.left && !buttons?.right) return null
+  return PTZ_DPAD_ORDER.find((name) => buttons[name]) ?? null
+})
+
+// RT (index 7) zooms in, LT (index 6) zooms out; RT wins if both are held.
+const ptzZoom = computed(() => {
   const buttons = shoulderButtons.value
-  if (!buttons?.lb && !buttons?.rb && !buttons?.lt && !buttons?.rt) return null
-  return PTZ_BUTTON_DIRECTIONS[PTZ_BUTTON_ORDER.find((name) => buttons[name])]
+  if (buttons?.rt) return 'in'
+  if (buttons?.lt) return 'out'
+  return null
 })
 
 const yVelocity = computed(() => -leftStickY.value * maxYVelocity.value)
@@ -61,10 +70,11 @@ function publishVelocity() {
 
 watch([yVelocity, thetaVelocity], publishVelocity, { immediate: true })
 
-// Push the current rotation request whenever it changes; `updatePtz` sends
-// only on transitions, and null (all triggers released) triggers the backend
+// Push the current PTZ request whenever it changes; `updatePtz` sends
+// only on transitions, and null (nothing held) triggers the backend
 // deadman stop.
 watch(ptzDirection, (next) => setDirection(next), { immediate: true })
+watch(ptzZoom, (next) => setZoom(next), { immediate: true })
 
 function updateGamepad() {
   if (gamepadName.value) {
@@ -95,7 +105,7 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(animationFrame)
   releaseGamepad?.()
   resetPacket()
-  resetPtzDirection()
+  resetPtz()
 })
 </script>
 

@@ -6,6 +6,10 @@ const axes = ref([0, 0, 0, 0])
 // 5 = RB, 6 = LT, 7 = RT. Triggers on many pads report as analog values
 // instead of booleans, so a small threshold marks them "pressed".
 const shoulderButtons = ref({ lb: false, rb: false, lt: false, rt: false })
+// Live D-pad state, polled each frame. Standard mapping: 12 = up, 13 = down,
+// 14 = left, 15 = right. Used for camera rotation, so it must stay separate
+// from the navigation `direction` events that the same buttons also emit.
+const dpadButtons = ref({ up: false, down: false, left: false, right: false })
 const handlers = new Set()
 
 const DIRECTION_REPEAT_DELAY = 360
@@ -53,6 +57,7 @@ function pollGamepad(timestamp) {
         gamepadName.value = ''
         axes.value = [0, 0, 0, 0]
         shoulderButtons.value = { lb: false, rb: false, lt: false, rt: false }
+        dpadButtons.value = { up: false, down: false, left: false, right: false }
         previousButtons = []
         heldDirection = null
         animationFrame = requestAnimationFrame(pollGamepad)
@@ -67,6 +72,13 @@ function pollGamepad(timestamp) {
         rb: Boolean(gamepad.buttons[5]?.pressed),
         lt: buttonPressed(gamepad, 6),
         rt: buttonPressed(gamepad, 7),
+    }
+
+    dpadButtons.value = {
+        up: Boolean(gamepad.buttons[12]?.pressed),
+        down: Boolean(gamepad.buttons[13]?.pressed),
+        left: Boolean(gamepad.buttons[14]?.pressed),
+        right: Boolean(gamepad.buttons[15]?.pressed),
     }
 
     const direction = currentDirection(gamepad)
@@ -100,6 +112,7 @@ function stopPolling() {
     gamepadName.value = ''
     axes.value = [0, 0, 0, 0]
     shoulderButtons.value = { lb: false, rb: false, lt: false, rt: false }
+    dpadButtons.value = { up: false, down: false, left: false, right: false }
     previousButtons = []
     heldDirection = null
 }
@@ -133,6 +146,7 @@ export function useGamepad() {
         axes: readonly(axes),
         gamepadName: readonly(gamepadName),
         shoulderButtons: readonly(shoulderButtons),
+        dpadButtons: readonly(dpadButtons),
         acquire,
         registerHandler,
     }
