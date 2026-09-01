@@ -9,7 +9,7 @@ Vue renderer                    Electron main                 FastAPI backend
 -------------                   -------------                 ---------------
 Camera/control UI               BrowserWindow                WS /ws/controls
 Gamepad and touch input  <IPC>  Settings JSON                Binary UDP at 50 Hz
-Typed WebSocket client          Exit/lifecycle               POST /offer (RTSP WebRTC)
+Typed WebSocket client          Exit/lifecycle               POST /offer?src= (RTSP WebRTC)
 Direct camera WebSocket + H.264 canvas                    UDP telemetry receiver
 ```
 
@@ -34,7 +34,7 @@ Electron has no robot or camera relay transport code. The renderer may connect d
 
 Vue owns input interpretation and UI state. `useBackendConnection.js` owns one WebSocket, reconnects every two seconds, replays latest configuration and control state after connection, and tracks live/stale telemetry. `useControlState.js` owns the packet object and coalesces reactive updates per animation frame. `useSettings.js` persists the frontend settings shape, including the telemetry listening port, keeps RTSP credentials separate from the source URL, and translates them into backend configuration.
 
-FastAPI owns network configuration, schema-driven packet validation/encoding/decoding, the 50 Hz command task, the independently bound telemetry receiver, camera backend selection, and WebRTC signaling. The default go2rtc backend is a FastAPI-managed localhost child process; aiortc remains an explicit in-process alternative. `packets-schema.json` at the repository root is the binary packet source of truth.
+FastAPI owns network configuration, schema-driven packet validation/encoding/decoding, the 50 Hz command task, the independently bound telemetry receiver, camera backend selection, and WebRTC signaling. Every configured RTSP source is registered and kept connected at once so the UI can switch instantly; `POST /offer?src=<id>` selects one. The default go2rtc backend is a FastAPI-managed localhost child process; aiortc remains an explicit in-process alternative. `packets-schema.json` at the repository root is the binary packet source of truth.
 
 The Docker image uses host networking so the frontend renderer continues to connect to `http://127.0.0.1:8000` without cross-container DNS. The entrypoint starts both processes, waits for backend readiness via `GET /health`, and shuts them down together when Electron exits. Settings are persisted in a bind-mounted host directory controlled by `APP_SETTINGS_DIR`.
 

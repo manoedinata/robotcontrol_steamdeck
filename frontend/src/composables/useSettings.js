@@ -33,34 +33,67 @@ const useOnScreenKeyboard = ref(true)
 let loaded = false
 const { updateConfig } = useBackendConnection()
 
-// The active source drives the live feed; the others stay configured but idle.
+// Every configured source stays connected at once so switching is instant;
+// `activeCameraIndex` only decides which warm feed is shown. `cameraUrl` is
+// kept for the Home HUD's address readout.
 const activeCamera = computed(() => cameraSources.value[activeCameraIndex.value] ?? EMPTY_CAMERA_SOURCE)
 const cameraUrl = computed(() => activeCamera.value.url)
-const cameraType = computed(() => activeCamera.value.type)
-const cameraUsername = computed(() => activeCamera.value.username)
-const cameraPassword = computed(() => activeCamera.value.password)
 
-function buildBackendCameraUrl() {
-    const sourceUrl = cameraUrl.value.trim()
+// A stream id is stable per source slot and is how the renderer addresses a
+// backend-dialed RTSP stream (`POST /offer?src=<id>`).
+function cameraStreamId(index) {
+    return `cam-${index}`
+}
+
+function buildBackendCameraUrl(source) {
+    const sourceUrl = (source?.url ?? '').trim()
     if (!sourceUrl || !sourceUrl.toLowerCase().startsWith('rtsp:')) return sourceUrl
 
     try {
         const authenticatedUrl = new URL(sourceUrl)
-        authenticatedUrl.username = cameraUsername.value
-        authenticatedUrl.password = cameraPassword.value
+        authenticatedUrl.username = source.username ?? ''
+        authenticatedUrl.password = source.password ?? ''
         return authenticatedUrl.toString()
     } catch {
         return sourceUrl
     }
 }
 
+// Per-source descriptor the Home view renders one warm CameraFeed from.
+const cameraFeeds = computed(() => cameraSources.value.map((source, index) => {
+    const url = (source.url ?? '').trim()
+    return {
+        // Stable per slot so HUD status tracking survives a remount.
+        id: cameraStreamId(index),
+        // Changes when the source is edited so Vue remounts (reconnects)
+        // that one feed; unchanged when only the active source switches.
+        key: `${cameraStreamId(index)}:${source.type}:${url}`,
+        index,
+        type: source.type,
+        // Empty until the source is actually configured, so an unconfigured
+        // slot shows "idle" instead of retrying against the backend.
+        streamId: source.type === 'rtsp' && url ? cameraStreamId(index) : '',
+        // Only WebSocket sources are reached directly by the renderer.
+        wsUrl: source.type === 'websocket' ? url : '',
+    }
+}))
+
 function syncBackendConfig() {
+    // Send every RTSP source so the backend keeps them all warm. WebSocket
+    // sources bypass the backend camera transport entirely.
+    const cameraStreams = cameraSources.value
+        .map((source, index) => ({ source, index }))
+        .filter(({ source }) => source.type === 'rtsp' && (source.url ?? '').trim())
+        .map(({ source, index }) => ({
+            id: cameraStreamId(index),
+            url: buildBackendCameraUrl(source),
+        }))
+
     updateConfig({
         udp_host: udpHost.value.trim(),
         udp_port: udpPort.value,
         udp_listen_port: udpListenPort.value,
-        // Direct camera WebSockets bypass the backend camera transport.
-        camera_url: cameraType.value === 'websocket' ? '' : buildBackendCameraUrl(),
+        camera_streams: cameraStreams,
         camera_backend: cameraBackend.value,
         ptz_ip: ptzIp.value.trim(),
     })
@@ -165,10 +198,8 @@ export function useSettings() {
     return {
         cameraSources: readonly(cameraSources),
         activeCameraIndex: readonly(activeCameraIndex),
+        cameraFeeds,
         cameraUrl,
-        cameraType,
-        cameraUsername,
-        cameraPassword,
         cameraBackend: readonly(cameraBackend),
         ptzIp: readonly(ptzIp),
         maxYVelocity: readonly(maxYVelocity),

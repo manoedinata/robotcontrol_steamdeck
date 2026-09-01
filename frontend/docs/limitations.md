@@ -2,7 +2,8 @@
 
 - Local development: the FastAPI backend must be started separately; Electron does not supervise it. The Docker path bundles and supervises both processes inside one container.
 - Backend runtime state is process-local and requires a single Uvicorn worker.
-- All connected UIs share one UDP destination, camera source, and control packet.
+- All connected UIs share one UDP destination, one set of camera sources, and one control packet.
+- Every configured camera source is connected simultaneously and kept warm for instant switching, so CPU, GPU, and network use scale with the number of sources; there is no cap or lazy-connect.
 - Robot telemetry currently exposes only battery percentage. The HUD also shows ICMP host latency to the configured UDP destination, but command acknowledgement, sequence IDs, exact UDP command RTT, RX rate, and loss are not implemented.
 - UDP is connectionless; robot motion shutdown depends on its receive-timeout watchdog.
 - Camera playback requires a reachable RTSP source and FFmpeg/PyAV support through `aiortc`.

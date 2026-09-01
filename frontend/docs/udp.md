@@ -13,10 +13,13 @@ Configuration:
     "udp_host": "127.0.0.1",
     "udp_port": 8888,
     "udp_listen_port": 8889,
-    "camera_url": "rtsp://camera/stream"
+    "camera_streams": [{ "id": "cam-0", "url": "rtsp://camera/stream" }],
+    "camera_backend": "go2rtc"
   }
 }
 ```
+
+`camera_streams` lists every RTSP source to keep connected at once (WebSocket sources are omitted). Ids match `[A-Za-z0-9_-]{1,64}` and are unique; the renderer uses `cam-<sourceIndex>`. An empty or absent list keeps camera capture idle.
 
 Control state:
 

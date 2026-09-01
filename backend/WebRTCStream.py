@@ -13,31 +13,58 @@ from urllib.request import Request, urlopen
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaPlayer
 
+# A config carries every RTSP source that should stay warm as (id, url) pairs.
+CameraStreams = tuple[tuple[str, str], ...]
+
+
+def _resolve_stream_id(streams: dict[str, str], requested: str | None) -> str:
+    """Pick the stream a WebRTC offer targets.
+
+    The renderer names the stream through ``?src=<id>``; when it is omitted
+    (or empty) and exactly one stream is configured, fall back to that one so
+    single-camera setups keep working without the query parameter.
+    """
+    if requested:
+        if requested not in streams:
+            raise ValueError(f"unknown camera stream: {requested!r}")
+        return requested
+    if len(streams) == 1:
+        return next(iter(streams))
+    if not streams:
+        raise ValueError("no camera stream is configured")
+    raise ValueError("camera stream id (?src=) is required with multiple streams")
+
 
 class _AiortcStream:
     """Create and clean up one RTSP-backed WebRTC peer per viewer."""
 
-    def __init__(self, camera_url: str, logger: logging.Logger) -> None:
-        self._camera_url = camera_url
+    def __init__(self, streams: CameraStreams, logger: logging.Logger) -> None:
+        self._streams: dict[str, str] = dict(streams)
         self._logger = logger
-        self._sessions: dict[RTCPeerConnection, MediaPlayer] = {}
+        # Each peer remembers the stream id and URL it was opened with so a
+        # config change can close only the peers whose source actually changed.
+        self._sessions: dict[
+            RTCPeerConnection, tuple[str, str, MediaPlayer]
+        ] = {}
         self._lock = asyncio.Lock()
 
-    async def update_url(self, camera_url: str) -> None:
+    async def update_streams(self, streams: CameraStreams) -> None:
         async with self._lock:
-            self._camera_url = camera_url
-            sessions = tuple(self._sessions)
+            self._streams = dict(streams)
+            stale = [
+                peer
+                for peer, (stream_id, url, _) in self._sessions.items()
+                if self._streams.get(stream_id) != url
+            ]
 
-        await asyncio.gather(*(self.close_peer(peer) for peer in sessions))
+        await asyncio.gather(*(self.close_peer(peer) for peer in stale))
 
     async def create_answer(
-        self, offer: RTCSessionDescription
+        self, offer: RTCSessionDescription, stream_id: str | None = None
     ) -> RTCSessionDescription:
         async with self._lock:
-            camera_url = self._camera_url
-
-        if not camera_url:
-            raise ValueError("camera_url is not configured")
+            resolved_id = _resolve_stream_id(self._streams, stream_id)
+            camera_url = self._streams[resolved_id]
 
         peer = RTCPeerConnection()
         player: MediaPlayer | None = None
@@ -66,7 +93,7 @@ class _AiortcStream:
             await peer.setLocalDescription(answer)
 
             async with self._lock:
-                self._sessions[peer] = player
+                self._sessions[peer] = (resolved_id, camera_url, player)
             return peer.localDescription
         except Exception:
             if player is not None:
@@ -77,9 +104,10 @@ class _AiortcStream:
 
     async def close_peer(self, peer: RTCPeerConnection) -> None:
         async with self._lock:
-            player = self._sessions.pop(peer, None)
+            session = self._sessions.pop(peer, None)
 
-        if player is not None:
+        if session is not None:
+            _, _, player = session
             if player.video is not None:
                 player.video.stop()
             if player.audio is not None:
@@ -94,15 +122,20 @@ class _AiortcStream:
 
 
 class _Go2RtcStream:
-    """Proxy RTSP/WebRTC signaling through one local go2rtc process."""
+    """Proxy RTSP/WebRTC signaling through one local go2rtc process.
 
-    STREAM_NAME = "robot-camera"
+    go2rtc keeps a source connected while at least one consumer is attached,
+    so holding a WebRTC peer open per stream is what keeps every configured
+    camera warm for an instant switch.
+    """
+
     API_URL = "http://127.0.0.1:1984"
     API_TIMEOUT_SECONDS = 15
 
-    def __init__(self, camera_url: str, logger: logging.Logger) -> None:
+    def __init__(self, streams: CameraStreams, logger: logging.Logger) -> None:
         self._logger = logger
-        self._camera_url = camera_url
+        self._streams: dict[str, str] = dict(streams)
+        self._registered: dict[str, str] = {}
         self._process: subprocess.Popen[bytes] | None = None
         self._config_path: str | None = None
         self._lock = asyncio.Lock()
@@ -162,6 +195,7 @@ class _Go2RtcStream:
             ) from error
 
         self._process = process
+        self._registered = {}
         for _ in range(20):
             if process.poll() is not None:
                 await self._stop_process()
@@ -176,7 +210,7 @@ class _Go2RtcStream:
         raise RuntimeError("go2rtc backend did not become ready")
 
     def _create_config_file(self) -> str:
-        config = """api:\n  listen: 127.0.0.1:1984\nwebrtc:\n  listen: :8555\nstreams:\n  robot-camera:\n"""
+        config = "api:\n  listen: 127.0.0.1:1984\nwebrtc:\n  listen: :8555\n"
         handle = tempfile.NamedTemporaryFile(
             mode="w", prefix="robot-monitor-go2rtc-", suffix=".yaml", delete=False
         )
@@ -188,6 +222,7 @@ class _Go2RtcStream:
     async def _stop_process(self) -> None:
         process = self._process
         self._process = None
+        self._registered = {}
         if process is None:
             return
         if process.poll() is None:
@@ -206,35 +241,60 @@ class _Go2RtcStream:
                 pass
             self._config_path = None
 
-    async def _ensure_stream(self, camera_url: str) -> None:
+    async def _sync_streams(self) -> None:
+        """Register/refresh/drop go2rtc streams to match the config."""
         if self._process is None or self._process.poll() is not None:
             await self._start()
-        query = urlencode({"name": self.STREAM_NAME, "src": camera_url})
-        await self._api_request(
-            "PUT",
-            f"/api/streams?{query}",
-            phase="RTSP stream registration",
-        )
-        self._camera_url = camera_url
 
-    async def update_url(self, camera_url: str) -> None:
+        for stream_id, url in self._streams.items():
+            if self._registered.get(stream_id) == url:
+                continue
+            if stream_id in self._registered:
+                # The URL changed; drop the stale source before re-adding so
+                # go2rtc does not keep both.
+                with suppress(OSError, SocketTimeout):
+                    await self._api_request(
+                        "DELETE",
+                        f"/api/streams?src={stream_id}",
+                        phase="RTSP stream refresh",
+                    )
+            query = urlencode({"name": stream_id, "src": url})
+            await self._api_request(
+                "PUT",
+                f"/api/streams?{query}",
+                phase="RTSP stream registration",
+            )
+            self._registered[stream_id] = url
+
+        for stream_id in tuple(self._registered):
+            if stream_id in self._streams:
+                continue
+            with suppress(OSError, SocketTimeout):
+                await self._api_request(
+                    "DELETE",
+                    f"/api/streams?src={stream_id}",
+                    phase="RTSP stream removal",
+                )
+            self._registered.pop(stream_id, None)
+
+    async def update_streams(self, streams: CameraStreams) -> None:
         async with self._lock:
-            self._camera_url = camera_url
-            if not camera_url:
+            self._streams = dict(streams)
+            if not self._streams:
+                await self._stop_process()
                 return
-            await self._ensure_stream(camera_url)
+            await self._sync_streams()
 
     async def create_answer(
-        self, offer: RTCSessionDescription
+        self, offer: RTCSessionDescription, stream_id: str | None = None
     ) -> RTCSessionDescription:
         async with self._lock:
-            if not self._camera_url:
-                raise ValueError("camera_url is not configured")
-            await self._ensure_stream(self._camera_url)
+            resolved_id = _resolve_stream_id(self._streams, stream_id)
+            await self._sync_streams()
             body = offer.sdp.encode()
             answer_sdp = await self._api_request(
                 "POST",
-                f"/api/webrtc?src={self.STREAM_NAME}",
+                f"/api/webrtc?src={resolved_id}",
                 body,
                 "application/sdp",
                 "WebRTC SDP exchange",
@@ -253,36 +313,42 @@ class WebRTCStream:
     """Select and manage the configured RTSP-to-WebRTC backend."""
 
     def __init__(
-        self, camera_url: str, logger: logging.Logger, backend: str = "go2rtc"
+        self,
+        streams: CameraStreams,
+        logger: logging.Logger,
+        backend: str = "go2rtc",
     ) -> None:
         self._logger = logger
         self._backend = backend
-        self._camera_url = camera_url
+        self._streams: CameraStreams = tuple(streams)
         self._stream: _AiortcStream | _Go2RtcStream
         self._set_backend(backend)
 
     def _set_backend(self, backend: str) -> None:
         if backend == "aiortc":
-            self._stream = _AiortcStream(self._camera_url, self._logger)
+            self._stream = _AiortcStream(self._streams, self._logger)
         elif backend == "go2rtc":
-            self._stream = _Go2RtcStream(self._camera_url, self._logger)
+            self._stream = _Go2RtcStream(self._streams, self._logger)
         else:
             raise ValueError("camera_backend must be 'go2rtc' or 'aiortc'")
 
-    async def update_config(self, camera_url: str, backend: str) -> None:
+    async def update_config(self, streams: CameraStreams, backend: str) -> None:
+        streams = tuple(streams)
         if backend != self._backend:
             await self.close()
             self._backend = backend
-            self._camera_url = camera_url
+            self._streams = streams
             self._set_backend(backend)
+            if streams:
+                await self._stream.update_streams(streams)
             return
-        self._camera_url = camera_url
-        await self._stream.update_url(camera_url)
+        self._streams = streams
+        await self._stream.update_streams(streams)
 
     async def create_answer(
-        self, offer: RTCSessionDescription
+        self, offer: RTCSessionDescription, stream_id: str | None = None
     ) -> RTCSessionDescription:
-        return await self._stream.create_answer(offer)
+        return await self._stream.create_answer(offer, stream_id)
 
     async def close(self) -> None:
         await self._stream.close()

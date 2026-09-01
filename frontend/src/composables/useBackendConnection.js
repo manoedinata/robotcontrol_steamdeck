@@ -15,6 +15,15 @@ const telemetryState = ref('waiting')
 const pingMs = ref(null)
 const pingState = ref('waiting')
 const signalingUrl = new URL('/offer', backendUrl).toString()
+
+// Receive-only WebRTC signaling for one backend-dialed RTSP stream. The
+// stream id selects which warm source the answer is for.
+function cameraSignalingUrl(streamId) {
+    if (!streamId) return signalingUrl
+    const url = new URL('/offer', backendUrl)
+    url.searchParams.set('src', streamId)
+    return url.toString()
+}
 let socket = null
 let reconnectTimer = null
 let telemetryTimer = null
@@ -181,6 +190,7 @@ export function useBackendConnection() {
         pingMs: readonly(pingMs),
         pingState: readonly(pingState),
         signalingUrl,
+        cameraSignalingUrl,
         connect,
         disconnect,
         updateConfig,

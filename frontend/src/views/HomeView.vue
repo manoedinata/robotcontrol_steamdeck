@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive } from 'vue'
 import { Battery, Camera, Gamepad2, LoaderCircle, Server } from '@lucide/vue'
 import CameraFeed from '../components/CameraFeed.vue'
 import ControllerPanel from '../components/ControllerPanel.vue'
@@ -7,10 +7,20 @@ import { useGamepad } from '../composables/useGamepad'
 import { useSettings } from '../composables/useSettings'
 import { useBackendConnection } from '../composables/useBackendConnection'
 
-const { cameraUrl, cameraSources, activeCameraIndex, switchCamera } = useSettings()
+const { cameraUrl, cameraSources, activeCameraIndex, cameraFeeds, switchCamera } = useSettings()
 const { gamepadName, registerHandler } = useGamepad()
 const { telemetry, telemetryState, pingMs, pingState } = useBackendConnection()
-const cameraState = ref('idle')
+
+// Every configured source is mounted and connected at once; this tracks each
+// feed's status by id so the HUD can reflect just the visible one.
+const cameraStates = reactive({})
+function onFeedStatus(id, state) {
+  cameraStates[id] = state
+}
+const cameraState = computed(() => {
+  const active = cameraFeeds.value[activeCameraIndex.value]
+  return (active && cameraStates[active.id]) || 'idle'
+})
 let unregisterGamepadHandler
 
 // Circle cycles the live camera source. Priority above the action bar so the
@@ -72,7 +82,9 @@ const statusLabel = computed(() => {
 
 <template>
   <div class="home-layout">
-    <CameraFeed @status-change="cameraState = $event" />
+    <CameraFeed v-for="feed in cameraFeeds" v-show="feed.index === activeCameraIndex" :key="feed.key"
+      :mode="feed.type" :stream-id="feed.streamId" :ws-url="feed.wsUrl"
+      @status-change="(state) => onFeedStatus(feed.id, state)" />
 
     <header class="hud-brand" aria-label="Application title">
       <span>

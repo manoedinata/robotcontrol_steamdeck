@@ -9,6 +9,7 @@ from PTZController import (
     zoom_to_ptz_data,
 )
 from server import validate_config
+from WebRTCStream import _resolve_stream_id
 
 
 class CameraBackendConfigTests(unittest.TestCase):
@@ -26,6 +27,76 @@ class CameraBackendConfigTests(unittest.TestCase):
     def test_unknown_backend_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             validate_config({"camera_backend": "ffmpeg"})
+
+
+class CameraStreamsConfigTests(unittest.TestCase):
+    def test_defaults_to_no_streams(self) -> None:
+        self.assertEqual(validate_config({})[3], ())
+
+    def test_valid_streams_are_normalized_to_id_url_pairs(self) -> None:
+        streams = validate_config(
+            {
+                "camera_streams": [
+                    {"id": "cam-0", "url": "  rtsp://user:pw@10.0.0.5:554/s  "},
+                    {"id": "cam-1", "url": "rtsp://10.0.0.6/live"},
+                ]
+            }
+        )[3]
+        self.assertEqual(
+            streams,
+            (
+                ("cam-0", "rtsp://user:pw@10.0.0.5:554/s"),
+                ("cam-1", "rtsp://10.0.0.6/live"),
+            ),
+        )
+
+    def test_empty_list_clears_streams(self) -> None:
+        self.assertEqual(validate_config({"camera_streams": []})[3], ())
+
+    def test_rejects_non_rtsp_url(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_config({"camera_streams": [{"id": "cam-0", "url": "http://x/y"}]})
+
+    def test_rejects_bad_stream_id(self) -> None:
+        for bad_id in ("cam 0", "cam/0", "", "x" * 65):
+            with self.subTest(bad_id=bad_id), self.assertRaises(ValueError):
+                validate_config(
+                    {"camera_streams": [{"id": bad_id, "url": "rtsp://h/s"}]}
+                )
+
+    def test_rejects_duplicate_stream_ids(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_config(
+                {
+                    "camera_streams": [
+                        {"id": "cam-0", "url": "rtsp://h/a"},
+                        {"id": "cam-0", "url": "rtsp://h/b"},
+                    ]
+                }
+            )
+
+    def test_rejects_non_list_and_legacy_camera_url(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_config({"camera_streams": "rtsp://h/s"})
+        with self.assertRaises(ValueError):
+            validate_config({"camera_url": "rtsp://h/s"})
+
+
+class ResolveStreamIdTests(unittest.TestCase):
+    def test_named_stream_is_returned_when_it_exists(self) -> None:
+        streams = {"cam-0": "rtsp://h/a", "cam-1": "rtsp://h/b"}
+        self.assertEqual(_resolve_stream_id(streams, "cam-1"), "cam-1")
+
+    def test_named_stream_that_is_unknown_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            _resolve_stream_id({"cam-0": "rtsp://h/a"}, "cam-9")
+
+    def test_missing_id_falls_back_only_with_a_single_stream(self) -> None:
+        self.assertEqual(_resolve_stream_id({"cam-0": "rtsp://h/a"}, None), "cam-0")
+        with self.assertRaises(ValueError):
+            _resolve_stream_id({"a": "rtsp://h/a", "b": "rtsp://h/b"}, None)
+        with self.assertRaises(ValueError):
+            _resolve_stream_id({}, None)
 
 
 class PTZConfigTests(unittest.TestCase):

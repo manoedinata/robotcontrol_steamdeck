@@ -71,7 +71,7 @@ runtime = RuntimeState(
         udp_ip="127.0.0.1",
         udp_port=8888,
         udp_listen_port=8889,
-        camera_url="rtsp://admin:password@127.0.0.1:554/stream",
+        camera_streams=(),
         camera_backend="go2rtc",
     ),
     current_packet=default_packet,
@@ -80,18 +80,60 @@ runtime = RuntimeState(
 
 
 video_stream = WebRTCStream(
-    runtime.config.camera_url, logger=LOGGER, backend=runtime.config.camera_backend
+    runtime.config.camera_streams,
+    logger=LOGGER,
+    backend=runtime.config.camera_backend,
 )
+
+# A camera stream id is echoed straight into a go2rtc URL and used as a
+# config-map key, so keep it to an unambiguous, injection-safe alphabet.
+CAMERA_STREAM_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def validate_camera_streams(value: Any) -> tuple[tuple[str, str], ...]:
+    """Validate the list of RTSP sources kept warm for instant switching.
+
+    Each entry is ``{"id": <stream id>, "url": <rtsp url>}``. Ids must be
+    unique and match ``CAMERA_STREAM_ID_RE``; urls must be RTSP with a host.
+    An empty list means no camera source and keeps every transport idle.
+    """
+    if not isinstance(value, list):
+        raise ValueError("camera_streams must be a list")
+
+    streams: list[tuple[str, str]] = []
+    seen_ids: set[str] = set()
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise ValueError("each camera stream must be an object")
+        stream_id = entry.get("id")
+        url_value = entry.get("url")
+        if not isinstance(stream_id, str) or not CAMERA_STREAM_ID_RE.fullmatch(
+            stream_id
+        ):
+            raise ValueError(
+                "camera stream id must match [A-Za-z0-9_-]{1,64}"
+            )
+        if stream_id in seen_ids:
+            raise ValueError(f"duplicate camera stream id: {stream_id!r}")
+        if not isinstance(url_value, str):
+            raise ValueError("camera stream url must be a string")
+        url = url_value.strip()
+        parsed = urlparse(url)
+        if not url or parsed.scheme != "rtsp" or not parsed.hostname:
+            raise ValueError("camera stream url must be a valid RTSP URL")
+        seen_ids.add(stream_id)
+        streams.append((stream_id, url))
+    return tuple(streams)
 
 
 def validate_config(
     config: dict[str, Any],
-) -> tuple[str, int, int, str, str, bool, str, str, str]:
+) -> tuple[str, int, int, tuple[tuple[str, str], ...], str, bool, str, str, str]:
     allowed_keys = {
         "udp_host",
         "udp_port",
         "udp_listen_port",
-        "camera_url",
+        "camera_streams",
         "camera_backend",
         "ptz_ip",
         "ptz_username",
@@ -106,7 +148,11 @@ def validate_config(
     udp_listen_port_value = config.get(
         "udp_listen_port", runtime.config.udp_listen_port
     )
-    camera_url_value = config.get("camera_url", runtime.config.camera_url)
+    camera_streams = (
+        validate_camera_streams(config["camera_streams"])
+        if "camera_streams" in config
+        else runtime.config.camera_streams
+    )
     camera_backend_value = config.get("camera_backend", runtime.config.camera_backend)
     ptz_ip_value = config.get("ptz_ip", runtime.config.ptz_ip)
     ptz_username_value = config.get("ptz_username", runtime.config.ptz_username)
@@ -119,8 +165,6 @@ def validate_config(
         udp_listen_port_value, int
     ):
         raise ValueError("udp_listen_port must be an integer")
-    if not isinstance(camera_url_value, str):
-        raise ValueError("camera_url must be a string")
     if not isinstance(camera_backend_value, str) or camera_backend_value not in {
         "go2rtc",
         "aiortc",
@@ -136,7 +180,6 @@ def validate_config(
     udp_host = udp_host_value.strip()
     udp_port = udp_port_value
     udp_listen_port = udp_listen_port_value
-    camera_url = camera_url_value.strip()
     ptz_ip = ptz_ip_value.strip()
     ptz_username = ptz_username_value.strip()
     ptz_password = ptz_password_value
@@ -146,16 +189,11 @@ def validate_config(
         raise ValueError("udp_host and udp_port 1..65535 must both be set")
     if not 1 <= udp_listen_port <= 65535:
         raise ValueError("udp_listen_port must be in the range 1..65535")
-    parsed_camera_url = urlparse(camera_url)
-    if camera_url and (
-        parsed_camera_url.scheme != "rtsp" or not parsed_camera_url.hostname
-    ):
-        raise ValueError("camera_url must be a valid RTSP URL")
     return (
         udp_host,
         udp_port,
         udp_listen_port,
-        camera_url,
+        camera_streams,
         camera_backend_value,
         udp_enabled,
         ptz_ip,
@@ -512,8 +550,12 @@ async def video_offer(request: Request) -> JSONResponse:
         if not isinstance(sdp, str) or not isinstance(offer_type, str):
             raise ValueError("WebRTC offer requires string sdp and type fields")
 
+        # The renderer names the camera source through ?src=<stream id>; it is
+        # optional for a single-stream setup.
+        stream_id = request.query_params.get("src") or None
+
         answer = await video_stream.create_answer(
-            RTCSessionDescription(sdp=sdp, type=offer_type)
+            RTCSessionDescription(sdp=sdp, type=offer_type), stream_id
         )
         return JSONResponse(
             {"sdp": answer.sdp, "type": answer.type},
@@ -556,7 +598,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         udp_host,
                         udp_port,
                         udp_listen_port,
-                        camera_url,
+                        camera_streams,
                         camera_backend,
                         udp_enabled,
                         ptz_ip,
@@ -566,19 +608,22 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.config.udp_ip = udp_host
                     runtime.config.udp_port = udp_port
                     runtime.config.udp_listen_port = udp_listen_port
-                    runtime.config.camera_url = camera_url
+                    runtime.config.camera_streams = camera_streams
                     runtime.config.camera_backend = camera_backend
                     runtime.udp_enabled = udp_enabled
                     runtime.config.ptz_ip = ptz_ip
                     runtime.config.ptz_username = ptz_username
                     runtime.config.ptz_password = ptz_password
                     sync_ptz_controller()
-                    await video_stream.update_config(camera_url, camera_backend)
+                    await video_stream.update_config(
+                        camera_streams, camera_backend
+                    )
                     print(
                         "UDP config accepted: "
                         f"enabled={udp_enabled} destination="
                         f"{udp_host}:{udp_port} telemetry_port={udp_listen_port} "
                         f"ptz_ip={ptz_ip or 'disabled'} "
+                        f"camera_streams={len(camera_streams)} "
                         f"clients={len(runtime.clients)}",
                         flush=True,
                     )

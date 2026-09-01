@@ -6,7 +6,7 @@ A Steam Deck-oriented Electron and Vue UI for viewing a camera stream and contro
 
 - Camera-first frameless UI for the Steam Deck's 1280x800 viewport
 - RTSP camera sources through backend WebRTC signaling, with optional credentials and selectable go2rtc/aiortc backend
-- Multiple configurable camera sources, cycled live with B (Circle)
+- Multiple configurable camera sources, all kept connected at once and cycled instantly with B (Circle)
 - Pointer, touch, Steam Deck, and compatible gamepad controls
 - Configurable linear Y and angular theta limits
 - PTZ camera control (pan/tilt via D-pad, zoom via shoulder buttons, focus via on-screen buttons on the left edge) using an optional ISAPI camera address
@@ -51,14 +51,14 @@ For a single container that launches both frontend and backend from Steam, see t
 `useBackendConnection.js` owns the singleton WebSocket and reconnect lifecycle. It sends typed messages:
 
 ```json
-{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"udp_listen_port":8889,"camera_url":"rtsp://camera/stream","camera_backend":"go2rtc"}}
+{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"udp_listen_port":8889,"camera_streams":[{"id":"cam-0","url":"rtsp://camera/stream"}],"camera_backend":"go2rtc"}}
 ```
 
 ```json
 {"type":"send","packet":{"vy":0,"vtheta":0}}
 ```
 
-`useControlState.js` owns the generic reactive packet object and coalesces changes to one publication per animation frame. `CameraFeed.vue` negotiates receive-only WebRTC through FastAPI `/offer`; it does not contact go2rtc or the camera directly.
+`useControlState.js` owns the generic reactive packet object and coalesces changes to one publication per animation frame. Every configured source has its own always-connected `CameraFeed.vue`; the Home view mounts them all and only shows the active one, so switching sources never reconnects. An RTSP feed negotiates receive-only WebRTC through FastAPI `/offer?src=<id>` and never contacts go2rtc or the camera directly; a WebSocket feed connects straight to the camera.
 
 The backend broadcasts received telemetry as `{"type":"receive","packet":{"battery_level":75}}`. The renderer validates the percentage and marks the value stale after two seconds without another packet.
 
