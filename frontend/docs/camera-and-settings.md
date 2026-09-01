@@ -10,7 +10,7 @@ The Settings drawer stores camera source, UDP destination, velocity limits, and 
 - UDP command target host/port and telemetry listening port.
 - Maximum linear Y and angular theta velocity, `0.1..100`.
 - Built-in on-screen keyboard toggle.
-- Optional PTZ camera IP address for camera pan/tilt/zoom control.
+- Optional PTZ camera IP address, plus optional PTZ username and password, for camera pan/tilt/zoom/focus control.
 
 The persisted contract remains:
 
@@ -38,7 +38,9 @@ The persisted contract remains:
   "udpPort": 5000,
   "udpListenPort": 8889,
   "useOnScreenKeyboard": true,
-  "ptzIp": ""
+  "ptzIp": "",
+  "ptzUsername": "",
+  "ptzPassword": ""
 }
 ```
 
@@ -58,7 +60,7 @@ Camera errors are surfaced by the WebRTC connection and retried by the existing 
 
 ## PTZ Control
 
-`ptzIp` stores the IP of a PTZ-capable camera (Hikvision ISAPI compatible). When set, the renderer forwards it to FastAPI inside the `config` message as `ptz_ip` together with optional `ptz_username` and `ptz_password`; the backend then drives the camera's ISAPI continuous-move endpoint on behalf of all connected UIs. The address is optional: an empty value disables PTZ, hides nothing in the UI, and simply keeps the backend from issuing camera HTTP requests. Controller bindings are documented in `controls.md`.
+`ptzIp` stores the IP of a PTZ-capable camera (Hikvision ISAPI compatible); `ptzUsername` and `ptzPassword` hold its optional credentials. The Settings drawer's "Camera rotation (PTZ)" section has one field for each. All three are sent to FastAPI inside the `config` message as `ptz_ip`, `ptz_username`, and `ptz_password`; the backend then drives the camera's ISAPI continuous-move and focus endpoints on behalf of all connected UIs, trying digest auth first and falling back to basic on a `401`. The address is optional: an empty value disables PTZ, hides nothing in the UI, and simply keeps the backend from issuing camera HTTP requests. Credentials are persisted in plain text in the Electron settings file, like the RTSP credentials. Controller bindings are documented in `controls.md`.
 
 ## Built-in Keyboard
 

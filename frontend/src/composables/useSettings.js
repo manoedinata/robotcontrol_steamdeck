@@ -10,6 +10,8 @@ const DEFAULT_UDP_LISTEN_PORT = 8889
 const DEFAULT_CAMERA_BACKEND = 'go2rtc'
 const DEFAULT_CAMERA_TYPE = 'rtsp'
 const DEFAULT_PTZ_IP = ''
+const DEFAULT_PTZ_USERNAME = ''
+const DEFAULT_PTZ_PASSWORD = ''
 const EMPTY_CAMERA_SOURCE = Object.freeze({
     url: '',
     type: DEFAULT_CAMERA_TYPE,
@@ -24,6 +26,8 @@ const cameraSources = ref([{ ...EMPTY_CAMERA_SOURCE }])
 const activeCameraIndex = ref(0)
 const cameraBackend = ref(DEFAULT_CAMERA_BACKEND)
 const ptzIp = ref(DEFAULT_PTZ_IP)
+const ptzUsername = ref(DEFAULT_PTZ_USERNAME)
+const ptzPassword = ref(DEFAULT_PTZ_PASSWORD)
 const maxYVelocity = ref(DEFAULT_MAX_VELOCITY)
 const maxThetaVelocity = ref(DEFAULT_MAX_VELOCITY)
 const udpHost = ref(DEFAULT_UDP_HOST)
@@ -96,6 +100,8 @@ function syncBackendConfig() {
         camera_streams: cameraStreams,
         camera_backend: cameraBackend.value,
         ptz_ip: ptzIp.value.trim(),
+        ptz_username: ptzUsername.value,
+        ptz_password: ptzPassword.value,
     })
 }
 
@@ -150,6 +156,8 @@ function applySettings(settings) {
     activeCameraIndex.value = clampCameraIndex(settings?.activeCameraIndex ?? 0)
     cameraBackend.value = settings?.cameraBackend ?? DEFAULT_CAMERA_BACKEND
     ptzIp.value = typeof settings?.ptzIp === 'string' ? settings.ptzIp : DEFAULT_PTZ_IP
+    ptzUsername.value = typeof settings?.ptzUsername === 'string' ? settings.ptzUsername : DEFAULT_PTZ_USERNAME
+    ptzPassword.value = typeof settings?.ptzPassword === 'string' ? settings.ptzPassword : DEFAULT_PTZ_PASSWORD
     maxYVelocity.value = settings?.maxYVelocity ?? DEFAULT_MAX_VELOCITY
     maxThetaVelocity.value = settings?.maxThetaVelocity ?? DEFAULT_MAX_VELOCITY
     udpHost.value = settings?.udpHost ?? DEFAULT_UDP_HOST
@@ -202,6 +210,8 @@ export function useSettings() {
         cameraUrl,
         cameraBackend: readonly(cameraBackend),
         ptzIp: readonly(ptzIp),
+        ptzUsername: readonly(ptzUsername),
+        ptzPassword: readonly(ptzPassword),
         maxYVelocity: readonly(maxYVelocity),
         maxThetaVelocity: readonly(maxThetaVelocity),
         udpHost: readonly(udpHost),

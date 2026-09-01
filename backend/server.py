@@ -340,7 +340,12 @@ def sync_ptz_controller() -> None:
             LOGGER.info("PTZ control disabled: no ptz_ip configured")
         return
 
-    if runtime.ptz is None or runtime.ptz.ip != ptz_ip:
+    if (
+        runtime.ptz is None
+        or runtime.ptz.ip != ptz_ip
+        or runtime.ptz.username != runtime.config.ptz_username
+        or runtime.ptz.password != runtime.config.ptz_password
+    ):
         runtime.ptz = PTZController(
             ip=ptz_ip,
             username=runtime.config.ptz_username,

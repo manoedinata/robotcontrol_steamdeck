@@ -73,9 +73,14 @@ Preserve this persisted contract:
   "udpHost": "192.168.1.30",
   "udpPort": 5000,
   "udpListenPort": 8889,
-  "useOnScreenKeyboard": true
+  "useOnScreenKeyboard": true,
+  "ptzIp": "",
+  "ptzUsername": "",
+  "ptzPassword": ""
 }
 ```
+
+`ptzIp`/`ptzUsername`/`ptzPassword` are the renderer source of truth for PTZ; they are sent to the backend as `ptz_ip`/`ptz_username`/`ptz_password` and are stored in plain text like the RTSP credentials.
 
 Legacy top-level `cameraType`/`cameraUrl`/`cameraUsername`/`cameraPassword` files must keep loading as a single source and be rewritten into `cameraSources` on save.
 
