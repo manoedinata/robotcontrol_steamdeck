@@ -30,13 +30,14 @@ When Y velocity is negative, `ControllerPanel.vue` negates theta before sending 
 
 ## Camera Controls (PTZ)
 
-| Input       | Camera action    |
-| ----------- | ---------------- |
-| D-pad up    | Tilt camera up   |
-| D-pad down  | Tilt camera down |
-| D-pad right | Pan camera right |
-| D-pad left  | Pan camera left  |
-| RT (hold)   | Zoom in          |
-| LT (hold)   | Zoom out         |
+| Input                | Camera action                                               |
+| -------------------- | ----------------------------------------------------------- |
+| D-pad up             | Tilt camera up                                              |
+| D-pad down           | Tilt camera down                                            |
+| D-pad right          | Pan camera right                                            |
+| D-pad left           | Pan camera left                                             |
+| RB (hold)            | Zoom in                                                     |
+| LB (hold)            | Zoom out                                                    |
+| Focus buttons (hold) | On-screen buttons on the left edge of the Home view (mirroring the Settings/Exit stack on the right): focus near / far (single command on press, stop on release) |
 
-PTZ requires a PTZ IP address in Settings. With the address set, holding an input sends a `{"type":"ptz","direction":...,"zoom":...}` message over the controls WebSocket: the D-pad populates `direction` and the analog triggers populate `zoom`, as two independent channels so panning and zooming can combine. The backend re-sends the held command at 5 Hz and transmits continuous stop commands once the button is released, so the camera keeps moving between updates and always stops cleanly even if the UI closes. Trigger input uses a `0.35` threshold like the robot controls. An empty PTZ IP disables the feature entirely; the backend never issues camera HTTP requests.
+PTZ requires a PTZ IP address in Settings. With the address set, holding an input sends a `{"type":"ptz","direction":...,"zoom":...,"focus":...}` message over the controls WebSocket: the D-pad populates `direction`, the shoulder buttons populate `zoom`, and the on-screen focus buttons populate `focus` — three independent channels so panning, zooming, and focusing can combine. On the wire `zoom` uses the backend's `zoom-in`/`zoom-out` and `focus` uses `focus-near`/`focus-far`; `useBackendConnection.js` maps the UI's `in`/`out`/`near`/`far` values before sending. The backend re-sends the held rotation/zoom command at 5 Hz and transmits continuous stop commands once the button is released, so the camera keeps moving between updates and always stops cleanly even if the UI closes. The shoulder buttons are digital (pressed/not pressed), since Electron/Chromium does not reliably surface the analog triggers. Focus is different: it is sent once per press on the ISAPI `FocusData` endpoint (separate from the `PTZData` channel) with a single stop command on release, rather than being repeated at the loop rate. An empty PTZ IP disables the feature entirely; the backend never issues camera HTTP requests.

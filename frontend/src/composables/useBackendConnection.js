@@ -146,13 +146,28 @@ function updateControl(packet) {
 }
 
 // Camera PTZ request. `direction` is one of 'left' | 'right' | 'up' |
-// 'down' while a D-Pad button is held, `zoom` is 'in' | 'out' while RT/LT
-// is held, and both are null when nothing is held (the backend then keeps
-// sending the ISAPI stop command).
-function updatePtz(direction, zoom) {
-    const request = { direction: direction ?? null, zoom: zoom ?? null }
-    const previous = latestPtzRequest ?? { direction: null, zoom: null }
-    if (previous.direction === request.direction && previous.zoom === request.zoom) return
+// 'down' while a D-Pad button is held, `zoom` is 'in' | 'out' while RB/LB
+// is held, `focus` is 'near' | 'far' while a focus button is held, and all
+// are null when nothing is held (the backend then keeps sending the ISAPI
+// stop command). The wire contract expects the backend's 'zoom-in'/
+// 'zoom-out' and 'focus-near'/'focus-far' vocabulary, so the UI's short
+// values are mapped here at the transport boundary rather than leaking
+// backend naming into every UI component.
+const PTZ_ZOOM_WIRE_VALUES = { in: 'zoom-in', out: 'zoom-out' }
+const PTZ_FOCUS_WIRE_VALUES = { near: 'focus-near', far: 'focus-far' }
+
+function updatePtz(direction, zoom, focus) {
+    const request = {
+        direction: direction ?? null,
+        zoom: zoom ? PTZ_ZOOM_WIRE_VALUES[zoom] ?? zoom : null,
+        focus: focus ? PTZ_FOCUS_WIRE_VALUES[focus] ?? focus : null,
+    }
+    const previous = latestPtzRequest ?? { direction: null, zoom: null, focus: null }
+    if (
+        previous.direction === request.direction
+        && previous.zoom === request.zoom
+        && previous.focus === request.focus
+    ) return
     latestPtzRequest = request
     send({ type: 'ptz', ...request })
 }

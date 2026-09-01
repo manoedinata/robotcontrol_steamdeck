@@ -7,8 +7,8 @@ class Settings:
         camera_url: str = "rtsp://admin:password@127.0.0.1:554/stream",
         camera_backend: str = "go2rtc",
         ptz_ip: str = "",
-        ptz_username: str = "",
-        ptz_password: str = "",
+        ptz_username: str = "admin",
+        ptz_password: str = "a1234567",
     ):
         self.udp_ip = udp_ip
         self.udp_port = udp_port

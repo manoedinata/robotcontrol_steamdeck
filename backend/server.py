@@ -14,7 +14,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 import settings as settings_module
-from PTZController import PTZController, normalize_direction, normalize_zoom
+from PTZController import (
+    PTZController,
+    normalize_direction,
+    normalize_focus,
+    normalize_zoom,
+)
 from WebRTCStream import WebRTCStream
 import utils
 
@@ -49,6 +54,10 @@ class RuntimeState:
     # (deadman behavior).
     ptz_request: str | None = None
     ptz_zoom_request: str | None = None
+    ptz_focus_request: str | None = None
+    # Tracks which focus command was last sent to the camera so the loop can
+    # fire on the press/release edges only instead of re-sending each tick.
+    ptz_focus_sent: str | None = None
     ptz_request_seq: int = 0
 
 
@@ -303,12 +312,16 @@ def sync_ptz_controller() -> None:
 
 
 async def ptz_loop() -> None:
-    """Deadman loop for camera rotation and zoom.
+    """Deadman loop for camera rotation and zoom, edge-triggered focus.
 
-    Re-sends the latest requests (left/right/up/down rotation, zoom-in/
-    zoom-out) at a fixed rate while a button is held, and continuously sends
+    Rotation and zoom are re-sent (left/right/up/down rotation, zoom-in/
+    zoom-out) at a fixed rate while a button is held, and continuously send
     the ISAPI stop command while nothing is pressed. This keeps the camera
     from moving forever if a stop request from the UI is lost.
+
+    Focus is edge-triggered: exactly one FocusData command is sent when a
+    focus button is pressed and one FocusData stop when it is released, so
+    the focus endpoint is not hammered at the loop rate.
     """
     loop = asyncio.get_running_loop()
     interval = utils.hz_to_s(PTZ_SEND_HZ)
@@ -319,6 +332,7 @@ async def ptz_loop() -> None:
         while True:
             direction = runtime.ptz_request
             zoom = runtime.ptz_zoom_request
+            focus = runtime.ptz_focus_request
             controller = runtime.ptz
             if controller is not None:
                 try:
@@ -331,12 +345,22 @@ async def ptz_loop() -> None:
                         # tick, so a lost stop can never leave the camera
                         # moving on its own.
                         await controller.stop()
+                    # Focus runs on its own ISAPI endpoint (FocusData), but it
+                    # is edge-triggered instead of a deadman: one command is
+                    # sent when the button is pressed and one stop when it is
+                    # released, instead of re-sending every tick.
+                    if focus is not None and focus != runtime.ptz_focus_sent:
+                        await controller.focus(focus)
+                        runtime.ptz_focus_sent = focus
+                    elif focus is None and runtime.ptz_focus_sent is not None:
+                        await controller.stop_focus()
+                        runtime.ptz_focus_sent = None
                 except Exception as error:
                     now = loop.time()
                     if now - last_error_log >= 1.0:
                         active = (
-                            f"move {direction or zoom}"
-                            if (direction or zoom)
+                            f"move {direction or zoom or focus}"
+                            if (direction or zoom or focus)
                             else "stop"
                         )
                         LOGGER.warning(
@@ -561,16 +585,21 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 elif message_type == "ptz":
                     # UI PTZ request: direction is "left", "right", "up", or
                     # "down" while a D-Pad button is held; zoom is
-                    # "zoom-in"/"zoom-out" while RT/LT is held. Either may be
-                    # null when nothing is held (triggers continuous stop).
+                    # "zoom-in"/"zoom-out" while RB/LB is held; focus is
+                    # "focus-near"/"focus-far" while a focus button is held.
+                    # Any may be null when nothing is held (triggers stop).
                     direction = incoming_data.get("direction")
                     zoom = incoming_data.get("zoom")
+                    focus = incoming_data.get("focus")
                     if direction is not None:
                         direction = normalize_direction(direction)
                     if zoom is not None:
                         zoom = normalize_zoom(zoom)
+                    if focus is not None:
+                        focus = normalize_focus(focus)
                     runtime.ptz_request = direction
                     runtime.ptz_zoom_request = zoom
+                    runtime.ptz_focus_request = focus
                     runtime.ptz_request_seq += 1
                 elif message_type == "send":
                     packet = incoming_data.get("packet", {})
@@ -600,6 +629,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         if not runtime.clients:
             runtime.current_packet = utils.generate_default_state(PACKET_SCHEMA)
             runtime.packet_payload = encode_packet(runtime.current_packet)
-            # Last UI left; make sure the camera stops rotating and zooming.
+            # Last UI left; make sure the camera stops rotating, zooming, and
+            # focusing. ptz_focus_sent is intentionally NOT reset here: the
+            # loop sees focus=None with a non-None sent-state as the release
+            # edge and sends exactly one FocusData stop itself.
             runtime.ptz_request = None
             runtime.ptz_zoom_request = None
+            runtime.ptz_focus_request = None

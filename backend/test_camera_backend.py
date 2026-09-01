@@ -2,7 +2,9 @@ import unittest
 
 from PTZController import (
     direction_to_ptz_data,
+    focus_to_focus_data_xml,
     normalize_direction,
+    normalize_focus,
     normalize_zoom,
     zoom_to_ptz_data,
 )
@@ -102,6 +104,39 @@ class PTZZoomTests(unittest.TestCase):
         for zoom in ("zoom-in", "zoom-out"):
             with self.subTest(zoom=zoom):
                 self.assertEqual(normalize_zoom(zoom), zoom)
+
+
+class PTZFocusTests(unittest.TestCase):
+    def test_focus_requests_map_to_focus_data_xml(self) -> None:
+        self.assertIn(
+            '<FocusData xmlns="http://www.isapi.org/ver20/XMLSchema">'
+            "<focus>-50</focus>",
+            focus_to_focus_data_xml("focus-near"),
+        )
+        self.assertIn(
+            '<FocusData xmlns="http://www.isapi.org/ver20/XMLSchema">'
+            "<focus>50</focus>",
+            focus_to_focus_data_xml("focus-far"),
+        )
+
+    def test_focus_speed_is_clamped(self) -> None:
+        self.assertIn("<focus>100</focus>", focus_to_focus_data_xml("focus-far", 500))
+        self.assertIn("<focus>-1</focus>", focus_to_focus_data_xml("focus-near", -5))
+
+    def test_focus_rejects_unknown_values(self) -> None:
+        for value in ("near", "tele", "", None, 3):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                focus_to_focus_data_xml(value)
+
+    def test_normalize_focus_rejects_unknown_values(self) -> None:
+        for value in ("near", "far", "", None, 3, "FOCUS-NEAR "):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                normalize_focus(value)
+
+    def test_normalize_focus_accepts_known_values(self) -> None:
+        for focus in ("focus-near", "focus-far"):
+            with self.subTest(focus=focus):
+                self.assertEqual(normalize_focus(focus), focus)
 
 
 if __name__ == "__main__":

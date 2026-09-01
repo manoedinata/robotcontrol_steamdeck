@@ -3,9 +3,9 @@ import { readonly, ref } from 'vue'
 const gamepadName = ref('')
 const axes = ref([0, 0, 0, 0])
 // Live shoulder button state, polled each frame. Standard mapping: 4 = LB,
-// 5 = RB, 6 = LT, 7 = RT. Triggers on many pads report as analog values
-// instead of booleans, so a small threshold marks them "pressed".
-const shoulderButtons = ref({ lb: false, rb: false, lt: false, rt: false })
+// 5 = RB. Electron/Chromium may not surface the analog triggers (LT/RT) as
+// usable buttons on some pads, so zoom uses the digital shoulders.
+const shoulderButtons = ref({ lb: false, rb: false })
 // Live D-pad state, polled each frame. Standard mapping: 12 = up, 13 = down,
 // 14 = left, 15 = right. Used for camera rotation, so it must stay separate
 // from the navigation `direction` events that the same buttons also emit.
@@ -15,7 +15,6 @@ const handlers = new Set()
 const DIRECTION_REPEAT_DELAY = 360
 const DIRECTION_REPEAT_INTERVAL = 120
 const STICK_NAVIGATION_THRESHOLD = 0.55
-const TRIGGER_PRESSED_THRESHOLD = 0.35
 
 let animationFrame = 0
 let consumerCount = 0
@@ -28,14 +27,6 @@ function dispatch(action) {
     for (const entry of orderedHandlers) {
         if (entry.handler(action)) return
     }
-}
-
-// Analog triggers report a value in 0..1 with `pressed` only set once they hit
-// the hardware's own click point; reading the value catches lighter presses.
-function buttonPressed(gamepad, index) {
-    const button = gamepad.buttons[index]
-    if (!button) return false
-    return Boolean(button.pressed) || (button.value ?? 0) >= TRIGGER_PRESSED_THRESHOLD
 }
 
 function currentDirection(gamepad) {
@@ -56,7 +47,7 @@ function pollGamepad(timestamp) {
     if (!gamepad) {
         gamepadName.value = ''
         axes.value = [0, 0, 0, 0]
-        shoulderButtons.value = { lb: false, rb: false, lt: false, rt: false }
+        shoulderButtons.value = { lb: false, rb: false }
         dpadButtons.value = { up: false, down: false, left: false, right: false }
         previousButtons = []
         heldDirection = null
@@ -70,8 +61,6 @@ function pollGamepad(timestamp) {
     shoulderButtons.value = {
         lb: Boolean(gamepad.buttons[4]?.pressed),
         rb: Boolean(gamepad.buttons[5]?.pressed),
-        lt: buttonPressed(gamepad, 6),
-        rt: buttonPressed(gamepad, 7),
     }
 
     dpadButtons.value = {
@@ -111,7 +100,7 @@ function stopPolling() {
     animationFrame = 0
     gamepadName.value = ''
     axes.value = [0, 0, 0, 0]
-    shoulderButtons.value = { lb: false, rb: false, lt: false, rt: false }
+    shoulderButtons.value = { lb: false, rb: false }
     dpadButtons.value = { up: false, down: false, left: false, right: false }
     previousButtons = []
     heldDirection = null

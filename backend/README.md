@@ -30,19 +30,23 @@ Valid robot telemetry is broadcast to all connected UIs:
 
 ## PTZ Control
 
-When `ptz_ip` is configured, the backend drives a PTZ camera's Hikvision ISAPI continuous-move endpoint on behalf of all connected UIs. `ptz_username` and `ptz_password` are optional and are tried as digest auth first, falling back to basic auth on a `401` response. Setting `ptz_ip` to an empty string disables PTZ and stops all camera HTTP traffic.
+When `ptz_ip` is configured, the backend drives a PTZ camera's Hikvision ISAPI continuous-move endpoint (rotation and zoom) plus the FocusData focus endpoint on behalf of all connected UIs. `ptz_username` and `ptz_password` are optional and are tried as digest auth first, falling back to basic auth on a `401` response. Setting `ptz_ip` to an empty string disables PTZ and stops all camera HTTP traffic.
 
-The UI sends held PTZ requests over the controls WebSocket; `direction` and `zoom` are independent channels:
+The UI sends held PTZ requests over the controls WebSocket; `direction`, `zoom`, and `focus` are independent channels:
 
 ```json
-{"type":"ptz","direction":"left","zoom":null}
-{"type":"ptz","direction":null,"zoom":"zoom-in"}
+{"type":"ptz","direction":"left","zoom":null,"focus":null}
+{"type":"ptz","direction":null,"zoom":"zoom-in","focus":null}
+{"type":"ptz","direction":null,"zoom":null,"focus":"focus-near"}
 ```
 
 - `direction`: `"left"`, `"right"`, `"up"`, `"down"`, or `null`.
 - `zoom`: `"zoom-in"`, `"zoom-out"`, or `null`.
+- `focus`: `"focus-near"`, `"focus-far"`, or `null`.
 
-A background loop sends exactly one ISAPI command per tick (rotation takes priority over zoom, stop is sent when neither is active). Every command is re-sent at 5 Hz — including stop, which is re-sent continuously while no request is active so the camera always halts even if the UI disconnects, crashes, or a stop packet is lost. Camera movements map to ISAPI pan/tilt values and zoom to the ISAPI zoom channel; both use fixed speeds.
+A background loop sends exactly one rotation/zoom ISAPI command per tick (rotation takes priority over zoom, stop is sent when neither is active). Every rotation/zoom command is re-sent at 5 Hz — including stop, which is re-sent continuously while no request is active so the camera always halts even if the UI disconnects, crashes, or a stop packet is lost. Camera movements map to ISAPI pan/tilt values and zoom to the ISAPI zoom channel; both use fixed speeds.
+
+Focus is edge-triggered instead of deadman-repeated: one `FocusData` command goes to `PUT /ISAPI/System/Video/inputs/channels/<n>/focus` when a focus value first appears, and one zero-speed `FocusData` stop is sent when it clears (including when the last UI disconnects). Rotation and zoom stop packets on the `PTZData` channel are unaffected.
 
 ## Binary UDP Schema
 

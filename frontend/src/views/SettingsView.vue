@@ -444,7 +444,8 @@ defineExpose({ saveBeforeClose })
         <Camera :size="20" aria-hidden="true" />
         <div>
           <h2>Camera rotation (PTZ)</h2>
-          <p>Address of the camera that responds to rotation commands. LB/RB rotate left/right; LT/RT tilt down/up.</p>
+          <p>Address of the camera that responds to rotation commands. D-pad tilts up/down and pans left/right; LB/RB
+            zoom out/in.</p>
         </div>
       </div>
 

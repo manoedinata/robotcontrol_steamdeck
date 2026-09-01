@@ -8,7 +8,7 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 
 - `main.js`: BrowserWindow, application lifecycle, settings load/save IPC, and Exit IPC.
 - `electron-components/preload.js`: narrow `quitApp`, `loadSettings`, and `saveSettings` bridge.
-- `src/App.vue`: persistent command shell, backend connection lifecycle, and Settings drawer state.
+- `src/App.vue`: persistent command shell (Settings/Exit stack on the right, PTZ focus near/far buttons on the left), backend connection lifecycle, and Settings drawer state.
 - `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition.
 - `src/views/SettingsView.vue`: camera sources, UDP destination, velocity limits, and keyboard settings.
 - `src/components/CameraFeed.vue`: RTSP backend WebRTC negotiation or direct camera WebSocket playback and reconnect state.

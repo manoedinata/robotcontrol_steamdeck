@@ -27,6 +27,9 @@ class PTZHandler(SimpleHTTPRequestHandler):
     """Handles PTZ control endpoints."""
 
     def do_PUT(self) -> None:
+        if self._is_focus_endpoint():
+            self._handle_focus()
+            return
         if not self._is_ptz_endpoint():
             self.send_error(404, "Not found")
             return
@@ -53,6 +56,43 @@ class PTZHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.lower()
         return "/isapi/ptzctrl/" in path and "/continuous" in path
+
+    def _is_focus_endpoint(self) -> bool:
+        parsed = urlparse(self.path)
+        path = parsed.path.lower()
+        # Matches the backend's focus URL:
+        # /ISAPI/System/Video/inputs/channels/<n>/focus
+        return "/isapi/system/video/inputs/channels/" in path and path.endswith(
+            "/focus"
+        )
+
+    def _handle_focus(self) -> None:
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length).decode("utf-8")
+        except Exception as error:
+            LOGGER.warning("Failed to read focus body: %s", error)
+            self.send_error(400, "Invalid body")
+            return
+
+        speed = self._parse_focus_speed(body)
+        if speed is None:
+            LOGGER.info("Focus stop received (focus=0)")
+            self._respond_ok()
+            return
+        LOGGER.info("Focus %s received: %s", "NEAR" if speed < 0 else "FAR", speed)
+        self._respond_ok()
+
+    def _parse_focus_speed(self, xml_body: str) -> int | None:
+        try:
+            root = ET.fromstring(xml_body)
+            ns = {"ptz": "http://www.isapi.org/ver20/XMLSchema"}
+            focus_el = self._find_first(root, ns, "focus")
+            speed = int(focus_el.text) if focus_el is not None and focus_el.text else 0
+            return speed or None
+        except Exception as error:
+            LOGGER.warning("Failed to parse focus XML: %s", error)
+            return None
 
     def _parse_direction(self, xml_body: str) -> str | None:
         try:

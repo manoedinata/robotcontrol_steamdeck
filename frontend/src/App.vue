@@ -1,13 +1,26 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { LogOut, Settings } from '@lucide/vue'
+import { Crosshair, Focus, LogOut, Settings } from '@lucide/vue'
 import { useGamepad } from './composables/useGamepad'
 import { useBackendConnection } from './composables/useBackendConnection'
+import { usePTZState } from './composables/usePTZState'
 import HomeView from './views/HomeView.vue'
 import SettingsShell from './components/SettingsShell.vue'
 
 const { registerHandler } = useGamepad()
 const { connect: connectBackend, disconnect: disconnectBackend } = useBackendConnection()
+const { setFocus } = usePTZState()
+
+// Focus buttons are hold-to-act: pointerdown starts the focus movement and
+// pointerup/leave releases it, mirroring the backend deadman behavior so the
+// camera stops focusing the moment the button is let go.
+function focusPress(value) {
+  setFocus(value)
+}
+
+function focusRelease() {
+  setFocus(null)
+}
 const actionBar = ref(null)
 const settingsOpen = ref(false)
 const settingsButton = ref(null)
@@ -66,6 +79,19 @@ onBeforeUnmount(() => {
     <main class="content-shell">
       <HomeView />
     </main>
+
+    <nav class="shell-actions shell-actions--left" aria-label="Camera focus controls">
+      <button class="floating-icon-button focus-trigger" type="button" title="Focus near"
+        aria-label="Focus near" @pointerdown.prevent="focusPress('near')" @pointerup="focusRelease()"
+        @pointerleave="focusRelease()" @pointercancel="focusRelease()" @contextmenu.prevent>
+        <Focus :size="21" aria-hidden="true" />
+      </button>
+      <button class="floating-icon-button focus-trigger" type="button" title="Focus far"
+        aria-label="Focus far" @pointerdown.prevent="focusPress('far')" @pointerup="focusRelease()"
+        @pointerleave="focusRelease()" @pointercancel="focusRelease()" @contextmenu.prevent>
+        <Crosshair :size="21" aria-hidden="true" />
+      </button>
+    </nav>
 
     <nav ref="actionBar" class="shell-actions" aria-label="Application actions">
       <button class="floating-icon-button exit-trigger" type="button" title="Exit application"

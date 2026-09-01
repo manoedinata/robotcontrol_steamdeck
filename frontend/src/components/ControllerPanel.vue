@@ -24,7 +24,7 @@ let animationFrame
 let releaseGamepad
 
 // Camera PTZ mapping: D-Pad moves the camera (up/down tilt, left/right pan)
-// and the triggers zoom (RT zoom-in, LT zoom-out). When several D-Pad
+// and the shoulders zoom (RB zoom-in, LB zoom-out). When several D-Pad
 // buttons are held at once the first in this priority order wins, so the
 // camera always gets exactly one rotation direction; zoom is independent
 // and combines with any rotation.
@@ -36,11 +36,11 @@ const ptzDirection = computed(() => {
   return PTZ_DPAD_ORDER.find((name) => buttons[name]) ?? null
 })
 
-// RT (index 7) zooms in, LT (index 6) zooms out; RT wins if both are held.
+// RB (index 5) zooms in, LB (index 4) zooms out; RB wins if both are held.
 const ptzZoom = computed(() => {
   const buttons = shoulderButtons.value
-  if (buttons?.rt) return 'in'
-  if (buttons?.lt) return 'out'
+  if (buttons?.rb) return 'in'
+  if (buttons?.lb) return 'out'
   return null
 })
 
