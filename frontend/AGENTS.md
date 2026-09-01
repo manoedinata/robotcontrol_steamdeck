@@ -55,6 +55,7 @@ Current control mapping remains:
 - Theta is negated before publishing when `vy` is negative, so steering stays driver-relative while reversing.
 - Gamepad dead zone is `0.12`; pointer/touch has no dead zone.
 - Velocity is scaled by `maxYVelocity` and `maxThetaVelocity`, default `10`, bounded `0.1..100` in Settings.
+- PTZ (D-pad rotate, LB/RB zoom, on-screen focus buttons) is gated by `useSettings().ptzControlsActiveCamera`: requests are sent only while `ptzIp`'s host equals the active camera stream's host. `usePTZState` publishes a stop and drops local state when that flips false; `App.vue` hides the focus buttons.
 
 ### Settings
 

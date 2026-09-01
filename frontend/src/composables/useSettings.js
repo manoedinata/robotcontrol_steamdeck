@@ -43,6 +43,24 @@ const { updateConfig } = useBackendConnection()
 const activeCamera = computed(() => cameraSources.value[activeCameraIndex.value] ?? EMPTY_CAMERA_SOURCE)
 const cameraUrl = computed(() => activeCamera.value.url)
 
+// Host of a bare IP, `host:port`, or a full URL; '' when it cannot be read.
+function hostOf(value) {
+    const raw = (value ?? '').trim()
+    if (!raw) return ''
+    try {
+        return new URL(raw.includes('://') ? raw : `http://${raw}`).hostname
+    } catch {
+        return raw.split('/')[0].split(':')[0]
+    }
+}
+
+// PTZ pan/tilt/zoom/focus only make sense for the camera on screen: true only
+// when a PTZ IP is set and it is the host of the active camera stream.
+const ptzControlsActiveCamera = computed(() => {
+    const ptzHost = hostOf(ptzIp.value)
+    return Boolean(ptzHost) && hostOf(activeCamera.value.url) === ptzHost
+})
+
 // A stream id is stable per source slot and is how the renderer addresses a
 // backend-dialed RTSP stream (`POST /offer?src=<id>`).
 function cameraStreamId(index) {
@@ -212,6 +230,7 @@ export function useSettings() {
         ptzIp: readonly(ptzIp),
         ptzUsername: readonly(ptzUsername),
         ptzPassword: readonly(ptzPassword),
+        ptzControlsActiveCamera,
         maxYVelocity: readonly(maxYVelocity),
         maxThetaVelocity: readonly(maxThetaVelocity),
         udpHost: readonly(udpHost),

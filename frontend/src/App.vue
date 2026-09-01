@@ -9,7 +9,7 @@ import SettingsShell from './components/SettingsShell.vue'
 
 const { registerHandler } = useGamepad()
 const { connect: connectBackend, disconnect: disconnectBackend } = useBackendConnection()
-const { setFocus } = usePTZState()
+const { setFocus, enabled: ptzEnabled } = usePTZState()
 
 // Focus buttons are hold-to-act: pointerdown starts the focus movement and
 // pointerup/leave releases it, mirroring the backend deadman behavior so the
@@ -80,7 +80,7 @@ onBeforeUnmount(() => {
       <HomeView />
     </main>
 
-    <nav class="shell-actions shell-actions--left" aria-label="Camera focus controls">
+    <nav v-if="ptzEnabled" class="shell-actions shell-actions--left" aria-label="Camera focus controls">
       <button class="floating-icon-button focus-trigger" type="button" title="Focus near"
         aria-label="Focus near" @pointerdown.prevent="focusPress('near')" @pointerup="focusRelease()"
         @pointerleave="focusRelease()" @pointercancel="focusRelease()" @contextmenu.prevent>
