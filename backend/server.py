@@ -314,10 +314,6 @@ async def ptz_loop() -> None:
     interval = utils.hz_to_s(PTZ_SEND_HZ)
     next_send = loop.time()
     last_error_log = 0.0
-    last_sent: str | None = None
-    last_zoom_sent: str | None = None
-    pending_stop = True
-    pending_zoom_stop = True
 
     try:
         while True:
@@ -328,19 +324,13 @@ async def ptz_loop() -> None:
                 try:
                     if direction is not None:
                         await controller.move(direction)
-                    elif pending_stop or last_sent is not None:
-                        # Keep stopping until the camera acknowledges a stop,
-                        # so a lost stop request cannot leave it rotating.
-                        await controller.stop()
-                    last_sent = direction
-                    pending_stop = direction is not None
-
-                    if zoom is not None:
+                    elif zoom is not None:
                         await controller.zoom(zoom)
-                    elif pending_zoom_stop or last_zoom_sent is not None:
+                    else:
+                        # Nothing requested: re-send the stop command every
+                        # tick, so a lost stop can never leave the camera
+                        # moving on its own.
                         await controller.stop()
-                    last_zoom_sent = zoom
-                    pending_zoom_stop = zoom is not None
                 except Exception as error:
                     now = loop.time()
                     if now - last_error_log >= 1.0:
@@ -356,16 +346,6 @@ async def ptz_loop() -> None:
                             error,
                         )
                         last_error_log = now
-                    if direction is None:
-                        # Stop failed; retry on the next tick.
-                        pending_stop = True
-                    if zoom is None:
-                        pending_zoom_stop = True
-                else:
-                    if direction is None:
-                        pending_stop = False
-                    if zoom is None:
-                        pending_zoom_stop = False
 
             next_send += interval
             delay = next_send - loop.time()

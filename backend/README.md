@@ -42,7 +42,7 @@ The UI sends held PTZ requests over the controls WebSocket; `direction` and `zoo
 - `direction`: `"left"`, `"right"`, `"up"`, `"down"`, or `null`.
 - `zoom`: `"zoom-in"`, `"zoom-out"`, or `null`.
 
-A background loop resends the current command at 5 Hz and continuously sends stop commands while no request is active, so the camera always halts even if the UI disconnects or crashes. Failed stop commands are retried on the following tick. Camera movements map to ISAPI pan/tilt values and zoom to the ISAPI zoom channel; both use fixed speeds.
+A background loop sends exactly one ISAPI command per tick (rotation takes priority over zoom, stop is sent when neither is active). Every command is re-sent at 5 Hz — including stop, which is re-sent continuously while no request is active so the camera always halts even if the UI disconnects, crashes, or a stop packet is lost. Camera movements map to ISAPI pan/tilt values and zoom to the ISAPI zoom channel; both use fixed speeds.
 
 ## Binary UDP Schema
 
