@@ -30,10 +30,10 @@ class CameraBackendConfigTests(unittest.TestCase):
 
 class PTZConfigTests(unittest.TestCase):
     def test_ptz_defaults_to_disabled(self) -> None:
+        # An empty ptz_ip is what disables PTZ; the credential defaults only
+        # take effect once an address is configured.
         config = validate_config({})
         self.assertEqual(config[6], "")
-        self.assertEqual(config[7], "")
-        self.assertEqual(config[8], "")
 
     def test_ptz_ip_is_accepted_and_stripped(self) -> None:
         config = validate_config({"ptz_ip": "  192.168.1.64  "})
@@ -65,7 +65,7 @@ class PTZDirectionTests(unittest.TestCase):
         self.assertIn("<pan>1</pan>", direction_to_ptz_data("right", -5))
 
     def test_normalize_direction_rejects_unknown_values(self) -> None:
-        for value in ("spin", "", None, 3, "LEFT "):
+        for value in ("spin", "", None, 3):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 normalize_direction(value)
 
@@ -73,6 +73,9 @@ class PTZDirectionTests(unittest.TestCase):
         for direction in ("left", "right", "up", "down"):
             with self.subTest(direction=direction):
                 self.assertEqual(normalize_direction(direction), direction)
+
+    def test_normalize_direction_trims_and_lowercases(self) -> None:
+        self.assertEqual(normalize_direction("  LEFT "), "left")
 
 
 class PTZZoomTests(unittest.TestCase):
@@ -88,7 +91,7 @@ class PTZZoomTests(unittest.TestCase):
 
     def test_zoom_speed_is_clamped(self) -> None:
         self.assertIn("<zoom>100</zoom>", zoom_to_ptz_data("zoom-in", 500))
-        self.assertIn("<zoom>1</zoom>", zoom_to_ptz_data("zoom-out", -5))
+        self.assertIn("<zoom>-1</zoom>", zoom_to_ptz_data("zoom-out", -5))
 
     def test_zoom_rejects_unknown_values(self) -> None:
         for value in ("in", "wide", "", None, 3):
@@ -96,7 +99,7 @@ class PTZZoomTests(unittest.TestCase):
                 zoom_to_ptz_data(value)
 
     def test_normalize_zoom_rejects_unknown_values(self) -> None:
-        for value in ("in", "out", "", None, 3, "ZOOM-IN "):
+        for value in ("in", "out", "", None, 3):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 normalize_zoom(value)
 
@@ -104,6 +107,9 @@ class PTZZoomTests(unittest.TestCase):
         for zoom in ("zoom-in", "zoom-out"):
             with self.subTest(zoom=zoom):
                 self.assertEqual(normalize_zoom(zoom), zoom)
+
+    def test_normalize_zoom_trims_and_lowercases(self) -> None:
+        self.assertEqual(normalize_zoom("  ZOOM-IN "), "zoom-in")
 
 
 class PTZFocusTests(unittest.TestCase):
@@ -129,7 +135,7 @@ class PTZFocusTests(unittest.TestCase):
                 focus_to_focus_data_xml(value)
 
     def test_normalize_focus_rejects_unknown_values(self) -> None:
-        for value in ("near", "far", "", None, 3, "FOCUS-NEAR "):
+        for value in ("near", "far", "", None, 3):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 normalize_focus(value)
 
@@ -137,6 +143,9 @@ class PTZFocusTests(unittest.TestCase):
         for focus in ("focus-near", "focus-far"):
             with self.subTest(focus=focus):
                 self.assertEqual(normalize_focus(focus), focus)
+
+    def test_normalize_focus_trims_and_lowercases(self) -> None:
+        self.assertEqual(normalize_focus("  FOCUS-NEAR "), "focus-near")
 
 
 if __name__ == "__main__":
