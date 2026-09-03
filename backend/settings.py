@@ -7,8 +7,6 @@ class Settings:
         camera_streams: tuple[tuple[str, str], ...] = (),
         camera_backend: str = "go2rtc",
         ptz_ip: str = "",
-        ptz_username: str = "admin",
-        ptz_password: str = "a1234567",
     ):
         self.udp_ip = udp_ip
         self.udp_port = udp_port
@@ -20,5 +18,3 @@ class Settings:
         self.camera_streams = camera_streams
         self.camera_backend = camera_backend
         self.ptz_ip = ptz_ip
-        self.ptz_username = ptz_username
-        self.ptz_password = ptz_password

@@ -25,6 +25,11 @@ MOVE_DIRECTIONS = ("left", "right", "up", "down")
 ZOOM_DIRECTIONS = ("zoom-in", "zoom-out")
 FOCUS_DIRECTIONS = ("focus-near", "focus-far")
 
+# Fixed camera login for this private deployment; PTZ credentials are not part
+# of the settings the UI sends.
+PTZ_USERNAME = "admin"
+PTZ_PASSWORD = "a1234567"
+
 PTZ_SPEED = 60
 ZOOM_SPEED = 60
 FOCUS_SPEED = 50
@@ -121,8 +126,8 @@ class PTZController:
     def __init__(
         self,
         ip: str,
-        username: str,
-        password: str,
+        username: str = PTZ_USERNAME,
+        password: str = PTZ_PASSWORD,
         channel: int = 1,
         loop: asyncio.AbstractEventLoop | None = None,
     ):

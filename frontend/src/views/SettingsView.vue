@@ -12,8 +12,6 @@ const {
   activeCameraIndex,
   cameraBackend,
   ptzIp,
-  ptzUsername,
-  ptzPassword,
   maxYVelocity,
   maxThetaVelocity,
   udpHost,
@@ -28,8 +26,6 @@ const {
 const cameras = ref([])
 const backend = ref(cameraBackend.value)
 const ptzAddress = ref(ptzIp.value)
-const ptzUser = ref(ptzUsername.value)
-const ptzPass = ref(ptzPassword.value)
 const maxY = ref(maxYVelocity.value)
 const maxTheta = ref(maxThetaVelocity.value)
 const targetHost = ref(udpHost.value)
@@ -59,11 +55,9 @@ const keyboardFields = {
   targetPort: { label: 'UDP target port', layout: 'integer', maxLength: 5 },
   listenPort: { label: 'UDP telemetry listen port', layout: 'integer', maxLength: 5 },
   ptzAddress: { label: 'PTZ camera IP', layout: 'ip', maxLength: 253 },
-  ptzUser: { label: 'PTZ username', layout: 'credential', maxLength: 128 },
-  ptzPass: { label: 'PTZ password', layout: 'credential', maxLength: 256, sensitive: true },
 }
 
-const fieldValues = { maxY, maxTheta, targetHost, targetPort, listenPort, ptzAddress, ptzUser, ptzPass }
+const fieldValues = { maxY, maxTheta, targetHost, targetPort, listenPort, ptzAddress }
 
 // Camera fields are addressed as `camera:<index>:<field>` so the on-screen
 // keyboard can target any source in the list.
@@ -187,14 +181,6 @@ watch(ptzIp, (next) => {
   ptzAddress.value = next
 }, { immediate: true })
 
-watch(ptzUsername, (next) => {
-  ptzUser.value = next
-}, { immediate: true })
-
-watch(ptzPassword, (next) => {
-  ptzPass.value = next
-}, { immediate: true })
-
 watch(maxYVelocity, (next) => {
   maxY.value = next
 }, { immediate: true })
@@ -252,8 +238,6 @@ async function persistSettings({ focusSave = false } = {}) {
       activeCameraIndex: Math.min(activeCameraIndex.value, cameraSourcePayload.length - 1),
       cameraBackend: backend.value,
       ptzIp: ptzAddress.value.trim(),
-      ptzUsername: ptzUser.value.trim(),
-      ptzPassword: ptzPass.value,
       maxYVelocity: Number.parseFloat(maxY.value),
       maxThetaVelocity: Number.parseFloat(maxTheta.value),
       udpHost: targetHost.value.trim(),
@@ -460,8 +444,8 @@ defineExpose({ saveBeforeClose })
         <Camera :size="20" aria-hidden="true" />
         <div>
           <h2>Camera rotation (PTZ)</h2>
-          <p>Address and credentials of the camera that responds to rotation commands. D-pad tilts up/down and pans
-            left/right; LB/RB zoom out/in. Credentials are tried as digest auth first, then basic.</p>
+          <p>Address of the camera that responds to rotation commands. D-pad tilts up/down and pans
+            left/right; LB/RB zoom out/in. Camera credentials are fixed in the backend.</p>
         </div>
       </div>
 
@@ -472,22 +456,6 @@ defineExpose({ saveBeforeClose })
             :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" placeholder="192.168.1.64"
             autocomplete="off" data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
             @click="openKeyboard('ptzAddress')" @keydown="handleInputKeydown($event, 'ptzAddress')" />
-        </div>
-
-        <div class="settings-field">
-          <label for="ptz-username">Username <span>(optional)</span></label>
-          <input id="ptz-username" v-model="ptzUser" class="form-control" type="text"
-            :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" autocomplete="off" data-gamepad-control
-            @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('ptzUser')"
-            @keydown="handleInputKeydown($event, 'ptzUser')" />
-        </div>
-
-        <div class="settings-field">
-          <label for="ptz-password">Password <span>(optional)</span></label>
-          <input id="ptz-password" v-model="ptzPass" class="form-control" type="password"
-            :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled" autocomplete="off" data-gamepad-control
-            @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('ptzPass')"
-            @keydown="handleInputKeydown($event, 'ptzPass')" />
         </div>
       </div>
 

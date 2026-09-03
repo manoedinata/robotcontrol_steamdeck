@@ -10,7 +10,7 @@ The Settings drawer stores camera source, UDP destination, velocity limits, and 
 - UDP command target host/port and telemetry listening port.
 - Maximum linear Y and angular theta velocity, `0.1..100`.
 - Built-in on-screen keyboard toggle.
-- Optional PTZ camera IP address, plus optional PTZ username and password, for camera pan/tilt/zoom/focus control.
+- Optional PTZ camera IP address for camera pan/tilt/zoom/focus control. The camera credentials are hardcoded in the backend, not stored here.
 
 The persisted contract remains:
 
@@ -38,9 +38,7 @@ The persisted contract remains:
   "udpPort": 5000,
   "udpListenPort": 8889,
   "useOnScreenKeyboard": true,
-  "ptzIp": "",
-  "ptzUsername": "",
-  "ptzPassword": ""
+  "ptzIp": ""
 }
 ```
 
@@ -60,7 +58,7 @@ Camera errors are surfaced by the WebRTC connection and retried by the existing 
 
 ## PTZ Control
 
-`ptzIp` stores the IP of a PTZ-capable camera (Hikvision ISAPI compatible); `ptzUsername` and `ptzPassword` hold its optional credentials. The Settings drawer's "Camera rotation (PTZ)" section has one field for each. All three are sent to FastAPI inside the `config` message as `ptz_ip`, `ptz_username`, and `ptz_password`; the backend then drives the camera's ISAPI continuous-move and focus endpoints on behalf of all connected UIs, trying digest auth first and falling back to basic on a `401`. The address is optional: an empty value disables PTZ and keeps the backend from issuing camera HTTP requests.
+`ptzIp` stores the IP of a PTZ-capable camera (Hikvision ISAPI compatible). The Settings drawer's "Camera rotation (PTZ)" section has one field for it. It is sent to FastAPI inside the `config` message as `ptz_ip`; the camera credentials are hardcoded in the backend (`PTZ_USERNAME`/`PTZ_PASSWORD` in `PTZController.py`) rather than being configurable from the UI. The backend then drives the camera's ISAPI continuous-move and focus endpoints on behalf of all connected UIs, trying digest auth first and falling back to basic on a `401`. The address is optional: an empty value disables PTZ and keeps the backend from issuing camera HTTP requests.
 
 The renderer also only *sends* PTZ requests while `ptzIp`'s host matches the host of the camera currently on screen (`useSettings().ptzControlsActiveCamera`) — otherwise a held button would move a camera the operator is not watching. When they do not match, the on-screen focus buttons are hidden and D-pad/shoulder PTZ input is inert; `usePTZState` pushes a stop and clears its local state on the transition.
 

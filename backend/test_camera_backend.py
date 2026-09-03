@@ -101,8 +101,8 @@ class ResolveStreamIdTests(unittest.TestCase):
 
 class PTZConfigTests(unittest.TestCase):
     def test_ptz_defaults_to_disabled(self) -> None:
-        # An empty ptz_ip is what disables PTZ; the credential defaults only
-        # take effect once an address is configured.
+        # An empty ptz_ip is what disables PTZ; the hardcoded credentials
+        # only take effect once an address is configured.
         config = validate_config({})
         self.assertEqual(config[6], "")
 
@@ -111,8 +111,11 @@ class PTZConfigTests(unittest.TestCase):
         self.assertEqual(config[6], "192.168.1.64")
 
     def test_unknown_ptz_field_is_rejected(self) -> None:
-        with self.assertRaises(ValueError):
-            validate_config({"ptz_host": "192.168.1.64"})
+        # Credentials are hardcoded in the backend, so they are no longer
+        # accepted on the wire.
+        for field in ("ptz_host", "ptz_username", "ptz_password"):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                validate_config({field: "192.168.1.64"})
 
     def test_non_string_ptz_ip_is_rejected(self) -> None:
         with self.assertRaises(ValueError):

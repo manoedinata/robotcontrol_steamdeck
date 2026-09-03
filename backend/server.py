@@ -15,6 +15,8 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 import settings as settings_module
 from PTZController import (
+    PTZ_PASSWORD,
+    PTZ_USERNAME,
     PTZController,
     normalize_direction,
     normalize_focus,
@@ -110,9 +112,7 @@ def validate_camera_streams(value: Any) -> tuple[tuple[str, str], ...]:
         if not isinstance(stream_id, str) or not CAMERA_STREAM_ID_RE.fullmatch(
             stream_id
         ):
-            raise ValueError(
-                "camera stream id must match [A-Za-z0-9_-]{1,64}"
-            )
+            raise ValueError("camera stream id must match [A-Za-z0-9_-]{1,64}")
         if stream_id in seen_ids:
             raise ValueError(f"duplicate camera stream id: {stream_id!r}")
         if not isinstance(url_value, str):
@@ -128,7 +128,7 @@ def validate_camera_streams(value: Any) -> tuple[tuple[str, str], ...]:
 
 def validate_config(
     config: dict[str, Any],
-) -> tuple[str, int, int, tuple[tuple[str, str], ...], str, bool, str, str, str]:
+) -> tuple[str, int, int, tuple[tuple[str, str], ...], str, bool, str]:
     allowed_keys = {
         "udp_host",
         "udp_port",
@@ -136,8 +136,6 @@ def validate_config(
         "camera_streams",
         "camera_backend",
         "ptz_ip",
-        "ptz_username",
-        "ptz_password",
     }
     unknown_keys = set(config) - allowed_keys
     if unknown_keys:
@@ -155,8 +153,6 @@ def validate_config(
     )
     camera_backend_value = config.get("camera_backend", runtime.config.camera_backend)
     ptz_ip_value = config.get("ptz_ip", runtime.config.ptz_ip)
-    ptz_username_value = config.get("ptz_username", runtime.config.ptz_username)
-    ptz_password_value = config.get("ptz_password", runtime.config.ptz_password)
     if not isinstance(udp_host_value, str):
         raise ValueError("udp_host must be a string")
     if isinstance(udp_port_value, bool) or not isinstance(udp_port_value, int):
@@ -172,17 +168,11 @@ def validate_config(
         raise ValueError("camera_backend must be 'go2rtc' or 'aiortc'")
     if not isinstance(ptz_ip_value, str):
         raise ValueError("ptz_ip must be a string")
-    if not isinstance(ptz_username_value, str):
-        raise ValueError("ptz_username must be a string")
-    if not isinstance(ptz_password_value, str):
-        raise ValueError("ptz_password must be a string")
 
     udp_host = udp_host_value.strip()
     udp_port = udp_port_value
     udp_listen_port = udp_listen_port_value
     ptz_ip = ptz_ip_value.strip()
-    ptz_username = ptz_username_value.strip()
-    ptz_password = ptz_password_value
 
     udp_enabled = bool(udp_host or udp_port)
     if udp_enabled and (not udp_host or not 1 <= udp_port <= 65535):
@@ -197,8 +187,6 @@ def validate_config(
         camera_backend_value,
         udp_enabled,
         ptz_ip,
-        ptz_username,
-        ptz_password,
     )
 
 
@@ -340,16 +328,11 @@ def sync_ptz_controller() -> None:
             LOGGER.info("PTZ control disabled: no ptz_ip configured")
         return
 
-    if (
-        runtime.ptz is None
-        or runtime.ptz.ip != ptz_ip
-        or runtime.ptz.username != runtime.config.ptz_username
-        or runtime.ptz.password != runtime.config.ptz_password
-    ):
+    if runtime.ptz is None or runtime.ptz.ip != ptz_ip:
         runtime.ptz = PTZController(
             ip=ptz_ip,
-            username=runtime.config.ptz_username,
-            password=runtime.config.ptz_password,
+            username=PTZ_USERNAME,
+            password=PTZ_PASSWORD,
         )
         LOGGER.info("PTZ control enabled for %s", ptz_ip)
 
@@ -607,8 +590,6 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         camera_backend,
                         udp_enabled,
                         ptz_ip,
-                        ptz_username,
-                        ptz_password,
                     ) = validate_config(config)
                     runtime.config.udp_ip = udp_host
                     runtime.config.udp_port = udp_port
@@ -617,12 +598,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.config.camera_backend = camera_backend
                     runtime.udp_enabled = udp_enabled
                     runtime.config.ptz_ip = ptz_ip
-                    runtime.config.ptz_username = ptz_username
-                    runtime.config.ptz_password = ptz_password
                     sync_ptz_controller()
-                    await video_stream.update_config(
-                        camera_streams, camera_backend
-                    )
+                    await video_stream.update_config(camera_streams, camera_backend)
                     print(
                         "UDP config accepted: "
                         f"enabled={udp_enabled} destination="

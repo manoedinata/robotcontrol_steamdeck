@@ -35,7 +35,7 @@ The default backend base URL is `http://127.0.0.1:8000`; `VITE_BACKEND_URL` may 
 
 WebSocket messages are separated by `type`:
 
-- `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_streams", "camera_backend", "ptz_ip", "ptz_username", "ptz_password" } }` — `camera_streams` is `[{ "id", "url" }]`, one entry per configured RTSP source (WebSocket sources are omitted).
+- `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_streams", "camera_backend", "ptz_ip" } }` — `camera_streams` is `[{ "id", "url" }]`, one entry per configured RTSP source (WebSocket sources are omitted).
 - `{ "type": "send", "packet": { ...schemaFields } }`
 - `{ "type": "ptz", "direction", "zoom", "focus" }` — held PTZ requests; any field null when nothing is held.
 - Backend telemetry uses `{ "type": "receive", "packet": { "battery_level": 0..100 } }`.
@@ -75,13 +75,11 @@ Preserve this persisted contract:
   "udpPort": 5000,
   "udpListenPort": 8889,
   "useOnScreenKeyboard": true,
-  "ptzIp": "",
-  "ptzUsername": "",
-  "ptzPassword": ""
+  "ptzIp": ""
 }
 ```
 
-`ptzIp`/`ptzUsername`/`ptzPassword` are the renderer source of truth for PTZ; they are sent to the backend as `ptz_ip`/`ptz_username`/`ptz_password` and are stored in plain text like the RTSP credentials.
+`ptzIp` is the renderer source of truth for PTZ and is sent to the backend as `ptz_ip`. The PTZ camera credentials are not a setting: they are hardcoded in the backend (`PTZ_USERNAME`/`PTZ_PASSWORD` in `PTZController.py`).
 
 Legacy top-level `cameraType`/`cameraUrl`/`cameraUsername`/`cameraPassword` files must keep loading as a single source and be rewritten into `cameraSources` on save.
 

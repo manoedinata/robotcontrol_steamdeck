@@ -9,7 +9,7 @@
 - Camera playback requires a reachable RTSP source and FFmpeg/PyAV support through `aiortc`.
 - WebRTC ICE is currently configured for local Steam Deck/container playback; remote NAT traversal is not provided.
 - RTSP credentials are supported, but are stored in the local Electron settings file as plain text; protect access to that file.
-- PTZ control sends fixed speeds and continuous commands only; preset recall, absolute positioning, and zoom-level feedback are not implemented, and PTZ auth credentials are stored as plain text in the Electron settings file.
+- PTZ control sends fixed speeds and continuous commands only; preset recall, absolute positioning, and zoom-level feedback are not implemented, and the PTZ auth credentials are hardcoded in the backend source rather than configurable.
 - Direct WebSocket playback requires Chromium/Electron WebCodecs H.264 support and currently assumes each binary WebSocket message is one H.264 access unit in Annex-B format.
 - The Settings form does not preserve URL queries or fragments.
 - `VITE_BACKEND_URL` is build-time configuration, and non-default endpoints require a matching Content Security Policy update.
