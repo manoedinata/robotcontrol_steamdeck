@@ -39,6 +39,7 @@ WebSocket messages are separated by `type`:
 - `{ "type": "send", "packet": { ...schemaFields } }`
 - `{ "type": "ptz", "direction", "zoom", "focus" }` — held PTZ requests; any field null when nothing is held.
 - Backend telemetry uses `{ "type": "receive", "packet": { "battery_level": 0..100 } }`.
+- On connect the backend announces the settable send fields as `{ "type": "schema", "fields": [{ "name", "role", "type", "min", "max", "default" }] }` (padding excluded). Settings renders one min/max row per entry; do not parse `packets-schema.json` in the renderer.
 - Backend host reachability uses `{ "type": "ping", "ping_ms": number | null }`; the value measures ICMP latency to the configured UDP destination, not command-datagram RTT.
 - Backend errors use `{ "type": "error", "message": "..." }`.
 
@@ -54,7 +55,7 @@ Current control mapping remains:
 - Right stick horizontal axis controls `vtheta`; right is positive.
 - Theta is negated before publishing when `vy` is negative, so steering stays driver-relative while reversing.
 - Gamepad dead zone is `0.12`; pointer/touch has no dead zone.
-- Velocity is scaled by `maxYVelocity` and `maxThetaVelocity`, default `10`, bounded `0.1..100` in Settings.
+- Each axis is scaled by the `packetLimits` entry of the send field carrying its role (`yVelocity`, `thetaVelocity`): the positive half of the stick reaches `max`, the negative half `min`, and the result is clamped into that range. Limits default to the schema bounds and may only narrow them.
 - PTZ (D-pad rotate, LB/RB zoom, on-screen focus buttons) is gated by `useSettings().ptzControlsActiveCamera`: requests are sent only while `ptzIp`'s host equals the active camera stream's host. `usePTZState` publishes a stop and drops local state when that flips false; `App.vue` hides the focus buttons.
 
 ### Settings
@@ -69,8 +70,10 @@ Preserve this persisted contract:
   ],
   "activeCameraIndex": 0,
   "cameraBackend": "go2rtc",
-  "maxYVelocity": 10,
-  "maxThetaVelocity": 10,
+  "packetLimits": {
+    "pwm": { "min": -100, "max": 100 },
+    "steering": { "min": -100, "max": 100 }
+  },
   "udpHost": "192.168.1.30",
   "udpPort": 5000,
   "udpListenPort": 8889,

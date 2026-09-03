@@ -43,6 +43,14 @@ Robot telemetry uses the same WebSocket in the backend-to-renderer direction:
 
 The frontend accepts integer battery values in `0..100`, marks telemetry live on receipt, and marks it stale after two seconds without another valid packet.
 
+On connect the backend also announces which send-packet fields the UI may bound:
+
+```json
+{"type":"schema","fields":[{"name":"pwm","role":"yVelocity","type":"float32","min":-100,"max":100,"default":0}]}
+```
+
+Padding fields are excluded. Settings turns each entry into a minimum/maximum row, persists the result as `packetLimits`, and scales the joysticks to it.
+
 The backend also periodically measures ICMP host latency to the configured UDP destination and broadcasts it through the same WebSocket:
 
 ```json

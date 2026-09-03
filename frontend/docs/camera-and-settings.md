@@ -32,8 +32,10 @@ The persisted contract remains:
   ],
   "activeCameraIndex": 0,
   "cameraBackend": "go2rtc",
-  "maxYVelocity": 10,
-  "maxThetaVelocity": 10,
+  "packetLimits": {
+    "pwm": { "min": -100, "max": 100 },
+    "steering": { "min": -100, "max": 100 }
+  },
   "udpHost": "192.168.1.30",
   "udpPort": 5000,
   "udpListenPort": 8889,
@@ -45,6 +47,8 @@ The persisted contract remains:
 Legacy files with top-level `cameraUrl`, `cameraType`, `cameraUsername`, and `cameraPassword` keys are read as a single source and rewritten into `cameraSources` on the next save.
 
 `activeCameraIndex` selects which source is shown. Settings lists every source with a Show button, and pressing B (Circle) on the Home view cycles to the next source. Every source is connected at once and kept warm — the Home view mounts one `CameraFeed` per source and only shows the active one — so switching is instant with no reconnect. The backend receives every RTSP source in `camera_streams` and holds them all open. This trades steady CPU/GPU/bandwidth (one live decode per source) for an instant switch.
+
+`packetLimits` bounds each field of the command packet, keyed by field name. The backend announces the settable fields (everything but padding) over the controls WebSocket on connect as `{ "type": "schema", "fields": [...] }`, and the Robot controls section renders one minimum/maximum row per field, so a schema change reaches the UI without a renderer edit. Values are clamped into the bounds `packets-schema.json` declares: the operator can narrow a field's range, never widen it past what the backend accepts. Files predating this setting are migrated from the old `maxYVelocity`/`maxThetaVelocity` caps, which became `{ "min": -cap, "max": cap }` for the fields with the `yVelocity` and `thetaVelocity` roles.
 
 Empty UDP host and port `0` disable command transmission. `udpListenPort` remains required in `1..65535`, defaults to `8889`, and controls the backend telemetry bind port. The form requires a camera host and port, but the underlying backend accepts an empty `camera_streams` list and keeps capture idle. RTSP credentials are optional and persisted separately from each source `url`; the backend receives them as URL-encoded userinfo inside that source's `camera_streams[].url`. The form does not expose HTTPS selection, query parameters, or fragments.
 

@@ -12,7 +12,7 @@ import { usePTZState } from '../composables/usePTZState'
 // configurable per-axis limits from Settings. Hardware gamepad input is polled
 // each frame and applies a dead zone; pointer/touch input goes through the
 // joystick components directly.
-const { maxYVelocity, maxThetaVelocity } = useSettings()
+const { limitForRole } = useSettings()
 const { updatePacket, resetPacket } = useControlState()
 const { reset: resetPtz, setDirection, setZoom } = usePTZState()
 const { acquire: acquireGamepad, axes: gamepadAxes, gamepadName, shoulderButtons, dpadButtons } = useGamepad()
@@ -44,8 +44,17 @@ const ptzZoom = computed(() => {
   return null
 })
 
-const yVelocity = computed(() => -leftStickY.value * maxYVelocity.value)
-const thetaVelocity = computed(() => rightStickX.value * maxThetaVelocity.value)
+// Each axis is scaled by the operator's limit for the packet field that
+// carries it: the positive half of the stick reaches `max`, the negative half
+// reaches `min`. A range that does not straddle zero would otherwise leave the
+// span it covers, so the result is clamped back into it.
+function scaleAxis(axis, { min, max }) {
+  const scaled = axis >= 0 ? axis * max : -axis * min
+  return Math.min(max, Math.max(min, scaled))
+}
+
+const yVelocity = computed(() => scaleAxis(-leftStickY.value, limitForRole('yVelocity')))
+const thetaVelocity = computed(() => scaleAxis(rightStickX.value, limitForRole('thetaVelocity')))
 
 function formatVelocity(value) {
   const rounded = Math.round(value * 10) / 10

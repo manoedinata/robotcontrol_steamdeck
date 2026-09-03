@@ -319,6 +319,29 @@ async def udp_loop() -> None:
         LOGGER.error("UDP loop crashed unexpectedly: %s", e)
 
 
+def send_field_limits() -> list[dict[str, Any]]:
+    """Bounds of every operator-settable field of the send packet.
+
+    The UI renders one min/max row per entry and clamps its joystick output to
+    the operator's values, which must stay inside the schema bounds returned
+    here. Padding carries no operator-visible value, so it is left out.
+    """
+    return [
+        {
+            "name": field["name"],
+            "role": field.get("role", field["name"]),
+            "type": field["type"],
+            "min": field.get("min"),
+            "max": field.get("max"),
+            "default": field.get(
+                "default", utils.default_for_wire_type(field["type"])
+            ),
+        }
+        for field in utils.packet_schema(PACKET_SCHEMA, "send")["fields"]
+        if field.get("role") != "padding"
+    ]
+
+
 def sync_ptz_controller() -> None:
     """Rebuild the PTZ controller when its settings change."""
     ptz_ip = runtime.config.ptz_ip
@@ -561,6 +584,11 @@ async def video_offer(request: Request) -> JSONResponse:
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     runtime.clients[websocket] = asyncio.Lock()
+    # The send-packet layout is the backend's to own, so the UI is told which
+    # fields it may bound instead of parsing the schema itself.
+    await send_client_message(
+        websocket, {"type": "schema", "fields": send_field_limits()}
+    )
     LOGGER.info(
         "UI connected; sending controls every %.2f ms to %s:%s and receiving "
         "telemetry on port %s",

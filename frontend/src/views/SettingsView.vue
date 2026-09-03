@@ -12,8 +12,8 @@ const {
   activeCameraIndex,
   cameraBackend,
   ptzIp,
-  maxYVelocity,
-  maxThetaVelocity,
+  packetFieldLimits,
+  packetLimits,
   udpHost,
   udpPort,
   udpListenPort,
@@ -26,8 +26,8 @@ const {
 const cameras = ref([])
 const backend = ref(cameraBackend.value)
 const ptzAddress = ref(ptzIp.value)
-const maxY = ref(maxYVelocity.value)
-const maxTheta = ref(maxThetaVelocity.value)
+// One editable min/max row per operator-settable send-packet field.
+const limits = ref([])
 const targetHost = ref(udpHost.value)
 const targetPort = ref(udpPort.value || '')
 const listenPort = ref(udpListenPort.value)
@@ -49,42 +49,55 @@ const cameraKeyboardFields = {
 }
 
 const keyboardFields = {
-  maxY: { label: 'Max Y-velocity', layout: 'decimal', maxLength: 5 },
-  maxTheta: { label: 'Max Theta-velocity', layout: 'decimal', maxLength: 5 },
   targetHost: { label: 'UDP target host', layout: 'hostname', maxLength: 253 },
   targetPort: { label: 'UDP target port', layout: 'integer', maxLength: 5 },
   listenPort: { label: 'UDP telemetry listen port', layout: 'integer', maxLength: 5 },
   ptzAddress: { label: 'PTZ camera IP', layout: 'ip', maxLength: 253 },
 }
 
-const fieldValues = { maxY, maxTheta, targetHost, targetPort, listenPort, ptzAddress }
+const fieldValues = { targetHost, targetPort, listenPort, ptzAddress }
 
-// Camera fields are addressed as `camera:<index>:<field>` so the on-screen
-// keyboard can target any source in the list.
+// Camera sources and packet limits are lists, so their fields are addressed as
+// `<kind>:<index>:<field>` and the on-screen keyboard can target any row.
 function cameraField(index, field) {
   return `camera:${index}:${field}`
 }
 
+function limitField(index, field) {
+  return `limit:${index}:${field}`
+}
+
 function parseFieldName(name) {
-  const [prefix, index, field] = name.split(':')
-  if (prefix !== 'camera') return null
-  return { index: Number(index), field }
+  const [kind, index, field] = name.split(':')
+  if (kind !== 'camera' && kind !== 'limit') return null
+  return { kind, index: Number(index), field }
+}
+
+function rowsFor(kind) {
+  return kind === 'camera' ? cameras.value : limits.value
 }
 
 function readField(name) {
   const target = parseFieldName(name)
-  return target ? cameras.value[target.index]?.[target.field] : fieldValues[name].value
+  return target ? rowsFor(target.kind)[target.index]?.[target.field] : fieldValues[name].value
 }
 
 function writeField(name, value) {
   const target = parseFieldName(name)
-  if (target) cameras.value[target.index][target.field] = value
+  if (target) rowsFor(target.kind)[target.index][target.field] = value
   else fieldValues[name].value = value
 }
 
 function describeField(name) {
   const target = parseFieldName(name)
   if (!target) return keyboardFields[name]
+
+  if (target.kind === 'limit') {
+    const limit = limits.value[target.index]
+    const bound = target.field === 'min' ? 'minimum' : 'maximum'
+    return { label: `${limit.name} ${bound}`, layout: 'decimal', maxLength: 12 }
+  }
+
   const descriptor = cameraKeyboardFields[target.field]
   return { ...descriptor, label: `Camera ${target.index + 1} ${descriptor.label}` }
 }
@@ -181,12 +194,19 @@ watch(ptzIp, (next) => {
   ptzAddress.value = next
 }, { immediate: true })
 
-watch(maxYVelocity, (next) => {
-  maxY.value = next
-}, { immediate: true })
-
-watch(maxThetaVelocity, (next) => {
-  maxTheta.value = next
+// The backend announces the send-packet fields on connect, so the rows appear
+// (and re-seed after a save) as `packetFieldLimits` resolves.
+watch(packetFieldLimits, (fields) => {
+  limits.value = fields.map((field) => ({
+    name: field.name,
+    role: field.role,
+    schemaMin: field.schemaMin,
+    schemaMax: field.schemaMax,
+    // Integer wire types cannot carry a fractional bound.
+    step: field.type?.startsWith('float') ? 0.1 : 1,
+    min: String(field.min),
+    max: String(field.max),
+  }))
 }, { immediate: true })
 
 watch(udpHost, (next) => {
@@ -217,6 +237,15 @@ async function persistSettings({ focusSave = false } = {}) {
     return false
   }
 
+  const invalidLimit = limits.value.find(
+    (limit) => !(Number.parseFloat(limit.min) < Number.parseFloat(limit.max)),
+  )
+  if (invalidLimit) {
+    settingsState.value = 'error'
+    settingsMessage.value = `${invalidLimit.name}: minimum must be below maximum.`
+    return false
+  }
+
   settingsState.value = 'saving'
   settingsMessage.value = ''
 
@@ -238,8 +267,15 @@ async function persistSettings({ focusSave = false } = {}) {
       activeCameraIndex: Math.min(activeCameraIndex.value, cameraSourcePayload.length - 1),
       cameraBackend: backend.value,
       ptzIp: ptzAddress.value.trim(),
-      maxYVelocity: Number.parseFloat(maxY.value),
-      maxThetaVelocity: Number.parseFloat(maxTheta.value),
+      // Merged over the stored map so limits for fields the backend has not
+      // announced in this session are kept rather than dropped.
+      packetLimits: {
+        ...packetLimits.value,
+        ...Object.fromEntries(limits.value.map((limit) => [
+          limit.name,
+          { min: Number.parseFloat(limit.min), max: Number.parseFloat(limit.max) },
+        ])),
+      },
       udpHost: targetHost.value.trim(),
       udpPort: targetPort.value === '' ? 0 : Number.parseInt(targetPort.value, 10),
       udpListenPort: Number.parseInt(listenPort.value, 10),
@@ -418,25 +454,29 @@ defineExpose({ saveBeforeClose })
         <Gauge :size="20" aria-hidden="true" />
         <div>
           <h2>Robot controls</h2>
-          <p>Set the maximum velocity for each axis. Joystick output scales to these limits.</p>
+          <p v-if="limits.length">Set the range of every field in the command packet. Joystick output scales to
+            these limits and stays inside the bounds declared in packets-schema.json.</p>
+          <p v-else>Connect to the backend to load the command packet fields.</p>
         </div>
       </div>
 
-      <div class="velocity-settings-row">
+      <div v-for="(limit, index) in limits" :key="limit.name" class="velocity-settings-row">
         <div class="settings-field">
-          <label for="max-y-velocity">Max Y-velocity <span>(linear)</span></label>
-          <input id="max-y-velocity" v-model="maxY" class="form-control" type="number"
-            :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" min="0.1" max="100" step="0.1"
-            placeholder="10" required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
-            @click="openKeyboard('maxY')" @keydown="handleInputKeydown($event, 'maxY')" />
+          <label :for="`limit-${limit.name}-min`">{{ limit.name }} minimum <span>({{ limit.role }})</span></label>
+          <input :id="`limit-${limit.name}-min`" v-model="limit.min" class="form-control" type="number"
+            :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" :min="limit.schemaMin"
+            :max="limit.schemaMax" :step="limit.step" required data-gamepad-control
+            @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard(limitField(index, 'min'))"
+            @keydown="handleInputKeydown($event, limitField(index, 'min'))" />
         </div>
 
         <div class="settings-field">
-          <label for="max-theta-velocity">Max Theta-velocity <span>(angular)</span></label>
-          <input id="max-theta-velocity" v-model="maxTheta" class="form-control" type="number"
-            :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" min="0.1" max="100" step="0.1"
-            placeholder="10" required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
-            @click="openKeyboard('maxTheta')" @keydown="handleInputKeydown($event, 'maxTheta')" />
+          <label :for="`limit-${limit.name}-max`">{{ limit.name }} maximum <span>({{ limit.role }})</span></label>
+          <input :id="`limit-${limit.name}-max`" v-model="limit.max" class="form-control" type="number"
+            :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" :min="limit.schemaMin"
+            :max="limit.schemaMax" :step="limit.step" required data-gamepad-control
+            @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard(limitField(index, 'max'))"
+            @keydown="handleInputKeydown($event, limitField(index, 'max'))" />
         </div>
       </div>
 

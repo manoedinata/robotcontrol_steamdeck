@@ -14,6 +14,10 @@ const telemetry = ref(null)
 const telemetryState = ref('waiting')
 const pingMs = ref(null)
 const pingState = ref('waiting')
+// Operator-settable fields of the send packet, as announced by the backend on
+// connect. Padding is already filtered out there. Kept across reconnects so
+// Settings stays usable while the backend restarts.
+const packetFields = ref([])
 const signalingUrl = new URL('/offer', backendUrl).toString()
 
 // Receive-only WebRTC signaling for one backend-dialed RTSP stream. The
@@ -65,6 +69,15 @@ function acceptPing(message) {
     pingState.value = value === null ? 'unavailable' : 'live'
 }
 
+function acceptSchema(message) {
+    const fields = message?.fields
+    if (!Array.isArray(fields) || fields.some((field) => typeof field?.name !== 'string')) {
+        console.warn('[backend] Ignored invalid packet schema message:', message)
+        return
+    }
+    packetFields.value = fields
+}
+
 function acceptReceive(message) {
     const batteryLevel = message?.packet?.battery_level
     if (!Number.isInteger(batteryLevel) || batteryLevel < 0 || batteryLevel > 100) {
@@ -114,6 +127,8 @@ function connect() {
                 acceptReceive(message)
             } else if (message.type === 'ping') {
                 acceptPing(message)
+            } else if (message.type === 'schema') {
+                acceptSchema(message)
             }
         } catch (error) {
             console.warn('[backend] Ignored invalid WebSocket response:', error)
@@ -189,6 +204,7 @@ export function useBackendConnection() {
         telemetryState: readonly(telemetryState),
         pingMs: readonly(pingMs),
         pingState: readonly(pingState),
+        packetFields: readonly(packetFields),
         signalingUrl,
         cameraSignalingUrl,
         connect,

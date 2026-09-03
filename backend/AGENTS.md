@@ -28,6 +28,7 @@ This directory is the sole owner of UDP and RTSP camera transport. Electron is o
 - Supported wire types are `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `float32`, and `float64`.
 - Send cached binary UDP bytes at 50 Hz only while a controls WebSocket is connected and UDP is enabled.
 - Reset controls to schema defaults after the final controls WebSocket disconnects.
+- Announce the settable send fields to each UI on WebSocket connect as `{ "type": "schema", "fields": [...] }`, derived from `packet_types.send` with padding roles removed. The renderer must never read `packets-schema.json` itself.
 - Decode exact telemetry datagrams from `packet_types.receive` and broadcast `{ "type": "receive", "packet": { ... } }` to every connected UI.
 - Periodically measure ICMP latency to the configured UDP destination and broadcast `{ "type": "ping", "ping_ms": number | null }` to connected UIs. This is host reachability, not command acknowledgement RTT.
 - Camera sources are RTSP URLs; an empty or absent `camera_streams` list keeps playback idle. `POST /offer` takes `?src=<stream id>` to pick a stream (optional only when one stream is configured).

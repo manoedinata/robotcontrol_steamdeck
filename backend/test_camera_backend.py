@@ -8,7 +8,7 @@ from PTZController import (
     normalize_zoom,
     zoom_to_ptz_data,
 )
-from server import validate_config
+from server import send_field_limits, validate_config
 from WebRTCStream import _resolve_stream_id
 
 
@@ -97,6 +97,21 @@ class ResolveStreamIdTests(unittest.TestCase):
             _resolve_stream_id({"a": "rtsp://h/a", "b": "rtsp://h/b"}, None)
         with self.assertRaises(ValueError):
             _resolve_stream_id({}, None)
+
+
+class SendFieldLimitsTests(unittest.TestCase):
+    def test_padding_is_excluded_and_bounds_are_announced(self) -> None:
+        fields = send_field_limits()
+        names = [field["name"] for field in fields]
+
+        self.assertNotIn("padding", names)
+        self.assertEqual(names, ["pwm", "steering"])
+        for field in fields:
+            with self.subTest(field=field["name"]):
+                self.assertEqual(
+                    set(field), {"name", "role", "type", "min", "max", "default"}
+                )
+                self.assertLess(field["min"], field["max"])
 
 
 class PTZConfigTests(unittest.TestCase):
