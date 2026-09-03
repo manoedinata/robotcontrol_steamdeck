@@ -4,8 +4,8 @@
 
 | Input      | Action                                                                                                                     |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
-| D-pad      | On Home: pan/tilt the PTZ camera (see Camera Controls). Within Settings: move focus, and move within the built-in keyboard |
-| A          | Open Settings, activate a focused control, or press a keyboard key                                                         |
+| D-pad      | On Home: pan/tilt the PTZ camera only (see Camera Controls); it moves no focus there. Within Settings: move focus, and move within the built-in keyboard |
+| A          | Activate the focused control (on Home only the Settings/Exit button that already has focus) or press a keyboard key         |
 | B          | Switch to the next camera source on Home; close Settings or cancel the built-in keyboard                                   |
 | Left stick | Navigate the built-in keyboard only                                                                                        |
 
@@ -13,7 +13,7 @@ B only switches cameras when more than one source is configured and no modal dia
 
 The camera and robot controller remain mounted while Settings is open. Focus moves spatially, remains visible while the drawer scrolls, and returns to the originating control when the keyboard closes. Saving restores focus to the Save button. Held directional input repeats after an initial delay.
 
-On the Home view, both sticks retain robot-control behavior; interface navigation does not consume those axes.
+On the Home view, both sticks retain robot-control behavior and the D-pad stays with the camera; interface navigation consumes neither. The Settings and Exit buttons are tapped on the touchscreen, and focus returns to Settings when the drawer closes so A reopens it.
 
 ## Robot Controls
 

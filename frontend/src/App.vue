@@ -46,25 +46,18 @@ async function closeSettings() {
 // over to the drawer while it is open and stop the camera.
 watch(settingsOpen, (open) => setUiOwnsGamepad(open), { immediate: true })
 
+// On Home the D-Pad belongs to the camera alone, so directions are never
+// consumed here: the Settings/Exit stack is reached by touch and A only fires
+// the shell button that already holds focus.
 function handleGamepadNavigation(action) {
+  if (action !== 'activate') return false
   if (settingsOpen.value || document.querySelector('[role="dialog"][aria-modal="true"]')) return false
 
   const items = [...(actionBar.value?.querySelectorAll('[data-shell-action]') ?? [])]
-  const focusedIndex = items.indexOf(document.activeElement)
+  if (!items.includes(document.activeElement)) return false
 
-  if (action === 'up' || action === 'down' || action === 'left' || action === 'right') {
-    const offset = action === 'up' || action === 'left' ? -1 : 1
-    const currentIndex = focusedIndex >= 0 ? focusedIndex : 0
-    items[Math.max(0, Math.min(items.length - 1, currentIndex + offset))]?.focus()
-    return true
-  }
-
-  if (action === 'activate' && focusedIndex >= 0) {
-    document.activeElement.click()
-    return true
-  }
-
-  return focusedIndex >= 0
+  document.activeElement.click()
+  return true
 }
 
 onMounted(() => {
