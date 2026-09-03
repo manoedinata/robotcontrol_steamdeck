@@ -40,6 +40,21 @@ SCHEMA = {
     }
 }
 
+# A packet type may carry no header at all; its fields then start at offset 0.
+HEADERLESS_SCHEMA = {
+    "packet_types": {
+        "send": {
+            "byte_order": "little",
+            "header": "",
+            "fields": [{"name": "vy", "type": "float32", "default": 0.0}],
+        },
+        "receive": {
+            "byte_order": "little",
+            "fields": [{"name": "battery_level", "type": "uint8", "max": 100}],
+        },
+    }
+}
+
 
 class BinaryPacketTests(unittest.TestCase):
     def test_defaults_follow_schema_fields(self) -> None:
@@ -99,6 +114,22 @@ class BinaryPacketTests(unittest.TestCase):
     def test_decoder_applies_schema_bounds(self) -> None:
         with self.assertRaises(ValueError):
             utils.decode_binary_packet(b"ITS\xff", SCHEMA, "receive")
+
+    def test_empty_and_missing_headers_are_encoded_without_header_bytes(self) -> None:
+        # "header": "" on send, no header key at all on receive.
+        self.assertEqual(utils.packet_header(HEADERLESS_SCHEMA, "send"), b"")
+        self.assertEqual(utils.packet_header(HEADERLESS_SCHEMA, "receive"), b"")
+
+        payload = utils.encode_binary_packet({"vy": 1.5}, HEADERLESS_SCHEMA)
+        self.assertEqual(payload, struct.pack("<f", 1.5))
+
+    def test_headerless_packets_are_decoded_on_length_alone(self) -> None:
+        packet = utils.decode_binary_packet(b"\x4b", HEADERLESS_SCHEMA, "receive")
+        self.assertEqual(packet, {"battery_level": 75})
+
+        for payload in (b"", b"\x4b\x00"):
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                utils.decode_binary_packet(payload, HEADERLESS_SCHEMA, "receive")
 
     def test_unknown_packet_type_and_wire_type_are_rejected(self) -> None:
         with self.assertRaises(ValueError):

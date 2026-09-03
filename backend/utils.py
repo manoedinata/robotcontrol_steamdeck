@@ -102,6 +102,22 @@ def validate_packet_values(
                 raise ValueError(f"Field {name!r} exceeds its maximum")
 
 
+def packet_header(schema: dict, packet_type: str = "send") -> bytes:
+    """ASCII header bytes for a packet type; empty when the schema omits one.
+
+    A packet type may leave `header` out, null, or `""` to put its fields on
+    the wire on their own. Encoding then writes no header bytes and decoding
+    matches on length alone.
+    """
+    header = packet_schema(schema, packet_type).get("header") or ""
+    if not isinstance(header, str):
+        raise ValueError(f"Invalid {packet_type!r} packet header")
+    try:
+        return header.encode("ascii")
+    except UnicodeEncodeError as error:
+        raise ValueError(f"Invalid {packet_type!r} packet header") from error
+
+
 def packet_struct(schema: dict, packet_type: str = "send") -> struct.Struct:
     definition = packet_schema(schema, packet_type)
     try:
@@ -122,7 +138,7 @@ def encode_binary_packet(
     """Encode a complete packet using schema order and byte order."""
     definition = packet_schema(schema, packet_type)
     validate_packet_values(packet, schema, packet_type)
-    payload = bytearray(definition["header"].encode("ascii"))
+    payload = bytearray(packet_header(schema, packet_type))
     value_struct = packet_struct(schema, packet_type)
 
     values = []
@@ -159,10 +175,7 @@ def decode_binary_packet(
 ) -> dict[str, int | float]:
     """Decode a packet only when its header and total length match the schema."""
     definition = packet_schema(schema, packet_type)
-    try:
-        header = definition["header"].encode("ascii")
-    except (AttributeError, UnicodeEncodeError) as error:
-        raise ValueError(f"Invalid {packet_type!r} packet header") from error
+    header = packet_header(schema, packet_type)
 
     value_struct = packet_struct(schema, packet_type)
     expected_size = len(header) + value_struct.size
@@ -171,7 +184,7 @@ def decode_binary_packet(
             f"Invalid {packet_type!r} packet length: expected {expected_size}, "
             f"received {len(payload)}"
         )
-    if not payload.startswith(header):
+    if header and not payload.startswith(header):
         raise ValueError(f"Invalid {packet_type!r} packet header")
 
     try:
