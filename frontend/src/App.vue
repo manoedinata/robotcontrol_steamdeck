@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Crosshair, Focus, LogOut, Settings } from '@lucide/vue'
 import { useGamepad } from './composables/useGamepad'
 import { useBackendConnection } from './composables/useBackendConnection'
@@ -9,7 +9,7 @@ import SettingsShell from './components/SettingsShell.vue'
 
 const { registerHandler } = useGamepad()
 const { connect: connectBackend, disconnect: disconnectBackend } = useBackendConnection()
-const { setFocus, enabled: ptzEnabled } = usePTZState()
+const { setFocus, setUiOwnsGamepad, enabled: ptzEnabled } = usePTZState()
 
 // Focus buttons are hold-to-act: pointerdown starts the focus movement and
 // pointerup/leave releases it, mirroring the backend deadman behavior so the
@@ -41,6 +41,10 @@ async function closeSettings() {
   await nextTick()
   settingsButton.value?.focus({ preventScroll: true })
 }
+
+// Settings navigates with the same D-Pad the camera uses, so hand the gamepad
+// over to the drawer while it is open and stop the camera.
+watch(settingsOpen, (open) => setUiOwnsGamepad(open), { immediate: true })
 
 function handleGamepadNavigation(action) {
   if (settingsOpen.value || document.querySelector('[role="dialog"][aria-modal="true"]')) return false

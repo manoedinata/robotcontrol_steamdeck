@@ -1,4 +1,4 @@
-import { readonly, ref, watch } from 'vue'
+import { computed, readonly, ref, watch } from 'vue'
 import { useBackendConnection } from './useBackendConnection'
 import { useSettings } from './useSettings'
 
@@ -18,24 +18,30 @@ import { useSettings } from './useSettings'
 const direction = ref(null)
 const zoom = ref(null)
 const focus = ref(null)
+// True while an overlay (Settings, the on-screen keyboard) owns the gamepad:
+// there the D-Pad walks the form instead of moving the camera, so the same
+// presses must not reach the PTZ endpoint.
+const uiOwnsGamepad = ref(false)
 const { updatePtz } = useBackendConnection()
 const { ptzControlsActiveCamera } = useSettings()
 
 // PTZ requests are only sent while the configured PTZ IP is the camera on
-// screen; otherwise a held button would move a camera the operator cannot
-// see.
+// screen and no overlay is using the gamepad; otherwise a held button would
+// move a camera the operator cannot see or is not aiming at.
+const ptzAllowed = computed(() => ptzControlsActiveCamera.value && !uiOwnsGamepad.value)
+
 function publish() {
-    if (ptzControlsActiveCamera.value) {
+    if (ptzAllowed.value) {
         updatePtz(direction.value, zoom.value, focus.value)
     } else {
         updatePtz(null, null, null)
     }
 }
 
-// Switching cameras can make PTZ ineligible mid-hold (and hides the focus
-// buttons, so their release is lost). Drop the local state and push a stop;
-// the operator re-presses once the matching camera is back on screen.
-watch(ptzControlsActiveCamera, (allowed) => {
+// Switching cameras or opening Settings can make PTZ ineligible mid-hold (and
+// hides the focus buttons, so their release is lost). Drop the local state and
+// push a stop; the operator re-presses once PTZ is eligible again.
+watch(ptzAllowed, (allowed) => {
     if (!allowed) {
         direction.value = null
         zoom.value = null
@@ -62,6 +68,13 @@ function setFocus(value) {
     publish()
 }
 
+// Called by the shell when an overlay opens or closes. Suppressing publishes
+// rather than unmounting the gamepad watchers keeps the D-Pad live for form
+// navigation while the camera stays put.
+function setUiOwnsGamepad(value) {
+    uiOwnsGamepad.value = Boolean(value)
+}
+
 function reset() {
     setDirection(null)
     setZoom(null)
@@ -74,10 +87,11 @@ export function usePTZState() {
         zoom: readonly(zoom),
         focus: readonly(focus),
         // True only when PTZ commands are allowed for the camera on screen.
-        enabled: ptzControlsActiveCamera,
+        enabled: ptzAllowed,
         setDirection,
         setZoom,
         setFocus,
+        setUiOwnsGamepad,
         reset,
     }
 }
