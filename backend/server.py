@@ -267,6 +267,22 @@ async def udp_ping_loop() -> None:
         await asyncio.sleep(PING_INTERVAL_S)
 
 
+def release_udp_socket(sock: socket.socket | None) -> None:
+    """Close a telemetry socket and stop the send loop from reaching for it.
+
+    The send and receive loops share one bound socket so the robot sees
+    commands arrive from the same port its telemetry is sent to. That makes
+    the receiver the socket's owner, and every close has to clear the shared
+    reference: otherwise the send loop keeps calling sendto() on a closed
+    descriptor and fails with EBADF on every tick.
+    """
+    if sock is None:
+        return
+    if runtime.udp_socket is sock:
+        runtime.udp_socket = None
+    sock.close()
+
+
 async def udp_loop() -> None:
     """Send the latest controls at a stable rate while a UI is connected."""
     loop = asyncio.get_running_loop()
@@ -276,33 +292,41 @@ async def udp_loop() -> None:
 
     try:
         while True:
-            if runtime.clients and runtime.udp_enabled and runtime.udp_socket:
-                try:
-                    # LOGGER.info(
-                    #     "Sending UDP packet to %s:%s, payload=%s",
-                    #     runtime.config.udp_ip,
-                    #     runtime.config.udp_port,
-                    #     runtime.packet_payload,
-                    # )
-
-                    # Send using the shared, bound socket
-                    runtime.udp_socket.sendto(
-                        runtime.packet_payload,
-                        (runtime.config.udp_ip, runtime.config.udp_port),
-                    )
-                except BlockingIOError:
-                    # Non-blocking socket OS buffer is full, just skip this tick
-                    pass
-                except OSError as error:
+            if runtime.clients and runtime.udp_enabled:
+                # Read the shared socket once: the receive loop may rebind it
+                # between the check and the send.
+                sock = runtime.udp_socket
+                if sock is None:
+                    # Nothing is bound, so there is nothing to send from. Say
+                    # so instead of going quiet, which looks identical to a
+                    # robot that is simply not answering.
                     now = loop.time()
                     if now - last_error_log >= 1.0:
                         LOGGER.warning(
-                            "UDP send to %s:%s failed: %s",
-                            runtime.config.udp_ip,
-                            runtime.config.udp_port,
-                            error,
+                            "UDP send skipped: telemetry port %s is not bound",
+                            runtime.config.udp_listen_port,
                         )
                         last_error_log = now
+                else:
+                    try:
+                        # Send using the shared, bound socket
+                        sock.sendto(
+                            runtime.packet_payload,
+                            (runtime.config.udp_ip, runtime.config.udp_port),
+                        )
+                    except BlockingIOError:
+                        # Non-blocking socket OS buffer is full, skip this tick
+                        pass
+                    except OSError as error:
+                        now = loop.time()
+                        if now - last_error_log >= 1.0:
+                            LOGGER.warning(
+                                "UDP send to %s:%s failed: %s",
+                                runtime.config.udp_ip,
+                                runtime.config.udp_port,
+                                error,
+                            )
+                            last_error_log = now
 
             next_send += interval
             delay = next_send - loop.time()
@@ -443,15 +467,14 @@ async def udp_receive_loop() -> None:
         while True:
             configured_port = runtime.config.udp_listen_port
             if sock is None or configured_port != bound_port:
-                if sock is not None:
-                    sock.close()
+                release_udp_socket(sock)
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.setblocking(False)
                 try:
                     sock.bind(("0.0.0.0", configured_port))
                     runtime.udp_socket = sock  # <-- Share the socket here
                 except OSError as error:
-                    sock.close()
+                    release_udp_socket(sock)
                     sock = None
                     bound_port = None
                     now = loop.time()
@@ -478,7 +501,7 @@ async def udp_receive_loop() -> None:
                 if now - last_error_log >= 1.0:
                     LOGGER.warning("UDP telemetry receive failed: %s", error)
                     last_error_log = now
-                sock.close()
+                release_udp_socket(sock)
                 sock = None
                 bound_port = None
                 continue
@@ -506,8 +529,7 @@ async def udp_receive_loop() -> None:
 
             await broadcast_telemetry(packet)
     finally:
-        if sock is not None:
-            sock.close()
+        release_udp_socket(sock)
 
 
 @asynccontextmanager
