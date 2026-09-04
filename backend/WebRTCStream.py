@@ -316,18 +316,20 @@ class _Go2RtcStream:
         async with self._lock:
             resolved_id = _resolve_stream_id(self._streams, stream_id)
             await self._sync_streams()
-            body = offer.sdp.encode()
-            answer_sdp = await self._api_request(
-                "POST",
-                f"/api/webrtc?src={resolved_id}",
-                body,
-                "application/sdp",
-                "WebRTC SDP exchange",
-            )
-            return RTCSessionDescription(
-                sdp=answer_sdp.decode(),
-                type="answer",
-            )
+
+        # The SDP exchange waits on go2rtc dialing the camera, which is bounded
+        # only by API_TIMEOUT_SECONDS. Holding the lock across it would stall
+        # every config update -- and with it the control WebSocket that sends
+        # them -- for the whole timeout, so it runs unlocked. Registration
+        # above stays serialized, which is what the lock is actually for.
+        answer_sdp = await self._api_request(
+            "POST",
+            f"/api/webrtc?src={resolved_id}",
+            offer.sdp.encode(),
+            "application/sdp",
+            "WebRTC SDP exchange",
+        )
+        return RTCSessionDescription(sdp=answer_sdp.decode(), type="answer")
 
     async def close(self) -> None:
         async with self._lock:
