@@ -28,9 +28,9 @@ trap shutdown_services SIGINT SIGTERM EXIT
 mkdir -p /app/config
 
 # Build the frontend source code
-# echo "[entrypoint] Building frontend..." >&2
-# cd /app/frontend
-# npm run build
+echo "[entrypoint] Building frontend..." >&2
+cd /app/frontend
+npm run build
 
 # Start FastAPI backend. Host networking lets it bind to 127.0.0.1:8000.
 echo "[entrypoint] Starting backend..." >&2

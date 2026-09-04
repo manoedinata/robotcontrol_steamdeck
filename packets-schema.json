@@ -3,11 +3,11 @@
     "packet_types": {
         "send": {
             "byte_order": "little",
-            "header": "its",
+            "header": "",
             "fields": [
                 {
                     "name": "pwm",
-                    "type": "int8",
+                    "type": "float32",
                     "role": "yVelocity",
                     "default": 0,
                     "min": -100,
@@ -16,7 +16,7 @@
                 },
                 {
                     "name": "steering",
-                    "type": "int8",
+                    "type": "float32",
                     "role": "thetaVelocity",
                     "default": 0,
                     "min": -100,
