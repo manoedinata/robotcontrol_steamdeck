@@ -38,6 +38,10 @@ def _resolve_stream_id(streams: dict[str, str], requested: str | None) -> str:
 class _AiortcStream:
     """Create and clean up one RTSP-backed WebRTC peer per viewer."""
 
+    # Microseconds. ffmpeg waits ~7s (or forever, on a camera that accepts the
+    # connection then goes quiet) before giving up on an RTSP dial, so bound it.
+    RTSP_OPEN_TIMEOUT_US = "5000000"
+
     def __init__(self, streams: CameraStreams, logger: logging.Logger) -> None:
         self._streams: dict[str, str] = dict(streams)
         self._logger = logger
@@ -46,7 +50,24 @@ class _AiortcStream:
         self._sessions: dict[
             RTCPeerConnection, tuple[str, str, MediaPlayer]
         ] = {}
+        # Stream ids with an RTSP dial in flight. The renderer retries a failed
+        # camera every couple of seconds, which is faster than a dead camera
+        # fails, so without this the retries would stack worker threads.
+        self._dialing: set[str] = set()
         self._lock = asyncio.Lock()
+
+    def _open_player(self, camera_url: str) -> MediaPlayer:
+        """Dial the RTSP source. Blocking: only call this in a worker thread."""
+        return MediaPlayer(
+            camera_url,
+            format="rtsp",
+            options={
+                "rtsp_transport": "udp",
+                "fflags": "nobuffer",
+                "flags": "low_delay",
+                "timeout": self.RTSP_OPEN_TIMEOUT_US,
+            },
+        )
 
     async def update_streams(self, streams: CameraStreams) -> None:
         async with self._lock:
@@ -65,19 +86,20 @@ class _AiortcStream:
         async with self._lock:
             resolved_id = _resolve_stream_id(self._streams, stream_id)
             camera_url = self._streams[resolved_id]
+            if resolved_id in self._dialing:
+                raise RuntimeError(
+                    f"camera stream {resolved_id!r} is already being opened"
+                )
+            self._dialing.add(resolved_id)
 
         peer = RTCPeerConnection()
         player: MediaPlayer | None = None
         try:
-            player = MediaPlayer(
-                camera_url,
-                format="rtsp",
-                options={
-                    "rtsp_transport": "udp",
-                    "fflags": "nobuffer",
-                    "flags": "low_delay",
-                },
-            )
+            # MediaPlayer() opens the RTSP container synchronously and does not
+            # return until the camera answers or ffmpeg times out. Run it in a
+            # worker thread so an unreachable camera cannot stall the event
+            # loop, and with it the UDP send loop, telemetry and PTZ.
+            player = await asyncio.to_thread(self._open_player, camera_url)
             if player.video is None:
                 raise RuntimeError("RTSP source does not provide a video track")
 
@@ -101,6 +123,9 @@ class _AiortcStream:
                 player.audio and player.audio.stop()
             await peer.close()
             raise
+        finally:
+            async with self._lock:
+                self._dialing.discard(resolved_id)
 
     async def close_peer(self, peer: RTCPeerConnection) -> None:
         async with self._lock:
