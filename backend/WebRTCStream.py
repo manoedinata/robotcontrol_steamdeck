@@ -13,6 +13,8 @@ from urllib.request import Request, urlopen
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaPlayer
 
+import utils
+
 # A config carries every RTSP source that should stay warm as (id, url) pairs.
 CameraStreams = tuple[tuple[str, str], ...]
 
@@ -35,6 +37,24 @@ def _resolve_stream_id(streams: dict[str, str], requested: str | None) -> str:
     raise ValueError("camera stream id (?src=) is required with multiple streams")
 
 
+def _discard_dialed_player(dial: asyncio.Future) -> None:
+    """Tear down a player that finished opening after we stopped waiting."""
+    if dial.cancelled() or dial.exception() is not None:
+        return
+    with suppress(Exception):
+        _stop_player(dial.result())
+
+
+def _stop_player(player: MediaPlayer | None) -> None:
+    """Release the RTSP connection behind a player."""
+    if player is None:
+        return
+    if player.video is not None:
+        player.video.stop()
+    if player.audio is not None:
+        player.audio.stop()
+
+
 class _AiortcStream:
     """Create and clean up one RTSP-backed WebRTC peer per viewer."""
 
@@ -54,6 +74,10 @@ class _AiortcStream:
         # camera every couple of seconds, which is faster than a dead camera
         # fails, so without this the retries would stack worker threads.
         self._dialing: set[str] = set()
+        # Set by close(). A dial in flight stops being waited on, so quitting
+        # mid-reconnect does not wait out the camera's timeout, and whatever
+        # the dial eventually opens is torn down instead of left running.
+        self._closing = asyncio.Event()
         self._lock = asyncio.Lock()
 
     def _open_player(self, camera_url: str) -> MediaPlayer:
@@ -96,10 +120,10 @@ class _AiortcStream:
         player: MediaPlayer | None = None
         try:
             # MediaPlayer() opens the RTSP container synchronously and does not
-            # return until the camera answers or ffmpeg times out. Run it in a
-            # worker thread so an unreachable camera cannot stall the event
-            # loop, and with it the UDP send loop, telemetry and PTZ.
-            player = await asyncio.to_thread(self._open_player, camera_url)
+            # return until the camera answers or ffmpeg times out. Run it off
+            # the event loop so an unreachable camera cannot stall the UDP send
+            # loop, telemetry and PTZ along with it.
+            player = await self._dial(resolved_id, camera_url)
             if player.video is None:
                 raise RuntimeError("RTSP source does not provide a video track")
 
@@ -118,29 +142,42 @@ class _AiortcStream:
                 self._sessions[peer] = (resolved_id, camera_url, player)
             return peer.localDescription
         except Exception:
-            if player is not None:
-                player.video and player.video.stop()
-                player.audio and player.audio.stop()
+            _stop_player(player)
             await peer.close()
             raise
         finally:
             async with self._lock:
                 self._dialing.discard(resolved_id)
 
+    async def _dial(self, stream_id: str, camera_url: str) -> MediaPlayer:
+        """Open the RTSP source, giving up the wait as soon as we are closing."""
+        dial = utils.run_detached(
+            self._open_player, camera_url, thread_name=f"rtsp-dial-{stream_id}"
+        )
+        closing = asyncio.ensure_future(self._closing.wait())
+        try:
+            await asyncio.wait({dial, closing}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            closing.cancel()
+
+        if not dial.done():
+            # Shutting down. Stop waiting on the camera and hand the player,
+            # whenever it lands, straight to teardown.
+            dial.add_done_callback(_discard_dialed_player)
+            raise RuntimeError("camera backend is shutting down")
+        return dial.result()
+
     async def close_peer(self, peer: RTCPeerConnection) -> None:
         async with self._lock:
             session = self._sessions.pop(peer, None)
 
         if session is not None:
-            _, _, player = session
-            if player.video is not None:
-                player.video.stop()
-            if player.audio is not None:
-                player.audio.stop()
+            _stop_player(session[2])
         if peer.connectionState != "closed":
             await peer.close()
 
     async def close(self) -> None:
+        self._closing.set()
         async with self._lock:
             peers = tuple(self._sessions)
         await asyncio.gather(*(self.close_peer(peer) for peer in peers))
@@ -190,8 +227,13 @@ class _Go2RtcStream:
         phase: str = "go2rtc API request",
     ) -> bytes:
         try:
-            return await asyncio.to_thread(
-                self._request, method, f"{self.API_URL}{path}", body, content_type
+            return await utils.run_detached(
+                self._request,
+                method,
+                f"{self.API_URL}{path}",
+                body,
+                content_type,
+                thread_name="go2rtc-api",
             )
         except (OSError, SocketTimeout) as error:
             self._logger.warning(
@@ -253,12 +295,12 @@ class _Go2RtcStream:
         if process.poll() is None:
             try:
                 os.killpg(process.pid, signal.SIGTERM)
-                await asyncio.to_thread(process.wait, 3)
+                await utils.run_detached(process.wait, 3, thread_name="go2rtc-wait")
             except (OSError, subprocess.TimeoutExpired):
                 with suppress(Exception):
                     os.killpg(process.pid, signal.SIGKILL)
                 process.kill()
-                await asyncio.to_thread(process.wait)
+                await utils.run_detached(process.wait, thread_name="go2rtc-wait")
         if self._config_path:
             try:
                 os.unlink(self._config_path)

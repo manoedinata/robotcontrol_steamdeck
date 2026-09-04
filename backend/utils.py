@@ -1,5 +1,9 @@
+import asyncio
 import math
 import struct
+import threading
+from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 
 WIRE_TYPES = {
@@ -12,6 +16,47 @@ WIRE_TYPES = {
     "float32": ("f", 4, float),
     "float64": ("d", 8, float),
 }
+
+
+def run_detached(
+    func: Callable[..., Any], *args: Any, thread_name: str | None = None
+) -> asyncio.Future:
+    """Await a blocking call on a daemon thread that shutdown never joins.
+
+    asyncio.to_thread() and run_in_executor(None, ...) both hand work to the
+    loop's default executor, and closing the loop waits for every thread in
+    it. A blocking network call with a multi-second timeout would then hold
+    the process open long after the UI is gone -- quitting mid-reconnect kept
+    the RTSP dial, and the stream with it, alive until ffmpeg gave up. On a
+    daemon thread the awaiting coroutine can be abandoned and the interpreter
+    can exit while the call is still outstanding.
+
+    The returned future can be awaited, cancelled, or waited on alongside
+    other awaitables; cancelling it abandons the call rather than stopping it.
+    """
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future = loop.create_future()
+
+    def deliver(setter: Callable[[Any], None], value: Any) -> None:
+        # The awaiting side may be gone by the time the call lands.
+        if not future.cancelled():
+            setter(value)
+
+    def runner() -> None:
+        try:
+            result = func(*args)
+        except BaseException as error:  # delivered to the awaiting coroutine
+            setter, value = future.set_exception, error
+        else:
+            setter, value = future.set_result, result
+        # RuntimeError here means the loop is already closed, which is exactly
+        # the case this helper exists to survive.
+        with suppress(RuntimeError):
+            loop.call_soon_threadsafe(deliver, setter, value)
+
+    name = thread_name or f"detached-{getattr(func, '__name__', 'call')}"
+    threading.Thread(target=runner, name=name, daemon=True).start()
+    return future
 
 
 def s_to_hz(s: float) -> float:

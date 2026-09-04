@@ -14,6 +14,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+import utils
+
 LOGGER = logging.getLogger(__name__)
 
 # Camera keeps moving until a zero-speed PTZData arrives, so the loop re-sends
@@ -166,12 +168,15 @@ class PTZController:
             with opener.open(req, timeout=REQUEST_TIMEOUT_S) as resp:
                 resp.read()
 
-        loop = asyncio.get_running_loop()
         last_error: Exception | None = None
         # Digest first, basic fallback on 401, matching stream_camera.py.
         for opener in (self._digest_opener, self._basic_opener):
             try:
-                await loop.run_in_executor(None, _open, opener)
+                # Detached rather than run_in_executor(None, ...): a camera
+                # that has gone away holds a request for REQUEST_TIMEOUT_S,
+                # and the default executor is joined when the loop closes, so
+                # that wait would be added to every shutdown.
+                await utils.run_detached(_open, opener, thread_name="ptz-put")
                 return
             except urllib.error.HTTPError as e:
                 last_error = e
