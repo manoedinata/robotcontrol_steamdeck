@@ -8,7 +8,14 @@ from PTZController import (
     normalize_zoom,
     zoom_to_ptz_data,
 )
-from server import send_field_limits, validate_config
+from server import (
+    SCHEMA_SLEW_RATES,
+    advance_packet,
+    encode_current_packet,
+    runtime,
+    send_field_limits,
+    validate_config,
+)
 from WebRTCStream import _resolve_stream_id
 
 
@@ -109,9 +116,71 @@ class SendFieldLimitsTests(unittest.TestCase):
         for field in fields:
             with self.subTest(field=field["name"]):
                 self.assertEqual(
-                    set(field), {"name", "role", "type", "min", "max", "default"}
+                    set(field),
+                    {"name", "role", "type", "min", "max", "default", "slew_rate"},
                 )
                 self.assertLess(field["min"], field["max"])
+                # The schema gives both command fields a ramp rate.
+                self.assertGreater(field["slew_rate"], 0)
+
+
+class PacketSlewConfigTests(unittest.TestCase):
+    def test_schema_rates_apply_when_the_operator_overrides_nothing(self) -> None:
+        self.assertEqual(validate_config({})[7], {})
+        self.assertEqual(
+            {field["name"]: field["slew_rate"] for field in send_field_limits()},
+            SCHEMA_SLEW_RATES,
+        )
+
+    def test_overrides_are_accepted_and_zero_disables_limiting(self) -> None:
+        rates = validate_config({"packet_slew": {"pwm": 40, "steering": 0}})[7]
+        self.assertEqual(rates, {"pwm": 40.0, "steering": 0.0})
+        for rate in rates.values():
+            self.assertIsInstance(rate, float)
+
+    def test_unknown_padding_and_negative_rates_are_rejected(self) -> None:
+        for slew in (
+            {"nope": 10},
+            {"padding": 10},
+            {"pwm": -1},
+            {"pwm": float("inf")},
+            {"pwm": True},
+            {"pwm": "fast"},
+            [],
+        ):
+            with self.subTest(slew=slew):
+                with self.assertRaises(ValueError):
+                    validate_config({"packet_slew": slew})
+
+
+class RampTests(unittest.TestCase):
+    """The send loop's side of the ramp, against the real packet schema."""
+
+    def setUp(self) -> None:
+        self.saved = (dict(runtime.target_packet), dict(runtime.current_packet))
+
+    def tearDown(self) -> None:
+        target, current = self.saved
+        runtime.target_packet = target
+        runtime.current_packet = current
+
+    def test_one_tick_moves_a_field_by_at_most_its_rate(self) -> None:
+        runtime.current_packet["pwm"] = 0.0
+        runtime.target_packet["pwm"] = 100
+
+        self.assertTrue(advance_packet(0.02))
+        self.assertAlmostEqual(
+            runtime.current_packet["pwm"], SCHEMA_SLEW_RATES["pwm"] * 0.02
+        )
+        self.assertFalse(advance_packet(0.0))  # no time passed, no movement
+
+    def test_a_mid_ramp_packet_encodes_whatever_the_field_types_are(self) -> None:
+        # Ramp state is float even for an integer field, so the encoder has to
+        # be handed a rounded value rather than the raw state.
+        for field in send_field_limits():
+            runtime.current_packet[field["name"]] = 4.7
+
+        self.assertEqual(len(encode_current_packet()), len(runtime.packet_payload))
 
 
 class PTZConfigTests(unittest.TestCase):

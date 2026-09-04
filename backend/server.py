@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 import re
 import socket
 from contextlib import asynccontextmanager, suppress
@@ -37,6 +38,15 @@ with SCHEMA_PATH.open(encoding="utf-8") as schema_file:
     PACKET_SCHEMA = json.load(schema_file)
 
 
+SCHEMA_SLEW_RATES = utils.slew_rates(PACKET_SCHEMA)
+# Ramp state is kept as float so a sub-unit step still makes progress, but an
+# integer field cannot carry one, so these are rounded on the way out.
+INTEGER_SEND_FIELDS = frozenset(
+    field["name"]
+    for field in utils.packet_schema(PACKET_SCHEMA, "send")["fields"]
+    if not field["type"].startswith("float")
+)
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 )
@@ -45,6 +55,10 @@ logging.basicConfig(
 @dataclass
 class RuntimeState:
     config: settings_module.Settings
+    # What the UI last asked for, and what the ramp has actually reached. They
+    # differ only while a rate-limited field is still travelling toward its
+    # target; every other field tracks the target exactly.
+    target_packet: dict[str, Any]
     current_packet: dict[str, Any]
     packet_payload: bytes
     udp_enabled: bool = False
@@ -67,6 +81,20 @@ def encode_packet(packet: dict[str, Any]) -> bytes:
     return utils.encode_binary_packet(packet, PACKET_SCHEMA)
 
 
+def encode_current_packet() -> bytes:
+    """Encode the ramped packet, rounding the fields that must be integers."""
+    return encode_packet(
+        {
+            name: (
+                round(value)
+                if name in INTEGER_SEND_FIELDS and isinstance(value, float)
+                else value
+            )
+            for name, value in runtime.current_packet.items()
+        }
+    )
+
+
 default_packet = utils.generate_default_state(PACKET_SCHEMA)
 runtime = RuntimeState(
     config=settings_module.Settings(
@@ -76,7 +104,8 @@ runtime = RuntimeState(
         camera_streams=(),
         camera_backend="go2rtc",
     ),
-    current_packet=default_packet,
+    target_packet=dict(default_packet),
+    current_packet=dict(default_packet),
     packet_payload=encode_packet(default_packet),
 )
 
@@ -126,9 +155,37 @@ def validate_camera_streams(value: Any) -> tuple[tuple[str, str], ...]:
     return tuple(streams)
 
 
+def validate_packet_slew(value: Any) -> dict[str, float]:
+    """Validate the operator's per-field ramp rates, in units per second.
+
+    Keys name send-packet fields that carry a command; padding is not ramped,
+    so naming it is a mistake worth reporting rather than ignoring. A rate of
+    0 disables limiting for that field, and a field left out keeps the rate
+    the schema declares.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("packet_slew must be an object")
+
+    commandable = {
+        field["name"]
+        for field in utils.packet_schema(PACKET_SCHEMA, "send")["fields"]
+        if field.get("role") != "padding"
+    }
+    rates: dict[str, float] = {}
+    for name, rate in value.items():
+        if name not in commandable:
+            raise ValueError(f"Unknown packet_slew field: {name!r}")
+        if isinstance(rate, bool) or not isinstance(rate, (int, float)):
+            raise ValueError(f"packet_slew {name!r} must be a number")
+        if not math.isfinite(rate) or rate < 0:
+            raise ValueError(f"packet_slew {name!r} must be finite and not negative")
+        rates[name] = float(rate)
+    return rates
+
+
 def validate_config(
     config: dict[str, Any],
-) -> tuple[str, int, int, tuple[tuple[str, str], ...], str, bool, str]:
+) -> tuple[str, int, int, tuple[tuple[str, str], ...], str, bool, str, dict[str, float]]:
     allowed_keys = {
         "udp_host",
         "udp_port",
@@ -136,6 +193,7 @@ def validate_config(
         "camera_streams",
         "camera_backend",
         "ptz_ip",
+        "packet_slew",
     }
     unknown_keys = set(config) - allowed_keys
     if unknown_keys:
@@ -153,6 +211,11 @@ def validate_config(
     )
     camera_backend_value = config.get("camera_backend", runtime.config.camera_backend)
     ptz_ip_value = config.get("ptz_ip", runtime.config.ptz_ip)
+    packet_slew = (
+        validate_packet_slew(config["packet_slew"])
+        if "packet_slew" in config
+        else dict(runtime.config.packet_slew)
+    )
     if not isinstance(udp_host_value, str):
         raise ValueError("udp_host must be a string")
     if isinstance(udp_port_value, bool) or not isinstance(udp_port_value, int):
@@ -187,6 +250,7 @@ def validate_config(
         camera_backend_value,
         udp_enabled,
         ptz_ip,
+        packet_slew,
     )
 
 
@@ -267,6 +331,36 @@ async def udp_ping_loop() -> None:
         await asyncio.sleep(PING_INTERVAL_S)
 
 
+def effective_slew_rates() -> dict[str, float]:
+    """Ramp rates in force: the operator's overrides over the schema's."""
+    return {**SCHEMA_SLEW_RATES, **runtime.config.packet_slew}
+
+
+def advance_packet(dt: float) -> bool:
+    """Step the outgoing packet toward the UI's target. True if it moved.
+
+    Fields with a rate travel at most `rate * dt` per tick; the rest take the
+    target immediately. State is kept as float even for integer fields --
+    rounding it here would strand any field whose per-tick step is under half
+    a unit, so rounding is left to the encoder.
+    """
+    rates = effective_slew_rates()
+    moved = False
+    for name, target in runtime.target_packet.items():
+        current = runtime.current_packet.get(name)
+        if isinstance(target, list) or not isinstance(current, (int, float)):
+            # Padding and any other non-scalar field is not ramped.
+            if current != target:
+                runtime.current_packet[name] = target
+                moved = True
+            continue
+        stepped = utils.slew_step(float(current), float(target), rates.get(name), dt)
+        if stepped != current:
+            runtime.current_packet[name] = stepped
+            moved = True
+    return moved
+
+
 def release_udp_socket(sock: socket.socket | None) -> None:
     """Close a telemetry socket and stop the send loop from reaching for it.
 
@@ -287,11 +381,21 @@ async def udp_loop() -> None:
     """Send the latest controls at a stable rate while a UI is connected."""
     loop = asyncio.get_running_loop()
     interval = utils.hz_to_s(UDP_SEND_HZ)
+    # A tick that ran late must not hand the ramp one huge step, so the
+    # measured dt is capped at a few intervals' worth of catch-up.
+    max_dt = interval * 5
     next_send = loop.time()
+    last_tick = next_send
     last_error_log = 0.0
 
     try:
         while True:
+            now = loop.time()
+            dt = min(max(now - last_tick, 0.0), max_dt)
+            last_tick = now
+            if advance_packet(dt):
+                runtime.packet_payload = encode_current_packet()
+
             if runtime.clients and runtime.udp_enabled:
                 # Read the shared socket once: the receive loop may rebind it
                 # between the check and the send.
@@ -360,6 +464,9 @@ def send_field_limits() -> list[dict[str, Any]]:
             "default": field.get(
                 "default", utils.default_for_wire_type(field["type"])
             ),
+            # Units per second the command may change by. None leaves the
+            # field unramped.
+            "slew_rate": effective_slew_rates().get(field["name"]),
         }
         for field in utils.packet_schema(PACKET_SCHEMA, "send")["fields"]
         if field.get("role") != "padding"
@@ -640,6 +747,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         camera_backend,
                         udp_enabled,
                         ptz_ip,
+                        packet_slew,
                     ) = validate_config(config)
                     runtime.config.udp_ip = udp_host
                     runtime.config.udp_port = udp_port
@@ -648,6 +756,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.config.camera_backend = camera_backend
                     runtime.udp_enabled = udp_enabled
                     runtime.config.ptz_ip = ptz_ip
+                    runtime.config.packet_slew = packet_slew
                     sync_ptz_controller()
                     await video_stream.update_config(camera_streams, camera_backend)
                     print(
@@ -683,9 +792,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     if not isinstance(packet, dict):
                         raise ValueError("packet must be an object")
                     utils.validate_packet_values(packet, PACKET_SCHEMA)
-                    next_packet = {**runtime.current_packet, **packet}
-                    runtime.packet_payload = encode_packet(next_packet)
-                    runtime.current_packet = next_packet
+                    # Only the target moves here. udp_loop ramps the packet on
+                    # the wire toward it at the configured rate.
+                    runtime.target_packet = {**runtime.target_packet, **packet}
                 else:
                     raise ValueError("message type must be 'config', 'send', or 'ptz'")
             except (
@@ -704,8 +813,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     finally:
         runtime.clients.pop(websocket, None)
         if not runtime.clients:
-            runtime.current_packet = utils.generate_default_state(PACKET_SCHEMA)
-            runtime.packet_payload = encode_packet(runtime.current_packet)
+            # Clear the ramp along with the target: a UI that reconnects must
+            # start from a standstill, not resume a half-finished ramp.
+            runtime.target_packet = utils.generate_default_state(PACKET_SCHEMA)
+            runtime.current_packet = dict(runtime.target_packet)
+            runtime.packet_payload = encode_current_packet()
             # Last UI left; make sure the camera stops rotating, zooming, and
             # focusing. ptz_focus_sent is intentionally NOT reset here: the
             # loop sees focus=None with a non-None sent-state as the release

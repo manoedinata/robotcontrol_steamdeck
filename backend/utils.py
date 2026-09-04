@@ -147,6 +147,56 @@ def validate_packet_values(
                 raise ValueError(f"Field {name!r} exceeds its maximum")
 
 
+def slew_rates(schema: dict, packet_type: str = "send") -> dict[str, float]:
+    """Per-field ramp rates, in packet units per second.
+
+    A field declares `slew_rate` to cap how fast its command may change on the
+    wire, so a joystick slammed to full deflection becomes a linear ramp
+    instead of a step the robot has to absorb. Fields that leave it out (and
+    padding, which carries no command) are sent through unchanged, as is a
+    rate of 0.
+    """
+    rates: dict[str, float] = {}
+    for field in packet_schema(schema, packet_type)["fields"]:
+        if field.get("role") == "padding":
+            continue
+        rate = field.get("slew_rate")
+        if rate is None:
+            continue
+        if isinstance(rate, bool) or not isinstance(rate, (int, float)):
+            raise ValueError(f"Field {field['name']!r} slew_rate must be a number")
+        if not math.isfinite(rate) or rate < 0:
+            raise ValueError(
+                f"Field {field['name']!r} slew_rate must be finite and not negative"
+            )
+        if rate > 0:
+            rates[field["name"]] = float(rate)
+    return rates
+
+
+def slew_step(value: float, target: float, rate: float | None, dt: float) -> float:
+    """Move `value` toward `target` by at most `rate * dt`.
+
+    This is the trapezoidal profile: capping the per-second change makes the
+    command ramp linearly, symmetrically in both directions. Without a rate
+    there is nothing to limit and the target applies immediately.
+    """
+    if rate is None or rate <= 0:
+        return target
+    if dt <= 0:
+        # No time has passed, so nothing may move. This is not the same as
+        # having no rate: returning the target here would teleport past the
+        # ramp on any tick the clock did not advance.
+        return value
+    step = rate * dt
+    delta = target - value
+    if delta > step:
+        return value + step
+    if delta < -step:
+        return value - step
+    return target
+
+
 def packet_header(schema: dict, packet_type: str = "send") -> bytes:
     """ASCII header bytes for a packet type; empty when the schema omits one.
 

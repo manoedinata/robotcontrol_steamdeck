@@ -56,6 +56,99 @@ HEADERLESS_SCHEMA = {
 }
 
 
+# Ramp rates are optional per field; padding is never ramped.
+SLEW_SCHEMA = {
+    "packet_types": {
+        "send": {
+            "byte_order": "little",
+            "header": "",
+            "fields": [
+                {"name": "vy", "type": "float32", "slew_rate": 250},
+                {"name": "mode", "type": "uint16"},
+                {"name": "spare", "type": "uint8", "role": "padding", "count": 4,
+                 "slew_rate": 999},
+            ],
+        }
+    }
+}
+
+
+class SlewProfileTests(unittest.TestCase):
+    TICK = 0.02          # the 50 Hz UDP send loop
+
+    def ramp(self, start, target, rate, ticks):
+        """Run the limiter for `ticks` ticks, returning every value it took."""
+        value = start
+        values = []
+        for _ in range(ticks):
+            value = utils.slew_step(value, target, rate, self.TICK)
+            values.append(value)
+        return values
+
+    def test_full_scale_step_ramps_instead_of_jumping(self) -> None:
+        # 250 units/s at 50 Hz is 5 units per tick, so 0 -> 100 takes 20 ticks.
+        values = self.ramp(0.0, 100.0, 250, 25)
+
+        self.assertAlmostEqual(values[0], 5.0)
+        self.assertAlmostEqual(values[19], 100.0)
+        self.assertEqual(values[20:], [100.0] * 5)      # settles, no overshoot
+
+    def test_no_tick_moves_further_than_the_rate_allows(self) -> None:
+        previous = 0.0
+        for value in self.ramp(0.0, 100.0, 250, 25):
+            self.assertLessEqual(abs(value - previous), 250 * self.TICK + 1e-9)
+            previous = value
+
+    def test_the_ramp_is_symmetric_in_both_directions(self) -> None:
+        up = self.ramp(0.0, 100.0, 250, 20)
+        down = self.ramp(0.0, -100.0, 250, 20)
+
+        self.assertEqual(up, [-value for value in down])
+
+    def test_a_rate_of_zero_or_none_applies_the_target_at_once(self) -> None:
+        for rate in (None, 0, 0.0):
+            with self.subTest(rate=rate):
+                self.assertEqual(utils.slew_step(0.0, 100.0, rate, self.TICK), 100.0)
+
+    def test_no_elapsed_time_means_no_movement(self) -> None:
+        # Distinct from having no rate: a tick where the clock did not advance
+        # must not hand the target straight through.
+        self.assertEqual(utils.slew_step(10.0, 100.0, 250, 0.0), 10.0)
+        self.assertEqual(utils.slew_step(10.0, 100.0, 250, -1.0), 10.0)
+
+    def test_a_sub_unit_step_still_advances_because_state_stays_float(self) -> None:
+        # 10 units/s at 50 Hz is 0.2 per tick. Rounding the limiter's own state
+        # would strand an integer field here; rounding only at encode time
+        # lets it cross to 1 after five ticks.
+        values = self.ramp(0.0, 100.0, 10, 5)
+
+        self.assertAlmostEqual(values[-1], 1.0)
+        self.assertEqual([round(value) for value in values], [0, 0, 1, 1, 1])
+
+    def test_a_target_inside_one_step_lands_exactly_on_it(self) -> None:
+        self.assertEqual(utils.slew_step(0.0, 1.5, 250, self.TICK), 1.5)
+        self.assertEqual(utils.slew_step(100.0, 99.0, 250, self.TICK), 99.0)
+
+    def test_rates_are_read_per_field_and_padding_is_skipped(self) -> None:
+        self.assertEqual(utils.slew_rates(SLEW_SCHEMA), {"vy": 250.0})
+
+    def test_invalid_rates_are_rejected(self) -> None:
+        for rate in (-1, float("nan"), float("inf"), True, "fast"):
+            with self.subTest(rate=rate):
+                schema = {
+                    "packet_types": {
+                        "send": {
+                            "byte_order": "little",
+                            "fields": [
+                                {"name": "vy", "type": "float32", "slew_rate": rate}
+                            ],
+                        }
+                    }
+                }
+                with self.assertRaises(ValueError):
+                    utils.slew_rates(schema)
+
+
 class BinaryPacketTests(unittest.TestCase):
     def test_defaults_follow_schema_fields(self) -> None:
         self.assertEqual(utils.generate_default_state(SCHEMA), {"vy": 0.0, "mode": 2})

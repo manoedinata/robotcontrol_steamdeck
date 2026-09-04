@@ -14,6 +14,7 @@ const {
   ptzIp,
   packetFieldLimits,
   packetLimits,
+  packetSlew,
   udpHost,
   udpPort,
   udpListenPort,
@@ -206,6 +207,8 @@ watch(packetFieldLimits, (fields) => {
     step: field.type?.startsWith('float') ? 0.1 : 1,
     min: String(field.min),
     max: String(field.max),
+    // Blank means "no ramp": the field goes on the wire the moment it changes.
+    slew: field.slewRate === null ? '' : String(field.slewRate),
   }))
 }, { immediate: true })
 
@@ -275,6 +278,14 @@ async function persistSettings({ focusSave = false } = {}) {
           limit.name,
           { min: Number.parseFloat(limit.min), max: Number.parseFloat(limit.max) },
         ])),
+      },
+      // A blank rate is an absent override, which hands the field back to the
+      // rate declared in packets-schema.json.
+      packetSlew: {
+        ...packetSlew.value,
+        ...Object.fromEntries(limits.value
+          .filter((limit) => limit.slew !== '')
+          .map((limit) => [limit.name, Number.parseFloat(limit.slew)])),
       },
       udpHost: targetHost.value.trim(),
       udpPort: targetPort.value === '' ? 0 : Number.parseInt(targetPort.value, 10),
@@ -455,7 +466,9 @@ defineExpose({ saveBeforeClose })
         <div>
           <h2>Robot controls</h2>
           <p v-if="limits.length">Set the range of every field in the command packet. Joystick output scales to
-            these limits and stays inside the bounds declared in packets-schema.json.</p>
+            these limits and stays inside the bounds declared in packets-schema.json. The ramp rate caps how many
+            units per second a field may change by, so a joystick slammed to full deflection reaches it over a
+            ramp instead of in one packet; 0 sends the change immediately.</p>
           <p v-else>Connect to the backend to load the command packet fields.</p>
         </div>
       </div>
@@ -477,6 +490,15 @@ defineExpose({ saveBeforeClose })
             :max="limit.schemaMax" :step="limit.step" required data-gamepad-control
             @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard(limitField(index, 'max'))"
             @keydown="handleInputKeydown($event, limitField(index, 'max'))" />
+        </div>
+
+        <div class="settings-field">
+          <label :for="`limit-${limit.name}-slew`">{{ limit.name }} ramp rate <span>(units/s)</span></label>
+          <input :id="`limit-${limit.name}-slew`" v-model="limit.slew" class="form-control" type="number"
+            :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" min="0" :step="0.1"
+            data-gamepad-control
+            @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard(limitField(index, 'slew'))"
+            @keydown="handleInputKeydown($event, limitField(index, 'slew'))" />
         </div>
       </div>
 

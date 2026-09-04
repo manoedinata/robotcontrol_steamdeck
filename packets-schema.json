@@ -11,7 +11,8 @@
                     "role": "yVelocity",
                     "default": 0,
                     "min": -100,
-                    "max": 100
+                    "max": 100,
+                    "slew_rate": 250
                 },
                 {
                     "name": "steering",
@@ -19,7 +20,8 @@
                     "role": "thetaVelocity",
                     "default": 0,
                     "min": -100,
-                    "max": 100
+                    "max": 100,
+                    "slew_rate": 400
                 },
                 {
                     "name": "padding",

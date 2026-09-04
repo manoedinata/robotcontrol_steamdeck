@@ -102,6 +102,11 @@
     padding: 18px;
 }
 
+// Minimum, maximum and ramp rate belong to one field, so they stay on one row.
+.velocity-settings-row {
+    grid-template-columns: repeat(3, minmax(140px, 1fr));
+}
+
 .settings-field label {
     display: block;
     margin-bottom: 7px;

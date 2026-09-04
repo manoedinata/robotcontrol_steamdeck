@@ -113,6 +113,10 @@
     padding: 8px 22px 18px;
 }
 
+.velocity-settings-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .camera-source-header {
     padding: 12px 22px 0;
 }

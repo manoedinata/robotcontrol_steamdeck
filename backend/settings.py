@@ -7,6 +7,7 @@ class Settings:
         camera_streams: tuple[tuple[str, str], ...] = (),
         camera_backend: str = "go2rtc",
         ptz_ip: str = "",
+        packet_slew: dict[str, float] | None = None,
     ):
         self.udp_ip = udp_ip
         self.udp_port = udp_port
@@ -18,3 +19,7 @@ class Settings:
         self.camera_streams = camera_streams
         self.camera_backend = camera_backend
         self.ptz_ip = ptz_ip
+        # Operator overrides for the schema's per-field ramp rates, keyed by
+        # field name. Empty means every field keeps the rate the schema
+        # declares.
+        self.packet_slew: dict[str, float] = dict(packet_slew or {})

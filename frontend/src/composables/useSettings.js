@@ -31,6 +31,11 @@ const packetLimits = ref({})
 // Files written before per-field limits stored one symmetric cap per axis;
 // these seed the limits of the roles they used to cap.
 const legacyRoleLimits = ref({})
+// Operator overrides for the ramp rate of each send field, in packet units
+// per second: `{ pwm: 250 }`. A field with no entry keeps the rate declared in
+// packets-schema.json. Unlike the bounds above these are applied by the
+// backend, which owns the fixed-rate send loop, so they are sent to it.
+const packetSlew = ref({})
 const udpHost = ref(DEFAULT_UDP_HOST)
 const udpPort = ref(DEFAULT_UDP_PORT)
 const udpListenPort = ref(DEFAULT_UDP_LISTEN_PORT)
@@ -88,6 +93,8 @@ const packetFieldLimits = computed(() => packetFields.value.map((field) => {
         schemaMax: Number.isFinite(field.max) ? field.max : null,
         min: clampToSchema(range.min, field),
         max: clampToSchema(range.max, field),
+        // Units per second. Null means the field is sent unramped.
+        slewRate: packetSlew.value[field.name] ?? field.slew_rate ?? null,
     }
 }))
 
@@ -156,6 +163,7 @@ function syncBackendConfig() {
         camera_streams: cameraStreams,
         camera_backend: cameraBackend.value,
         ptz_ip: ptzIp.value.trim(),
+        packet_slew: { ...packetSlew.value },
     })
 }
 
@@ -199,6 +207,19 @@ function parseStoredCameraSources(settings) {
     return stored.map(normalizeCameraSource)
 }
 
+// Ramp rates keyed by field name; 0 is meaningful (it disables limiting for
+// that field), so only negative and non-numeric entries are dropped.
+function parsePacketSlew(value) {
+    if (!value || typeof value !== 'object') return {}
+
+    const rates = {}
+    for (const [name, rate] of Object.entries(value)) {
+        const parsed = Number(rate)
+        if (Number.isFinite(parsed) && parsed >= 0) rates[name] = parsed
+    }
+    return rates
+}
+
 function parsePacketLimits(value) {
     if (!value || typeof value !== 'object') return {}
 
@@ -233,6 +254,7 @@ function applySettings(settings) {
     cameraBackend.value = settings?.cameraBackend ?? DEFAULT_CAMERA_BACKEND
     ptzIp.value = typeof settings?.ptzIp === 'string' ? settings.ptzIp : DEFAULT_PTZ_IP
     packetLimits.value = parsePacketLimits(settings?.packetLimits)
+    packetSlew.value = parsePacketSlew(settings?.packetSlew)
     legacyRoleLimits.value = parseLegacyRoleLimits(settings)
     udpHost.value = settings?.udpHost ?? DEFAULT_UDP_HOST
     udpPort.value = settings?.udpPort ?? DEFAULT_UDP_PORT
@@ -287,6 +309,7 @@ export function useSettings() {
         ptzControlsActiveCamera,
         packetFieldLimits,
         packetLimits: readonly(packetLimits),
+        packetSlew: readonly(packetSlew),
         limitForRole,
         udpHost: readonly(udpHost),
         udpPort: readonly(udpPort),
