@@ -34,7 +34,19 @@ if [[ -z "${CONTAINER_RUNTIME}" ]]; then
 	exit 1
 fi
 
-mkdir -p "${CONFIG_DIR}" "${RECORDINGS_DIR}"
+mkdir -p "${CONFIG_DIR}"
+
+# Removable media lives under /run/media, which is tmpfs. Creating a directory
+# there when the card is not mounted would put it in RAM, and recording into it
+# would fill memory until the Deck runs out. A path on a card must come into
+# existence by mounting the card, never by us; the backend reports the folder as
+# unavailable until it does.
+RECORDINGS_ON_REMOVABLE=false
+if [[ "${RECORDINGS_DIR}" == /run/media/* ]]; then
+	RECORDINGS_ON_REMOVABLE=true
+else
+	mkdir -p "${RECORDINGS_DIR}"
+fi
 
 # -----------------------------------------------------------------------------
 # Display / graphics environment discovery
@@ -90,6 +102,31 @@ for dev in /dev/input/js* /dev/input/event*; do
 done
 
 # -----------------------------------------------------------------------------
+# Storage
+# -----------------------------------------------------------------------------
+# Removable media is passed through at the *same* path so a folder typed into
+# Settings means the same thing on the host and in the container: the operator
+# reads it out of `ls /run/media/deck/` and pastes it in. rslave propagates host
+# mounts inward, so a card inserted after launch appears live and a removed one
+# disappears instead of going stale.
+REMOVABLE_ARGS=()
+if [[ -d /run/media ]]; then
+	REMOVABLE_ARGS+=(-v "/run/media:/run/media:rslave")
+fi
+
+# The internal default is mounted at /app/recordings, which the container's
+# RECORDINGS_DIR points at. A recordings folder on a card needs no mount of its
+# own -- /run/media above already carries it -- and bind-mounting an absent one
+# would recreate the tmpfs hazard.
+RECORDINGS_ARGS=()
+if [[ "${RECORDINGS_ON_REMOVABLE}" == true ]]; then
+	RECORDINGS_ARGS+=(-e "RECORDINGS_DIR=${RECORDINGS_DIR}")
+else
+	RECORDINGS_ARGS+=(-e "RECORDINGS_DIR=/app/recordings")
+	RECORDINGS_ARGS+=(-v "${RECORDINGS_DIR}:/app/recordings")
+fi
+
+# -----------------------------------------------------------------------------
 # Run the container
 # -----------------------------------------------------------------------------
 echo "[launch] Starting ${APP_NAME} using ${CONTAINER_RUNTIME}..." >&2
@@ -100,9 +137,9 @@ echo "[launch] Starting ${APP_NAME} using ${CONTAINER_RUNTIME}..." >&2
 	--ipc host \
 	--cap-add=NET_RAW \
 	-e "APP_SETTINGS_DIR=/app/config" \
-	-e "RECORDINGS_DIR=/app/recordings" \
 	-v "${CONFIG_DIR}:/app/config" \
-	-v "${RECORDINGS_DIR}:/app/recordings" \
+	"${RECORDINGS_ARGS[@]}" \
+	"${REMOVABLE_ARGS[@]}" \
 	-v "${PROJECT_ROOT}:/app" \
 	-v "${APP_NAME}-node-modules:/app/frontend/node_modules" \
 	-v "${APP_NAME}-electron-cache:/opt/electron/cache" \

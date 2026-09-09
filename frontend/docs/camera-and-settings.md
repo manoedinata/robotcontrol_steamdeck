@@ -82,7 +82,20 @@ Files land in the Settings "Recordings folder" when one is set, otherwise in
 `${SDRM_RECORDINGS_DIR:-$HOME/Videos/steamdeck-robot-monitor}` on the host. The
 field takes an absolute path and is validated in the form before saving, so a
 relative one is reported on the field rather than bouncing off the backend as a
-rejected config message. Playback and stream history are not part of the app.
+rejected config message.
+
+To record to an SD card, give it the card's mount path plus a folder. SteamOS
+mounts removable media at `/run/media/deck/<label>`, or `/run/media/deck/<uuid>`
+when the card has no label, which is what Steam's own "Format SD Card" leaves
+it as -- so the path differs per card and has to be read off the device with
+`ls /run/media/deck/` rather than assumed. The launcher passes `/run/media`
+through to the container at the same path, so what is listed there is exactly
+what goes in the field.
+
+The folder must exist before recording starts. With the card out, the record
+button reports it as unavailable and the rest of the app is unaffected; pulling
+the card mid-recording stops the session rather than writing into nowhere.
+Playback and stream history are not part of the app.
 
 ## PTZ Control
 

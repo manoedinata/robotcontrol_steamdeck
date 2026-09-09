@@ -542,6 +542,11 @@ defineExpose({ saveBeforeClose })
           <h2>Recording</h2>
           <p>Where the record button writes. One folder per recording, one file per camera
             source. Leave empty to use the location this install was set up with.</p>
+          <p>For an SD card, use its mount path plus a folder, like
+            <code>/run/media/deck/&lt;card&gt;/recordings</code>. Run
+            <code>ls /run/media/deck/</code> in Konsole to see what your card is called.
+            The folder has to exist already &mdash; recording reports it as unavailable
+            while the card is out, rather than writing somewhere else.</p>
         </div>
       </div>
 
@@ -550,7 +555,7 @@ defineExpose({ saveBeforeClose })
           <label for="recordings-dir">Recordings folder <span>(optional)</span></label>
           <input id="recordings-dir" v-model.trim="recordingsPath" class="form-control" type="text"
             :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled"
-            placeholder="/home/deck/Videos/steamdeck-robot-monitor" autocomplete="off" data-gamepad-control
+            placeholder="/run/media/deck/&lt;card&gt;/recordings" autocomplete="off" data-gamepad-control
             @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('recordingsPath')"
             @keydown="handleInputKeydown($event, 'recordingsPath')" />
         </div>

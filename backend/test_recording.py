@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import os
+import tempfile
 import unittest
 import Recorder as Recorder_module
 from datetime import datetime
@@ -306,6 +308,16 @@ class StatePayloadTests(unittest.TestCase):
         self.assertNotIn("rtsp://", serialized)
         self.assertNotIn("url", self.build()["sources"][0])
 
+    def test_a_lost_folder_is_reported_as_the_stop_reason(self) -> None:
+        # Pulling the card mid-recording stops cleanly rather than leaving every
+        # source retrying against a directory that no longer exists.
+        payload = recording_state_payload(
+            active=False, session=None, started_at=None, directory=None,
+            free_bytes=None, remaining=None, stopped_reason="folder_lost",
+            sources=[],
+        )
+        self.assertEqual(payload["stopped_reason"], "folder_lost")
+
     def test_idle_state_reports_no_session_and_no_sources(self) -> None:
         payload = recording_state_payload(
             active=False,
@@ -339,6 +351,44 @@ class ParentDeathTests(unittest.TestCase):
         # The hook compares against this rather than PID 1, so it stays correct
         # when the backend itself runs as the container's init process.
         self.assertEqual(Recorder_module._BACKEND_PID, os.getpid())
+
+
+class RecordingsFolderTests(unittest.TestCase):
+    """The folder is usually removable media, so it is never created."""
+
+    def start(self, root: str) -> str:
+        recorder = Recorder(logger=logging.getLogger("test"))
+        recorder.set_root(root)
+        recorder.update_sources((("cam-0", "rtsp://h/s"),))
+        with self.assertRaises(ValueError) as caught:
+            asyncio.run(recorder.start())
+        return str(caught.exception)
+
+    def test_a_missing_folder_refuses_to_record_and_is_not_created(self) -> None:
+        # An absent card must read as "not available". Creating it would invent
+        # a directory where the card is not -- in the container's ephemeral
+        # filesystem, or under /run, which is tmpfs, where recording fills RAM.
+        with tempfile.TemporaryDirectory() as parent:
+            missing = os.path.join(parent, "card", "recordings")
+            message = self.start(missing)
+            self.assertIn("not available", message)
+            self.assertFalse(os.path.exists(missing))
+            self.assertFalse(os.path.exists(os.path.join(parent, "card")))
+
+    def test_a_file_where_the_folder_should_be_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as parent:
+            path = os.path.join(parent, "not-a-dir")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("")
+            self.assertIn("not available", self.start(path))
+
+    def test_recording_with_no_sources_is_refused(self) -> None:
+        recorder = Recorder(logger=logging.getLogger("test"))
+        with tempfile.TemporaryDirectory() as root:
+            recorder.set_root(root)
+            with self.assertRaises(ValueError) as caught:
+                asyncio.run(recorder.start())
+        self.assertIn("no camera source", str(caught.exception))
 
 
 class RecorderConstructionTests(unittest.TestCase):

@@ -53,8 +53,8 @@ and once to each UI on connect. It never contains a camera URL:
 ```
 
 Per-source `status` is `idle`, `starting`, `recording`, `reconnecting`,
-`failed`, or `stopped`; `stopped_reason` is `null`, `operator`, `low_disk`, or
-`shutdown`. One source failing never stops the others.
+`failed`, or `stopped`; `stopped_reason` is `null`, `operator`, `low_disk`,
+`folder_lost`, or `shutdown`. One source failing never stops the others.
 
 Files go to `<recordings dir>/<YYYYmmdd-HHMMSS>/<stream id>_<part>.mkv`. The
 directory is the config message's `recordings_dir` when the operator has set one
@@ -67,6 +67,16 @@ in Settings, otherwise the `RECORDINGS_DIR` environment variable
 default". A relative path is rejected because it would resolve against whatever
 directory the backend happened to be started from. Like the source list, a
 change to it applies to the next session rather than moving a running one.
+
+**The folder must already exist; the backend never creates it.** That is what
+makes an SD card work safely. The launcher passes the host's `/run/media`
+through at the same path, so a card path means the same thing inside the
+container as out, and an absent card is simply a missing directory: recording
+refuses with "recordings folder is not available" and everything else keeps
+running. Creating it instead would invent a directory where the card is not --
+in the container's ephemeral filesystem, or under `/run`, which is tmpfs, where
+recording would fill RAM until the Deck ran out. Pulling the card mid-recording
+stops the session cleanly with `stopped_reason: "folder_lost"`.
 
 Behavior worth knowing:
 

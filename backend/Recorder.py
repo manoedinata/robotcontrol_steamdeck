@@ -709,14 +709,16 @@ class Recorder:
                 raise ValueError("no camera source is configured")
 
             root = self._root()
-            try:
-                root.mkdir(parents=True, exist_ok=True)
-            except OSError as error:
-                raise ValueError(
-                    f"recording directory is not available: {error}"
-                ) from error
+            # Deliberately not created. The folder is usually removable media,
+            # and creating it would mean inventing a directory wherever the
+            # card is *not* -- on the container's own ephemeral filesystem, or
+            # under /run, which is tmpfs, where a recording fills RAM until the
+            # Deck runs out. An absent card must read as "not available", which
+            # is exactly what a missing directory says.
+            if not root.is_dir():
+                raise ValueError(f"recordings folder is not available: {root}")
             if not os.access(root, os.W_OK):
-                raise ValueError(f"recording directory is not writable: {root}")
+                raise ValueError(f"recordings folder is not writable: {root}")
 
             usage = shutil.disk_usage(root)
             if not has_free_space(usage.free, MIN_FREE_START_BYTES):
@@ -805,11 +807,21 @@ class Recorder:
             return self.state()
 
         now = asyncio.get_running_loop().time()
+        root = self._active_root or self._root()
+
+        # The card was pulled. Every writer is about to fail on write, and each
+        # has already recorded video, so the supervisors would retry them
+        # forever against a directory that no longer exists.
+        if not root.is_dir():
+            self._logger.warning(
+                "Recordings folder %s disappeared; stopping the recording", root
+            )
+            return await self.stop(reason="folder_lost")
+
         stalled = [writer for writer in self._writers if writer.poll_size(now)]
         for writer in stalled:
             await writer.restart_stalled()
 
-        root = self._active_root or self._root()
         try:
             usage = shutil.disk_usage(root)
             self._free_bytes = usage.free

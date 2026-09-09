@@ -25,7 +25,7 @@ shutdown_services() {
 
 trap shutdown_services SIGINT SIGTERM EXIT
 
-mkdir -p /app/config "${RECORDINGS_DIR:-/app/recordings}"
+mkdir -p /app/config /app/recordings
 
 # Build the frontend source code
 echo "[entrypoint] Building frontend..." >&2
