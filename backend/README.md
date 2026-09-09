@@ -56,13 +56,22 @@ Per-source `status` is `idle`, `starting`, `recording`, `reconnecting`,
 `failed`, or `stopped`; `stopped_reason` is `null`, `operator`, `low_disk`, or
 `shutdown`. One source failing never stops the others.
 
-Files go to `$RECORDINGS_DIR/<YYYYmmdd-HHMMSS>/<stream id>_<part>.mkv`
+Files go to `<recordings dir>/<YYYYmmdd-HHMMSS>/<stream id>_<part>.mkv`. The
+directory is the config message's `recordings_dir` when the operator has set one
+in Settings, otherwise the `RECORDINGS_DIR` environment variable
 (`/app/recordings` in the container, bind-mounted from
-`${SDRM_RECORDINGS_DIR:-$HOME/Videos/steamdeck-robot-monitor}`). The path is an
-environment variable, never a config field.
+`${SDRM_RECORDINGS_DIR:-$HOME/Videos/steamdeck-robot-monitor}`), otherwise a
+`recordings/` directory beside the repo.
+
+`recordings_dir` must be absolute, or be empty to mean "use the deployment
+default". A relative path is rejected because it would resolve against whatever
+directory the backend happened to be started from. Like the source list, a
+change to it applies to the next session rather than moving a running one.
 
 Behavior worth knowing:
 
+- The recordings directory is captured when recording starts, so editing it in
+  Settings mid-session cannot move or split a running recording.
 - The source list is frozen when recording starts. Switching cameras in the UI
   re-sends the whole config, so reacting to it would split every recording into
   parts each time the operator pressed B.

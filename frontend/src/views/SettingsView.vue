@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
-import { Camera, Gauge, Keyboard, Network, Plus, Save, Trash2 } from '@lucide/vue'
+import { Camera, Disc, Gauge, Keyboard, Network, Plus, Save, Trash2 } from '@lucide/vue'
 import OnScreenKeyboard from '../components/OnScreenKeyboard.vue'
 import { useSettingsGamepadNavigation } from '../composables/useSettingsGamepadNavigation'
 import { useSettings } from '../composables/useSettings'
@@ -12,6 +12,7 @@ const {
   activeCameraIndex,
   cameraBackend,
   ptzIp,
+  recordingsDir,
   packetFieldLimits,
   packetLimits,
   packetSlew,
@@ -27,6 +28,7 @@ const {
 const cameras = ref([])
 const backend = ref(cameraBackend.value)
 const ptzAddress = ref(ptzIp.value)
+const recordingsPath = ref(recordingsDir.value)
 // One editable min/max row per operator-settable send-packet field.
 const limits = ref([])
 const targetHost = ref(udpHost.value)
@@ -54,9 +56,10 @@ const keyboardFields = {
   targetPort: { label: 'UDP target port', layout: 'integer', maxLength: 5 },
   listenPort: { label: 'UDP telemetry listen port', layout: 'integer', maxLength: 5 },
   ptzAddress: { label: 'PTZ camera IP', layout: 'ip', maxLength: 253 },
+  recordingsPath: { label: 'Recordings folder', layout: 'path', maxLength: 4096 },
 }
 
-const fieldValues = { targetHost, targetPort, listenPort, ptzAddress }
+const fieldValues = { targetHost, targetPort, listenPort, ptzAddress, recordingsPath }
 
 // Camera sources and packet limits are lists, so their fields are addressed as
 // `<kind>:<index>:<field>` and the on-screen keyboard can target any row.
@@ -191,6 +194,10 @@ watch(cameraBackend, (next) => {
   backend.value = next
 }, { immediate: true })
 
+watch(recordingsDir, (next) => {
+  recordingsPath.value = next
+})
+
 watch(ptzIp, (next) => {
   ptzAddress.value = next
 }, { immediate: true })
@@ -249,6 +256,13 @@ async function persistSettings({ focusSave = false } = {}) {
     return false
   }
 
+  const recordingsFolder = recordingsPath.value.trim()
+  if (recordingsFolder && !recordingsFolder.startsWith('/')) {
+    settingsState.value = 'error'
+    settingsMessage.value = 'Recordings folder must be an absolute path, starting with "/".'
+    return false
+  }
+
   settingsState.value = 'saving'
   settingsMessage.value = ''
 
@@ -270,6 +284,7 @@ async function persistSettings({ focusSave = false } = {}) {
       activeCameraIndex: Math.min(activeCameraIndex.value, cameraSourcePayload.length - 1),
       cameraBackend: backend.value,
       ptzIp: ptzAddress.value.trim(),
+      recordingsDir: recordingsPath.value.trim(),
       // Merged over the stored map so limits for fields the backend has not
       // announced in this session are kept rather than dropped.
       packetLimits: {
@@ -518,6 +533,26 @@ defineExpose({ saveBeforeClose })
             :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" placeholder="192.168.1.64"
             autocomplete="off" data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
             @click="openKeyboard('ptzAddress')" @keydown="handleInputKeydown($event, 'ptzAddress')" />
+        </div>
+      </div>
+
+      <div class="settings-panel-heading settings-panel-heading-divided">
+        <Disc :size="20" aria-hidden="true" />
+        <div>
+          <h2>Recording</h2>
+          <p>Where the record button writes. One folder per recording, one file per camera
+            source. Leave empty to use the location this install was set up with.</p>
+        </div>
+      </div>
+
+      <div class="udp-settings-row">
+        <div class="settings-field">
+          <label for="recordings-dir">Recordings folder <span>(optional)</span></label>
+          <input id="recordings-dir" v-model.trim="recordingsPath" class="form-control" type="text"
+            :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled"
+            placeholder="/home/deck/Videos/steamdeck-robot-monitor" autocomplete="off" data-gamepad-control
+            @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('recordingsPath')"
+            @keydown="handleInputKeydown($event, 'recordingsPath')" />
         </div>
       </div>
 

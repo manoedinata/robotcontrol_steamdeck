@@ -11,6 +11,8 @@ const DEFAULT_UDP_LISTEN_PORT = 8889
 const DEFAULT_CAMERA_BACKEND = 'go2rtc'
 const DEFAULT_CAMERA_TYPE = 'rtsp'
 const DEFAULT_PTZ_IP = ''
+// Empty means the backend keeps its deployment default (RECORDINGS_DIR).
+const DEFAULT_RECORDINGS_DIR = ''
 const EMPTY_CAMERA_SOURCE = Object.freeze({
     url: '',
     type: DEFAULT_CAMERA_TYPE,
@@ -25,6 +27,7 @@ const cameraSources = ref([{ ...EMPTY_CAMERA_SOURCE }])
 const activeCameraIndex = ref(0)
 const cameraBackend = ref(DEFAULT_CAMERA_BACKEND)
 const ptzIp = ref(DEFAULT_PTZ_IP)
+const recordingsDir = ref(DEFAULT_RECORDINGS_DIR)
 // Operator overrides for the send packet's field bounds, keyed by field name:
 // `{ pwm: { min, max } }`. A field with no entry keeps the schema's own bounds.
 const packetLimits = ref({})
@@ -162,6 +165,7 @@ function syncBackendConfig() {
         camera_streams: cameraStreams,
         camera_backend: cameraBackend.value,
         ptz_ip: ptzIp.value.trim(),
+        recordings_dir: recordingsDir.value.trim(),
         packet_slew: { ...packetSlew.value },
     })
 }
@@ -252,6 +256,9 @@ function applySettings(settings) {
     activeCameraIndex.value = clampCameraIndex(settings?.activeCameraIndex ?? 0)
     cameraBackend.value = settings?.cameraBackend ?? DEFAULT_CAMERA_BACKEND
     ptzIp.value = typeof settings?.ptzIp === 'string' ? settings.ptzIp : DEFAULT_PTZ_IP
+    recordingsDir.value = typeof settings?.recordingsDir === 'string'
+        ? settings.recordingsDir
+        : DEFAULT_RECORDINGS_DIR
     packetLimits.value = parsePacketLimits(settings?.packetLimits)
     packetSlew.value = parsePacketSlew(settings?.packetSlew)
     legacyRoleLimits.value = parseLegacyRoleLimits(settings)
@@ -305,6 +312,7 @@ export function useSettings() {
         cameraUrl,
         cameraBackend: readonly(cameraBackend),
         ptzIp: readonly(ptzIp),
+        recordingsDir: readonly(recordingsDir),
         ptzControlsActiveCamera,
         packetFieldLimits,
         packetLimits: readonly(packetLimits),

@@ -10,6 +10,7 @@ The Settings drawer stores camera source, UDP destination, velocity limits, and 
 - UDP command target host/port and telemetry listening port.
 - Maximum linear Y and angular theta velocity, `0.1..100`.
 - Built-in on-screen keyboard toggle.
+- Optional recordings folder. Empty uses the location the install was set up with; a value must be an absolute path.
 - Optional PTZ camera IP address for camera pan/tilt/zoom/focus control. The camera credentials are hardcoded in the backend, not stored here.
 
 The persisted contract remains:
@@ -40,7 +41,8 @@ The persisted contract remains:
   "udpPort": 5000,
   "udpListenPort": 8889,
   "useOnScreenKeyboard": true,
-  "ptzIp": ""
+  "ptzIp": "",
+  "recordingsDir": ""
 }
 ```
 
@@ -74,9 +76,13 @@ the socket drops -- a recording outlives a two-second reconnect, and blanking
 the chip would claim otherwise. It dims instead, until the backend re-states it.
 
 The chip shows elapsed time and a count of any failed sources, so one dead
-camera is visible without opening a log. Files land in
-`${SDRM_RECORDINGS_DIR:-$HOME/Videos/steamdeck-robot-monitor}` on the host;
-playback and stream history are not part of the app.
+camera is visible without opening a log.
+
+Files land in the Settings "Recordings folder" when one is set, otherwise in
+`${SDRM_RECORDINGS_DIR:-$HOME/Videos/steamdeck-robot-monitor}` on the host. The
+field takes an absolute path and is validated in the form before saving, so a
+relative one is reported on the field rather than bouncing off the backend as a
+rejected config message. Playback and stream history are not part of the app.
 
 ## PTZ Control
 

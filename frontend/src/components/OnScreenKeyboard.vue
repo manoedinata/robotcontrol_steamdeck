@@ -82,10 +82,19 @@ const rows = computed(() => {
     ]
   }
 
+  // Filesystem paths need digits as well as letters; the shared symbol row
+  // already carries '/', '-', '_' and '.'.
+  if (props.layout === 'path') {
+    return [
+      ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+      ...letterRows,
+    ]
+  }
+
   return letterRows
 })
 
-const isTextLayout = computed(() => ['text', 'hostname', 'credential'].includes(props.layout))
+const isTextLayout = computed(() => ['text', 'hostname', 'credential', 'path'].includes(props.layout))
 
 const symbolKeys = computed(() => props.layout === 'credential'
   ? ['@', '-', '_', '.', '!', '#', '$', '%', '&', '*', '+', '=', '?']

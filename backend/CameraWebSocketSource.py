@@ -168,11 +168,17 @@ class CameraWebSocketHub:
         payload = await self._probe(url)
         detected = detect_payload_format(payload) if payload else None
         if detected is None:
-            # An unrecognized payload is far more likely to be H.264 without a
-            # leading start code than something else entirely, and guessing
-            # keeps a working camera working; the log says the guess happened.
+            # Either the probe never reached the camera, or it sent something
+            # with no recognizable start code. Guess H.264 -- much the more
+            # likely of the two -- rather than refusing to bring the source up,
+            # but say which case this was, because "unreachable" and "speaks an
+            # unexpected format" call for very different fixes.
             self._logger.warning(
-                "Camera %s sent an unrecognized payload; assuming H.264", stream_id
+                "Camera %s: %s; assuming H.264",
+                stream_id,
+                "could not be reached to detect its format"
+                if payload is None
+                else "sent an unrecognized payload",
             )
             detected = "h264"
         self._formats[url] = detected

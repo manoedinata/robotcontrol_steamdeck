@@ -15,6 +15,7 @@ from server import (
     runtime,
     send_field_limits,
     validate_config,
+    validate_recordings_dir,
 )
 from CameraWebSocketSource import (
     detect_payload_format,
@@ -415,3 +416,42 @@ class CameraReconnectTests(unittest.TestCase):
 
     def test_the_first_reconnect_is_not_instant(self) -> None:
         self.assertGreater(reconnect_delay(0), 0)
+
+
+class RecordingsDirConfigTests(unittest.TestCase):
+    """Where recordings are written, chosen by the operator in Settings."""
+
+    def test_defaults_to_the_deployment_default(self) -> None:
+        # Empty means "whatever RECORDINGS_DIR says", which is what the
+        # container and the Steam launcher configure.
+        self.assertEqual(validate_config({})[8], "")
+
+    def test_an_absolute_path_is_accepted_and_trimmed(self) -> None:
+        self.assertEqual(
+            validate_config({"recordings_dir": "  /home/deck/Videos/runs  "})[8],
+            "/home/deck/Videos/runs",
+        )
+
+    def test_an_empty_value_restores_the_default(self) -> None:
+        self.assertEqual(validate_config({"recordings_dir": "   "})[8], "")
+
+    def test_a_relative_path_is_rejected(self) -> None:
+        # It would resolve against whatever directory the backend was started
+        # from, which the operator cannot reason about.
+        for bad in ("recordings", "./runs", "../runs", "~/Videos"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_config({"recordings_dir": bad})
+
+    def test_a_non_string_is_rejected(self) -> None:
+        for bad in (5, None, ["/tmp"], {"path": "/tmp"}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_recordings_dir(bad)
+
+    def test_adding_it_did_not_shift_the_existing_fields(self) -> None:
+        # The tuple is indexed positionally throughout this suite, so a new
+        # field must only ever be appended.
+        config = validate_config({"camera_streams": [], "ptz_ip": "10.0.0.9"})
+        self.assertEqual(config[3], ())
+        self.assertEqual(config[4], "go2rtc")
+        self.assertEqual(config[6], "10.0.0.9")
+        self.assertIsInstance(config[7], dict)

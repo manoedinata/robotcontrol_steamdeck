@@ -605,6 +605,11 @@ class Recorder:
         self._ws_hub = ws_hub
         self._listener: Callable[[dict[str, Any]], Awaitable[None]] | None = None
         self._sources: tuple[tuple[str, str], ...] = ()
+        # Operator override for the recordings location; empty falls back to
+        # the deployment default. Like the source list, it is picked up by the
+        # next session rather than applied to a running one.
+        self._root_override: str = ""
+        self._active_root: Path | None = None
         self._writers: list[_Writer] = []
         self._session: str | None = None
         self._started_at: float | None = None
@@ -625,6 +630,17 @@ class Recorder:
     ) -> None:
         """Attach the broadcast callback, which does not exist at import time."""
         self._listener = listener
+
+    def set_root(self, path: str) -> None:
+        """Choose where the next session writes. Empty restores the default."""
+        if path == self._root_override:
+            return
+        self._root_override = path
+        if self.active:
+            self._logger.info(
+                "Recording in progress; recordings directory change applies "
+                "to the next session"
+            )
 
     def update_sources(self, streams: tuple[tuple[str, str], ...]) -> None:
         """Adopt the configured sources for the *next* session.
@@ -662,6 +678,8 @@ class Recorder:
         asyncio.create_task(self._listener(self.state()))
 
     def _root(self) -> Path:
+        if self._root_override:
+            return Path(self._root_override)
         default = Path(__file__).resolve().parent.parent / "recordings"
         return Path(os.environ.get(RECORDINGS_DIR_ENV, str(default)))
 
@@ -742,6 +760,7 @@ class Recorder:
                 )
 
             self._session = session
+            self._active_root = root
             self._started_at = time.time()
             self._directory = str(session_dir)
             self._stopped_reason = None
@@ -790,7 +809,7 @@ class Recorder:
         for writer in stalled:
             await writer.restart_stalled()
 
-        root = self._root()
+        root = self._active_root or self._root()
         try:
             usage = shutil.disk_usage(root)
             self._free_bytes = usage.free

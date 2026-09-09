@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import re
 import socket
 from contextlib import asynccontextmanager, suppress
@@ -180,6 +181,30 @@ def validate_camera_streams(value: Any) -> tuple[tuple[str, str], ...]:
     return tuple(streams)
 
 
+def validate_recordings_dir(value: Any) -> str:
+    """Validate the operator's recordings location.
+
+    Empty means "use the deployment default" (the RECORDINGS_DIR environment
+    variable, or a directory beside the repo), which is what the Docker image
+    and the Steam launcher set up. An absolute path is required: a relative one
+    would resolve against whatever directory the backend happens to be started
+    from, which is not something the operator can reason about.
+
+    The path is only ever used as the parent of a generated session directory,
+    and every component below it is sanitized, so an operator naming an awkward
+    directory can misplace their own recordings but cannot make the backend
+    write outside the directory they chose.
+    """
+    if not isinstance(value, str):
+        raise ValueError("recordings_dir must be a string")
+    path = value.strip()
+    if not path:
+        return ""
+    if not os.path.isabs(path):
+        raise ValueError("recordings_dir must be an absolute path")
+    return path
+
+
 def validate_packet_slew(value: Any) -> dict[str, float]:
     """Validate the operator's per-field ramp rates, in units per second.
 
@@ -211,7 +236,15 @@ def validate_packet_slew(value: Any) -> dict[str, float]:
 def validate_config(
     config: dict[str, Any],
 ) -> tuple[
-    str, int, int, tuple[tuple[str, str], ...], str, bool, str, dict[str, float]
+    str,
+    int,
+    int,
+    tuple[tuple[str, str], ...],
+    str,
+    bool,
+    str,
+    dict[str, float],
+    str,
 ]:
     allowed_keys = {
         "udp_host",
@@ -221,6 +254,7 @@ def validate_config(
         "camera_backend",
         "ptz_ip",
         "packet_slew",
+        "recordings_dir",
     }
     unknown_keys = set(config) - allowed_keys
     if unknown_keys:
@@ -242,6 +276,11 @@ def validate_config(
         validate_packet_slew(config["packet_slew"])
         if "packet_slew" in config
         else dict(runtime.config.packet_slew)
+    )
+    recordings_dir = (
+        validate_recordings_dir(config["recordings_dir"])
+        if "recordings_dir" in config
+        else runtime.config.recordings_dir
     )
     if not isinstance(udp_host_value, str):
         raise ValueError("udp_host must be a string")
@@ -278,6 +317,9 @@ def validate_config(
         udp_enabled,
         ptz_ip,
         packet_slew,
+        # Appended last on purpose: the existing tests index this tuple
+        # positionally, so a new field must never shift the ones before it.
+        recordings_dir,
     )
 
 
@@ -850,6 +892,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         udp_enabled,
                         ptz_ip,
                         packet_slew,
+                        recordings_dir,
                     ) = validate_config(config)
                     runtime.config.udp_ip = udp_host
                     runtime.config.udp_port = udp_port
@@ -859,6 +902,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.udp_enabled = udp_enabled
                     runtime.config.ptz_ip = ptz_ip
                     runtime.config.packet_slew = packet_slew
+                    runtime.config.recordings_dir = recordings_dir
                     sync_ptz_controller()
                     # The hub must know a WebSocket source before the camera
                     # backend is pointed at its relay URL, or the first dial
@@ -866,6 +910,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     await camera_ws_hub.update_streams(camera_streams)
                     await video_stream.update_config(camera_streams, camera_backend)
                     recorder.update_sources(camera_streams)
+                    recorder.set_root(recordings_dir)
                     LOGGER.info(
                         "UDP config accepted: "
                         f"enabled={udp_enabled} destination="
