@@ -17,6 +17,7 @@ costs no extra camera connection because the hub is already holding one.
 """
 
 import asyncio
+import ctypes
 import logging
 import os
 import re
@@ -66,6 +67,44 @@ FINALIZE_TIMEOUT_S = 5.0
 
 # ffmpeg stderr kept per source, to surface the reason a source failed.
 STDERR_TAIL_LINES = 20
+
+# prctl(2) option number for the parent-death signal. Linux only.
+PR_SET_PDEATHSIG = 1
+
+# Loaded once at import, never inside the pre-exec hook: that hook runs between
+# fork and exec, where doing as little as possible is what keeps it safe.
+try:
+    _LIBC: ctypes.CDLL | None = ctypes.CDLL("libc.so.6", use_errno=True)
+except OSError:  # pragma: no cover - non-glibc platforms
+    _LIBC = None
+
+# Captured before any child exists, so the hook can tell "my parent died" from
+# "my parent legitimately is PID 1", which is the case when uvicorn runs as the
+# container's init process.
+_BACKEND_PID = os.getpid()
+
+
+def die_with_parent() -> None:
+    """Ask the kernel to signal this ffmpeg when the backend process dies.
+
+    Without this, a backend killed outright (SIGKILL, an OOM kill, a crash)
+    leaves its recorders running: they hold a camera session open and keep
+    filling the disk until their own time limit expires.
+
+    SIGTERM rather than SIGKILL, so ffmpeg still flushes and writes its
+    Matroska trailer on the way out and the recording stays a valid file.
+
+    Runs in the child between fork and exec.
+    """
+    if _LIBC is not None:
+        _LIBC.prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
+    # PDEATHSIG only fires on a *future* death, so a parent that died between
+    # the fork and this call would never be noticed. Checking here closes that
+    # race; comparing against the recorded pid rather than 1 keeps it correct
+    # when the backend itself is PID 1.
+    if os.getppid() != _BACKEND_PID:
+        os._exit(1)
+
 
 _USERINFO_RE = re.compile(r"://[^/@\s]*@")
 _UNSAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]")
@@ -454,13 +493,14 @@ class _Writer:
 
     async def _run_once(self, output: str) -> None:
         args = self._args(output)
-        # Children stay in the backend's process group on purpose, so a
-        # `kill -- -PGID` reaps orphans if the backend is killed outright.
         self._process = await asyncio.create_subprocess_exec(
             *args,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
+            # Children stay in the backend's process group, and the kernel
+            # takes them down with it even if it is killed outright.
+            preexec_fn=die_with_parent,
         )
         self._last_size = 0
         self._last_growth = asyncio.get_running_loop().time()

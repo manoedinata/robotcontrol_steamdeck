@@ -1,10 +1,13 @@
 import logging
+import os
 import unittest
+import Recorder as Recorder_module
 from datetime import datetime
 from pathlib import Path
 
 from Recorder import (
     MIN_FREE_START_BYTES,
+    PR_SET_PDEATHSIG,
     MIN_FREE_STOP_BYTES,
     Recorder,
     SourceRecording,
@@ -318,6 +321,24 @@ class StatePayloadTests(unittest.TestCase):
         self.assertIsNone(payload["session_id"])
         self.assertEqual(payload["sources"], [])
         self.assertEqual(payload["stopped_reason"], "operator")
+
+
+class ParentDeathTests(unittest.TestCase):
+    """A killed backend must not leave recorders holding cameras open.
+
+    die_with_parent() itself is deliberately not called here: it only makes
+    sense between fork and exec, and in any other process its race check sees a
+    parent that is not the recorded backend and exits immediately -- which is
+    exactly what it should do in a child whose parent already died.
+    """
+
+    def test_the_prctl_option_number_is_the_linux_one(self) -> None:
+        self.assertEqual(PR_SET_PDEATHSIG, 1)
+
+    def test_the_recorded_backend_pid_is_this_process(self) -> None:
+        # The hook compares against this rather than PID 1, so it stays correct
+        # when the backend itself runs as the container's init process.
+        self.assertEqual(Recorder_module._BACKEND_PID, os.getpid())
 
 
 class RecorderConstructionTests(unittest.TestCase):
