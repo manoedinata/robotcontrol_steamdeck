@@ -1,6 +1,6 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Crosshair, Focus, LogOut, Settings } from '@lucide/vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Crosshair, Disc, Focus, LogOut, Settings } from '@lucide/vue'
 import { useGamepad } from './composables/useGamepad'
 import { useBackendConnection } from './composables/useBackendConnection'
 import { usePTZState } from './composables/usePTZState'
@@ -8,7 +8,12 @@ import HomeView from './views/HomeView.vue'
 import SettingsShell from './components/SettingsShell.vue'
 
 const { registerHandler } = useGamepad()
-const { connect: connectBackend, disconnect: disconnectBackend } = useBackendConnection()
+const {
+  connect: connectBackend,
+  disconnect: disconnectBackend,
+  recordingState,
+  setRecording,
+} = useBackendConnection()
 const { setFocus, setUiOwnsGamepad, enabled: ptzEnabled } = usePTZState()
 
 // Focus buttons are hold-to-act: pointerdown starts the focus movement and
@@ -21,6 +26,16 @@ function focusPress(value) {
 function focusRelease() {
   setFocus(null)
 }
+// Recording covers every configured source at once, so this is one toggle for
+// the whole session rather than a control per camera.
+const isRecording = computed(() => recordingState.value?.active === true)
+const recordLabel = computed(() =>
+  isRecording.value ? 'Stop recording' : 'Record all camera sources')
+
+function toggleRecording() {
+  setRecording(!isRecording.value)
+}
+
 const actionBar = ref(null)
 const settingsOpen = ref(false)
 const settingsButton = ref(null)
@@ -91,6 +106,11 @@ onBeforeUnmount(() => {
     </nav>
 
     <nav ref="actionBar" class="shell-actions" aria-label="Application actions">
+      <button class="floating-icon-button record-trigger" :class="{ recording: isRecording }"
+        type="button" :title="recordLabel" :aria-label="recordLabel" :aria-pressed="isRecording"
+        data-shell-action @click="toggleRecording">
+        <Disc :size="21" aria-hidden="true" />
+      </button>
       <button class="floating-icon-button exit-trigger" type="button" title="Exit application"
         aria-label="Exit application" data-shell-action @click="quitApp">
         <LogOut :size="21" aria-hidden="true" />

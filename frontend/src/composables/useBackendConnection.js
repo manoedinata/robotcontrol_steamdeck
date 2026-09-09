@@ -18,6 +18,13 @@ const pingState = ref('waiting')
 // connect. Padding is already filtered out there. Kept across reconnects so
 // Settings stays usable while the backend restarts.
 const packetFields = ref([])
+// What the backend is recording, pushed on connect and on every change. The
+// backend owns this: a recording outlives a UI reconnect, so the renderer
+// never asserts it, only reflects it.
+const recordingState = ref(null)
+// True while the socket is down and the last known recording state may have
+// moved on without us.
+const recordingStale = ref(false)
 const signalingUrl = new URL('/offer', backendUrl).toString()
 
 // Receive-only WebRTC signaling for one backend-dialed RTSP stream. The
@@ -57,6 +64,10 @@ function clearTelemetry() {
     telemetryState.value = 'waiting'
     pingMs.value = null
     pingState.value = 'waiting'
+    // recordingState is deliberately NOT cleared: ffmpeg keeps writing while
+    // the socket reconnects, and blanking the HUD would claim otherwise. The
+    // backend re-states it on connect.
+    recordingStale.value = true
 }
 
 function acceptPing(message) {
@@ -67,6 +78,15 @@ function acceptPing(message) {
     }
     pingMs.value = value
     pingState.value = value === null ? 'unavailable' : 'live'
+}
+
+function acceptRecording(message) {
+    if (typeof message?.active !== 'boolean' || !Array.isArray(message.sources)) {
+        console.warn('[backend] Ignored invalid recording message:', message)
+        return
+    }
+    recordingState.value = message
+    recordingStale.value = false
 }
 
 function acceptSchema(message) {
@@ -129,6 +149,8 @@ function connect() {
                 acceptPing(message)
             } else if (message.type === 'schema') {
                 acceptSchema(message)
+            } else if (message.type === 'recording') {
+                acceptRecording(message)
             }
         } catch (error) {
             console.warn('[backend] Ignored invalid WebSocket response:', error)
@@ -196,6 +218,13 @@ function updatePtz(direction, zoom, focus) {
     send({ type: 'ptz', ...request })
 }
 
+// Start or stop recording every configured camera source. Not replayed by
+// sendCurrentState(): the backend is the source of truth for whether a
+// recording is running, and replaying a stale intent could stop a live one.
+function setRecording(active) {
+    send({ type: 'record', action: active ? 'start' : 'stop' })
+}
+
 export function useBackendConnection() {
     return {
         connectionState: readonly(connectionState),
@@ -205,6 +234,8 @@ export function useBackendConnection() {
         pingMs: readonly(pingMs),
         pingState: readonly(pingState),
         packetFields: readonly(packetFields),
+        recordingState: readonly(recordingState),
+        recordingStale: readonly(recordingStale),
         signalingUrl,
         cameraSignalingUrl,
         connect,
@@ -212,5 +243,6 @@ export function useBackendConnection() {
         updateConfig,
         updateControl,
         updatePtz,
+        setRecording,
     }
 }

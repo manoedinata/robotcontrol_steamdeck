@@ -24,6 +24,7 @@ from PTZController import (
     normalize_zoom,
 )
 from CameraWebSocketSource import CameraWebSocketHub
+from Recorder import Recorder, normalize_record_action
 from WebRTCStream import WebRTCStream
 import utils
 
@@ -31,6 +32,7 @@ LOGGER = logging.getLogger(__name__)
 UDP_SEND_HZ = 50
 PTZ_SEND_HZ = 5.0
 PING_INTERVAL_S = 2.0
+RECORDING_STATE_INTERVAL_S = 2.0
 PING_TIMEOUT_S = 1.0
 PING_VALUE_PATTERN = re.compile(r"time[=<]([0-9]+(?:\.[0-9]+)?)\s*ms")
 
@@ -121,6 +123,10 @@ video_stream = WebRTCStream(
     backend=runtime.config.camera_backend,
     ws_hub=camera_ws_hub,
 )
+
+# Writes every configured source to disk on request. Constructing it does no
+# work; nothing is opened until the operator starts a recording.
+recorder = Recorder(logger=LOGGER, ws_hub=camera_ws_hub)
 
 # A camera stream id is echoed straight into a go2rtc URL and used as a
 # config-map key, so keep it to an unambiguous, injection-safe alphabet.
@@ -319,6 +325,39 @@ async def broadcast_ping(ping_ms: float | None) -> None:
             for websocket in tuple(runtime.clients)
         )
     )
+
+
+async def broadcast_recording(state: dict[str, Any]) -> None:
+    if not runtime.clients:
+        return
+
+    await asyncio.gather(
+        *(
+            send_client_message(websocket, state)
+            for websocket in tuple(runtime.clients)
+        )
+    )
+
+
+async def recording_state_loop() -> None:
+    """Refresh recording counters and publish them while a session runs.
+
+    Also drives the stall watchdog and the free-space check, so one tick does
+    all three rather than each keeping its own timer.
+    """
+    while True:
+        try:
+            if recorder.active:
+                state = await recorder.poll()
+                await broadcast_recording(state)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # This tick also drives the stall watchdog and the free-space
+            # guard, so letting it die would silently disarm both while a
+            # recording kept running.
+            LOGGER.exception("Recording state tick failed")
+        await asyncio.sleep(RECORDING_STATE_INTERVAL_S)
 
 
 async def udp_ping_loop() -> None:
@@ -668,11 +707,13 @@ async def udp_receive_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    recorder.set_listener(broadcast_recording)
     udp_tasks = (
         asyncio.create_task(udp_loop(), name="udp-sender"),
         asyncio.create_task(udp_receive_loop(), name="udp-receiver"),
         asyncio.create_task(udp_ping_loop(), name="udp-ping"),
         asyncio.create_task(ptz_loop(), name="ptz-deadman"),
+        asyncio.create_task(recording_state_loop(), name="recording-state"),
     )
     try:
         yield
@@ -682,8 +723,11 @@ async def lifespan(_app: FastAPI):
         for task in udp_tasks:
             with suppress(asyncio.CancelledError):
                 await task
-        # Peers first: closing them releases the relay subscriptions that keep
-        # the hub's camera connections open.
+        # Recorders first so their files are trailered and their camera
+        # sessions released, then the peers, whose relay subscriptions are what
+        # keep the hub's camera connections open.
+        recorder.set_listener(None)
+        await recorder.close()
         await video_stream.close()
         await camera_ws_hub.close()
 
@@ -772,6 +816,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await send_client_message(
         websocket, {"type": "schema", "fields": send_field_limits()}
     )
+    # A recording outlives a UI reconnect, so the backend states the truth
+    # rather than letting the renderer replay a stale intent.
+    await send_client_message(websocket, recorder.state())
     LOGGER.info(
         "UI connected; sending controls every %.2f ms to %s:%s and receiving "
         "telemetry on port %s",
@@ -818,14 +865,14 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     # 404s.
                     await camera_ws_hub.update_streams(camera_streams)
                     await video_stream.update_config(camera_streams, camera_backend)
+                    recorder.update_sources(camera_streams)
                     LOGGER.info(
                         "UDP config accepted: "
                         f"enabled={udp_enabled} destination="
                         f"{udp_host}:{udp_port} telemetry_port={udp_listen_port} "
                         f"ptz_ip={ptz_ip or 'disabled'} "
                         f"camera_streams={len(camera_streams)} "
-                        f"clients={len(runtime.clients)}",
-                        flush=True,
+                        f"clients={len(runtime.clients)}"
                     )
                 elif message_type == "ptz":
                     # UI PTZ request: direction is "left", "right", "up", or
@@ -846,6 +893,12 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.ptz_zoom_request = zoom
                     runtime.ptz_focus_request = focus
                     runtime.ptz_request_seq += 1
+                elif message_type == "record":
+                    action = normalize_record_action(incoming_data.get("action"))
+                    if action == "start":
+                        await recorder.start()
+                    else:
+                        await recorder.stop()
                 elif message_type == "send":
                     packet = incoming_data.get("packet", {})
                     if not isinstance(packet, dict):
@@ -855,7 +908,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     # the wire toward it at the configured rate.
                     runtime.target_packet = {**runtime.target_packet, **packet}
                 else:
-                    raise ValueError("message type must be 'config', 'send', or 'ptz'")
+                    raise ValueError(
+                        "message type must be 'config', 'send', 'ptz', or 'record'"
+                    )
             except (
                 TypeError,
                 ValueError,

@@ -34,6 +34,7 @@ The default backend base URL is `http://127.0.0.1:8000`; `VITE_BACKEND_URL` may 
 
 WebSocket messages are separated by `type`:
 
+- `{ "type": "record", "action": "start" | "stop" }` — records every configured source at once. Never replayed on reconnect: the backend owns whether a recording is running and pushes `{ "type": "recording", ... }` on connect and on every change.
 - `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_streams", "camera_backend", "ptz_ip" } }` — `camera_streams` is `[{ "id", "url" }]`, one entry per configured source. A url is `rtsp://`, `ws://`, or `wss://`; the backend owns all of them.
 - `{ "type": "send", "packet": { ...schemaFields } }`
 - `{ "type": "ptz", "direction", "zoom", "focus" }` — held PTZ requests; any field null when nothing is held.

@@ -25,7 +25,7 @@ shutdown_services() {
 
 trap shutdown_services SIGINT SIGTERM EXIT
 
-mkdir -p /app/config
+mkdir -p /app/config "${RECORDINGS_DIR:-/app/recordings}"
 
 # Build the frontend source code
 echo "[entrypoint] Building frontend..." >&2
@@ -36,7 +36,7 @@ npm run build
 echo "[entrypoint] Starting backend..." >&2
 cd /app/backend
 
-uvicorn server:app --host 127.0.0.1 --port 8000 --workers 1 --timeout-graceful-shutdown 1 --loop asyncio &
+uvicorn server:app --host 127.0.0.1 --port 8000 --workers 1 --timeout-graceful-shutdown 10 --loop asyncio &
 # uvicorn server:app --host 127.0.0.1 --port 8000 --workers 1 --timeout-graceful-shutdown 1 &
 BACKEND_PID=$!
 

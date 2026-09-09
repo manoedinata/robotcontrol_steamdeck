@@ -91,6 +91,7 @@ body {
 .hud-brand,
 .telemetry-bar,
 .battery-telemetry,
+.recording-status,
 .control-mode,
 .shell-actions,
 .joystick-section {
@@ -165,6 +166,64 @@ body {
     background: var(--hud-surface);
     box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
     backdrop-filter: blur(12px);
+}
+
+.recording-status {
+    top: 68px;
+    right: 24px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 11px;
+    color: #ffe4e4;
+    font-size: 0.76rem;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    border: 1px solid rgb(255 92 92 / 45%);
+    border-radius: 6px;
+    background: var(--hud-surface);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+    backdrop-filter: blur(12px);
+}
+
+// The socket dropped but ffmpeg is still writing; the count is no longer live.
+.recording-status.stale {
+    opacity: 0.6;
+}
+
+.recording-dot {
+    width: 9px;
+    height: 9px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--hud-red);
+    animation: recording-blink 1.6s ease-in-out infinite;
+}
+
+.recording-status.stale .recording-dot {
+    animation: none;
+}
+
+.recording-label {
+    font-variant-numeric: tabular-nums;
+}
+
+.recording-failed {
+    padding: 1px 6px;
+    color: #111719;
+    font-size: 0.7rem;
+    border-radius: 4px;
+    background: var(--hud-accent);
+}
+
+@keyframes recording-blink {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgb(255 92 92 / 55%);
+    }
+
+    50% {
+        box-shadow: 0 0 0 5px rgb(255 92 92 / 0%);
+    }
 }
 
 .connection-telemetry {
@@ -319,6 +378,19 @@ body {
     border-color: var(--hud-accent);
     outline: 3px solid rgb(245 185 66 / 26%);
     outline-offset: 2px;
+    background: var(--hud-accent);
+}
+
+.record-trigger.recording {
+    color: #ffffff;
+    border-color: rgb(255 92 92 / 60%);
+    background: #b63232;
+}
+
+.record-trigger.recording:hover,
+.record-trigger.recording:focus-visible {
+    color: #111719;
+    border-color: var(--hud-accent);
     background: var(--hud-accent);
 }
 

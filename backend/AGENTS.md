@@ -7,6 +7,7 @@ This directory is the sole owner of UDP and camera transport, for every source k
 ## Structure
 
 - `server.py`: FastAPI lifecycle, typed controls/telemetry WebSocket, UDP sender/receiver, and WebRTC signaling endpoint.
+- `Recorder.py`: records every configured source at once, one stream-copying ffmpeg each, into Matroska. The source list is frozen at start so config churn cannot split a recording; a source that has written video is retried all session, one that never did gives up. Never log or broadcast a camera URL from here.
 - `WebRTCStream.py`: selectable go2rtc/aiortc RTSP-to-WebRTC backends, multi-stream registration, and lifecycle cleanup.
 - `PTZController.py`: Hikvision ISAPI pan/tilt/zoom/focus continuous-move requests and value normalizers.
 - `settings.py`: mutable runtime destination and camera configuration.

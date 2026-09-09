@@ -31,6 +31,52 @@ Valid robot telemetry is broadcast to all connected UIs:
 {"type":"receive","packet":{"battery_level":75}}
 ```
 
+## Recording
+
+One button records every configured source at once, one ffmpeg per source,
+stream-copied (`-c copy`) into Matroska. Nothing is re-encoded.
+
+```json
+{"type":"record","action":"start"}
+{"type":"record","action":"stop"}
+```
+
+Recording state is broadcast on every change, every two seconds while active,
+and once to each UI on connect. It never contains a camera URL:
+
+```json
+{"type":"recording","active":true,"session_id":"20260909-123015",
+ "directory":"/app/recordings/20260909-123015","free_bytes":43257610240,
+ "seconds_remaining":2540,"stopped_reason":null,
+ "sources":[{"id":"cam-0","kind":"rtsp","status":"recording","part":1,
+             "file":"cam-0_001.mkv","bytes":18234312,"restarts":0,"error":null}]}
+```
+
+Per-source `status` is `idle`, `starting`, `recording`, `reconnecting`,
+`failed`, or `stopped`; `stopped_reason` is `null`, `operator`, `low_disk`, or
+`shutdown`. One source failing never stops the others.
+
+Files go to `$RECORDINGS_DIR/<YYYYmmdd-HHMMSS>/<stream id>_<part>.mkv`
+(`/app/recordings` in the container, bind-mounted from
+`${SDRM_RECORDINGS_DIR:-$HOME/Videos/steamdeck-robot-monitor}`). The path is an
+environment variable, never a config field.
+
+Behavior worth knowing:
+
+- The source list is frozen when recording starts. Switching cameras in the UI
+  re-sends the whole config, so reacting to it would split every recording into
+  parts each time the operator pressed B.
+- A source that has written video is retried for the rest of the session with
+  capped backoff, so a camera that reboots or drives out of range comes back on
+  a new part. A source that never wrote a single byte is treated as
+  misconfigured and gives up after three quick failures.
+- A recording that stops growing for 15 s is restarted: ffmpeg will otherwise
+  sit forever on an RTSP session that went quiet without erroring.
+- Recording continues across a UI reconnect. Only an explicit stop, low disk, or
+  backend shutdown ends it.
+- It refuses to start below 2 GiB free and stops cleanly below 512 MiB, which
+  trailers every file rather than letting several hit `ENOSPC` at once.
+
 ## PTZ Control
 
 When `ptz_ip` is configured, the backend drives a PTZ camera's Hikvision ISAPI continuous-move endpoint (rotation and zoom) plus the FocusData focus endpoint on behalf of all connected UIs. The camera credentials are hardcoded (`PTZ_USERNAME`/`PTZ_PASSWORD` in `PTZController.py`) and are tried as digest auth first, falling back to basic auth on a `401` response. Setting `ptz_ip` to an empty string disables PTZ and stops all camera HTTP traffic.
@@ -113,6 +159,8 @@ docker run --rm --network host -v "$PWD/..:/app" -w /app/backend \
 - WebRTC requires a reachable RTSP source. go2rtc is bundled in Docker and may use FFmpeg for codec conversion; local development requires `GO2RTC_BINARY` or a `go2rtc` executable on `PATH`.
 - The current WebRTC ICE configuration is intended for local host/container playback only.
 - RTSP credentials are supplied in each `camera_streams[].url` userinfo and should not be written to logs.
+- A recording adds one RTSP connection per recorded RTSP source, on top of the one the live view already holds. WebSocket sources cost nothing extra: the recorder is another subscriber to the hub's single connection.
+- A backend killed with `SIGKILL` leaves its ffmpeg children running. They stop themselves at the per-file time limit, and container teardown reaps them in the Docker deployment. A recording interrupted that way is missing its Matroska trailer but still plays; `ffmpeg -i in.mkv -c copy out.mkv` rebuilds the index.
 - A direct camera WebSocket source adds one relay hop (camera socket to local HTTP to the camera backend), which costs latency the old renderer-direct WebCodecs path did not. Nothing is re-encoded on that hop.
 - The relay address assumes the backend is reachable at `127.0.0.1:8000`; set `APP_BACKEND_PORT` when uvicorn runs on another port.
 - Every configured RTSP source stays connected while a UI is open, so CPU, GPU, and bandwidth cost scales with the number of sources.

@@ -3,6 +3,9 @@
 .gitignore
 .vscode
 
+# Recorded video never belongs in the image
+recordings
+
 # Local virtual environments and node_modules
 backend/venv
 frontend/node_modules

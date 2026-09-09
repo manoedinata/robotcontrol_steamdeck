@@ -18,6 +18,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE_NAME="${SDRM_IMAGE:-steamdeck-robot-monitor:latest}"
 APP_NAME="${SDRM_APP_NAME:-steamdeck-robot-monitor}"
 CONFIG_DIR="${SDRM_CONFIG_DIR:-${HOME}/.config/steamdeck-robot-monitor}"
+RECORDINGS_DIR="${SDRM_RECORDINGS_DIR:-${HOME}/Videos/steamdeck-robot-monitor}"
 
 # Container runtime detection: prefer docker, fall back to podman.
 CONTAINER_RUNTIME=""
@@ -33,7 +34,7 @@ if [[ -z "${CONTAINER_RUNTIME}" ]]; then
 	exit 1
 fi
 
-mkdir -p "${CONFIG_DIR}"
+mkdir -p "${CONFIG_DIR}" "${RECORDINGS_DIR}"
 
 # -----------------------------------------------------------------------------
 # Display / graphics environment discovery
@@ -99,7 +100,9 @@ echo "[launch] Starting ${APP_NAME} using ${CONTAINER_RUNTIME}..." >&2
 	--ipc host \
 	--cap-add=NET_RAW \
 	-e "APP_SETTINGS_DIR=/app/config" \
+	-e "RECORDINGS_DIR=/app/recordings" \
 	-v "${CONFIG_DIR}:/app/config" \
+	-v "${RECORDINGS_DIR}:/app/recordings" \
 	-v "${PROJECT_ROOT}:/app" \
 	-v "${APP_NAME}-node-modules:/app/frontend/node_modules" \
 	-v "${APP_NAME}-electron-cache:/opt/electron/cache" \

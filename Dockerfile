@@ -17,7 +17,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ELECTRON_CACHE=/opt/electron/cache \
     # The renderer should connect to the backend at the same host.
     VITE_BACKEND_URL=http://127.0.0.1:8000 \
-    APP_SETTINGS_DIR=/app/config
+    APP_SETTINGS_DIR=/app/config \
+    RECORDINGS_DIR=/app/recordings
 
 # Change APT mirror to kartolo.sby.datautama.net.id
 RUN sed -i 's|http://deb.debian.org/debian|https://kartolo.sby.datautama.net.id/debian|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
@@ -109,8 +110,8 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY packaging/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Keep the settings directory on a volume by default.
-VOLUME ["/app/config"]
+# Keep the settings and recordings directories on volumes by default.
+VOLUME ["/app/config", "/app/recordings"]
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/local/bin/docker-entrypoint.sh"]

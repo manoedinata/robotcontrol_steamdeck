@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive } from 'vue'
+import { computed, onBeforeUnmount, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { Battery, Camera, Gamepad2, LoaderCircle, Server } from '@lucide/vue'
 import CameraFeed from '../components/CameraFeed.vue'
 import ControllerPanel from '../components/ControllerPanel.vue'
@@ -9,7 +9,7 @@ import { useBackendConnection } from '../composables/useBackendConnection'
 
 const { cameraUrl, cameraSources, activeCameraIndex, cameraFeeds, switchCamera } = useSettings()
 const { gamepadName, registerHandler } = useGamepad()
-const { telemetry, telemetryState, pingMs, pingState } = useBackendConnection()
+const { telemetry, telemetryState, pingMs, pingState, recordingState, recordingStale } = useBackendConnection()
 
 // Every configured source is mounted and connected at once; this tracks each
 // feed's status by id so the HUD can reflect just the visible one.
@@ -21,6 +21,39 @@ const cameraState = computed(() => {
   const active = cameraFeeds.value[activeCameraIndex.value]
   return (active && cameraStates[active.id]) || 'idle'
 })
+// Recording HUD. The backend owns the state; this only renders it, including
+// while the socket is briefly down and ffmpeg is still writing.
+const isRecording = computed(() => recordingState.value?.active === true)
+const now = ref(Date.now())
+let elapsedTimer = null
+
+const failedSources = computed(() =>
+  (recordingState.value?.sources ?? []).filter((source) => source.status === 'failed'))
+
+const recordingElapsed = computed(() => {
+  const startedAt = recordingState.value?.started_at
+  if (!startedAt) return '0:00'
+  const seconds = Math.max(Math.floor(now.value / 1000 - startedAt), 0)
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+})
+
+const recordingLabel = computed(() => {
+  if (!isRecording.value) return 'Not recording'
+  const failed = failedSources.value.length
+  const total = recordingState.value?.sources?.length ?? 0
+  const scope = failed
+    ? `${total - failed} of ${total} sources recording, ${failed} failed`
+    : `${total} source${total === 1 ? '' : 's'} recording`
+  return `Recording for ${recordingElapsed.value}. ${scope}.`
+})
+
+onMounted(() => {
+  elapsedTimer = setInterval(() => { now.value = Date.now() }, 1000)
+})
+onUnmounted(() => {
+  if (elapsedTimer !== null) clearInterval(elapsedTimer)
+})
+
 let unregisterGamepadHandler
 
 // Circle cycles the live camera source. Priority above the action bar so the
@@ -116,6 +149,16 @@ const statusLabel = computed(() => {
           <span class="visually-hidden">{{ pingStatusLabel }}</span>
         </div>
       </div>
+    </div>
+
+    <div v-if="isRecording" class="recording-status" :class="{ stale: recordingStale }"
+      :title="recordingLabel" role="status" aria-live="polite">
+      <span class="recording-dot" aria-hidden="true"></span>
+      <span class="recording-label" aria-hidden="true">REC {{ recordingElapsed }}</span>
+      <span v-if="failedSources.length" class="recording-failed" aria-hidden="true">
+        {{ failedSources.length }} failed
+      </span>
+      <span class="visually-hidden">{{ recordingLabel }}</span>
     </div>
 
     <div class="battery-telemetry" :title="telemetryStatusLabel" role="status" aria-live="polite">

@@ -60,6 +60,24 @@ Both transports reach the renderer this way. For WebSocket mode, Settings still 
 
 Camera errors are surfaced by the WebRTC connection and retried by the existing camera lifecycle. A WebSocket source that drops is redialed by the backend hub with backoff, independently of the renderer's own retry. Camera source URLs are not logged in full because they may contain credentials. Local development can override the go2rtc executable with `GO2RTC_BINARY`; Docker bundles a pinned, checksum-verified binary.
 
+## Recording
+
+The HUD's record button captures every configured source at once, backend-side.
+There is one control for the whole session rather than one per camera, because
+the backend owns every source and records them uniformly.
+
+The renderer only reflects state, never asserts it: it sends
+`{ "type": "record", "action": "start" | "stop" }` and renders the
+`{ "type": "recording", ... }` payload the backend pushes back. That payload is
+not replayed on reconnect, and the HUD chip is deliberately *not* cleared when
+the socket drops -- a recording outlives a two-second reconnect, and blanking
+the chip would claim otherwise. It dims instead, until the backend re-states it.
+
+The chip shows elapsed time and a count of any failed sources, so one dead
+camera is visible without opening a log. Files land in
+`${SDRM_RECORDINGS_DIR:-$HOME/Videos/steamdeck-robot-monitor}` on the host;
+playback and stream history are not part of the app.
+
 ## PTZ Control
 
 `ptzIp` stores the IP of a PTZ-capable camera (Hikvision ISAPI compatible). The Settings drawer's "Camera rotation (PTZ)" section has one field for it. It is sent to FastAPI inside the `config` message as `ptz_ip`; the camera credentials are hardcoded in the backend (`PTZ_USERNAME`/`PTZ_PASSWORD` in `PTZController.py`) rather than being configurable from the UI. The backend then drives the camera's ISAPI continuous-move and focus endpoints on behalf of all connected UIs, trying digest auth first and falling back to basic on a `401`. The address is optional: an empty value disables PTZ and keeps the backend from issuing camera HTTP requests.
