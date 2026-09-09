@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from aiortc import RTCSessionDescription
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 import settings as settings_module
 from PTZController import (
@@ -23,6 +23,7 @@ from PTZController import (
     normalize_focus,
     normalize_zoom,
 )
+from CameraWebSocketSource import CameraWebSocketHub
 from WebRTCStream import WebRTCStream
 import utils
 
@@ -110,23 +111,35 @@ runtime = RuntimeState(
 )
 
 
+# Direct camera WebSocket sources are pulled in here and re-served over HTTP,
+# so the camera backend below can consume them exactly like an RTSP source.
+camera_ws_hub = CameraWebSocketHub(logger=LOGGER)
+
 video_stream = WebRTCStream(
     runtime.config.camera_streams,
     logger=LOGGER,
     backend=runtime.config.camera_backend,
+    ws_hub=camera_ws_hub,
 )
 
 # A camera stream id is echoed straight into a go2rtc URL and used as a
 # config-map key, so keep it to an unambiguous, injection-safe alphabet.
 CAMERA_STREAM_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
+# RTSP is dialed by the camera backend; ws/wss is pulled in by the backend and
+# re-served over HTTP so the same backend can turn it into WebRTC.
+CAMERA_STREAM_SCHEMES = frozenset({"rtsp", "ws", "wss"})
+
 
 def validate_camera_streams(value: Any) -> tuple[tuple[str, str], ...]:
-    """Validate the list of RTSP sources kept warm for instant switching.
+    """Validate the list of camera sources kept warm for instant switching.
 
-    Each entry is ``{"id": <stream id>, "url": <rtsp url>}``. Ids must be
-    unique and match ``CAMERA_STREAM_ID_RE``; urls must be RTSP with a host.
-    An empty list means no camera source and keeps every transport idle.
+    Each entry is ``{"id": <stream id>, "url": <camera url>}``. Ids must be
+    unique and match ``CAMERA_STREAM_ID_RE``. A url is either RTSP, dialed by
+    the camera backend directly, or a direct camera WebSocket, which the
+    backend re-serves over HTTP so the same backend can consume it. Both kinds
+    reach the renderer as WebRTC through ``POST /offer?src=<id>``. An empty
+    list means no camera source and keeps every transport idle.
     """
     if not isinstance(value, list):
         raise ValueError("camera_streams must be a list")
@@ -148,8 +161,14 @@ def validate_camera_streams(value: Any) -> tuple[tuple[str, str], ...]:
             raise ValueError("camera stream url must be a string")
         url = url_value.strip()
         parsed = urlparse(url)
-        if not url or parsed.scheme != "rtsp" or not parsed.hostname:
-            raise ValueError("camera stream url must be a valid RTSP URL")
+        if (
+            not url
+            or parsed.scheme not in CAMERA_STREAM_SCHEMES
+            or not parsed.hostname
+        ):
+            raise ValueError(
+                "camera stream url must be a valid RTSP or WebSocket URL"
+            )
         seen_ids.add(stream_id)
         streams.append((stream_id, url))
     return tuple(streams)
@@ -663,7 +682,10 @@ async def lifespan(_app: FastAPI):
         for task in udp_tasks:
             with suppress(asyncio.CancelledError):
                 await task
+        # Peers first: closing them releases the relay subscriptions that keep
+        # the hub's camera connections open.
         await video_stream.close()
+        await camera_ws_hub.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -685,6 +707,30 @@ app.add_middleware(
 async def health_check() -> dict[str, str]:
     """Lightweight readiness probe for the container entrypoint."""
     return {"status": "ok"}
+
+
+@app.get("/camera/{stream_id}/stream")
+async def camera_relay(stream_id: str) -> StreamingResponse:
+    """Re-serve one direct camera WebSocket source as an HTTP byte stream.
+
+    This exists because neither go2rtc nor ffmpeg can read a WebSocket. It is
+    an internal seam between the hub and the camera backend, not a renderer
+    endpoint: the UI still gets every source as WebRTC from ``POST /offer``.
+    """
+
+    # Checked before the response starts, so an unknown id is a 404 rather than
+    # an empty 200 that ffmpeg would happily retry against forever.
+    if not camera_ws_hub.has_stream(stream_id):
+        return JSONResponse(
+            {"error": f"unknown camera stream: {stream_id!r}"}, status_code=404
+        )
+
+    async def payloads():
+        async with camera_ws_hub.subscribe(stream_id) as stream:
+            async for payload in stream:
+                yield payload
+
+    return StreamingResponse(payloads(), media_type="application/octet-stream")
 
 
 @app.post("/offer")
@@ -767,6 +813,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.config.ptz_ip = ptz_ip
                     runtime.config.packet_slew = packet_slew
                     sync_ptz_controller()
+                    # The hub must know a WebSocket source before the camera
+                    # backend is pointed at its relay URL, or the first dial
+                    # 404s.
+                    await camera_ws_hub.update_streams(camera_streams)
                     await video_stream.update_config(camera_streams, camera_backend)
                     LOGGER.info(
                         "UDP config accepted: "

@@ -136,21 +136,20 @@ const cameraFeeds = computed(() => cameraSources.value.map((source, index) => {
         // that one feed; unchanged when only the active source switches.
         key: `${cameraStreamId(index)}:${source.type}:${url}`,
         index,
-        type: source.type,
         // Empty until the source is actually configured, so an unconfigured
-        // slot shows "idle" instead of retrying against the backend.
-        streamId: source.type === 'rtsp' && url ? cameraStreamId(index) : '',
-        // Only WebSocket sources are reached directly by the renderer.
-        wsUrl: source.type === 'websocket' ? url : '',
+        // slot shows "idle" instead of retrying against the backend. Every
+        // configured source has one, whatever its transport: the backend owns
+        // them all and hands each to the renderer as WebRTC.
+        streamId: url ? cameraStreamId(index) : '',
     }
 }))
 
 function syncBackendConfig() {
-    // Send every RTSP source so the backend keeps them all warm. WebSocket
-    // sources bypass the backend camera transport entirely.
+    // Send every configured source, whatever its transport. The backend keeps
+    // them all warm and is the only thing that talks to a camera.
     const cameraStreams = cameraSources.value
         .map((source, index) => ({ source, index }))
-        .filter(({ source }) => source.type === 'rtsp' && (source.url ?? '').trim())
+        .filter(({ source }) => (source.url ?? '').trim())
         .map(({ source, index }) => ({
             id: cameraStreamId(index),
             url: buildBackendCameraUrl(source),

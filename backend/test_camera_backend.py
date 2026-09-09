@@ -16,7 +16,14 @@ from server import (
     send_field_limits,
     validate_config,
 )
-from WebRTCStream import _resolve_stream_id
+from CameraWebSocketSource import (
+    detect_payload_format,
+    is_websocket_url,
+    reconnect_delay,
+    relay_url,
+    should_forward,
+)
+from WebRTCStream import _resolve_stream_id, go2rtc_source, ingest_url
 
 
 class CameraBackendConfigTests(unittest.TestCase):
@@ -60,9 +67,38 @@ class CameraStreamsConfigTests(unittest.TestCase):
     def test_empty_list_clears_streams(self) -> None:
         self.assertEqual(validate_config({"camera_streams": []})[3], ())
 
-    def test_rejects_non_rtsp_url(self) -> None:
-        with self.assertRaises(ValueError):
-            validate_config({"camera_streams": [{"id": "cam-0", "url": "http://x/y"}]})
+    def test_accepts_websocket_sources_alongside_rtsp(self) -> None:
+        streams = validate_config(
+            {
+                "camera_streams": [
+                    {"id": "cam-0", "url": "rtsp://10.0.0.5/s"},
+                    {"id": "cam-1", "url": "ws://192.168.1.123:12351"},
+                    {"id": "cam-2", "url": "wss://192.168.1.124:12351"},
+                ]
+            }
+        )[3]
+        self.assertEqual(
+            streams,
+            (
+                ("cam-0", "rtsp://10.0.0.5/s"),
+                ("cam-1", "ws://192.168.1.123:12351"),
+                ("cam-2", "wss://192.168.1.124:12351"),
+            ),
+        )
+
+    def test_rejects_a_url_that_is_neither_rtsp_nor_websocket(self) -> None:
+        for bad_url in ("http://x/y", "https://x/y", "file:///etc/passwd"):
+            with self.subTest(bad_url=bad_url), self.assertRaises(ValueError):
+                validate_config(
+                    {"camera_streams": [{"id": "cam-0", "url": bad_url}]}
+                )
+
+    def test_rejects_a_url_without_a_hostname(self) -> None:
+        for bad_url in ("rtsp://", "ws://", "ws:///path"):
+            with self.subTest(bad_url=bad_url), self.assertRaises(ValueError):
+                validate_config(
+                    {"camera_streams": [{"id": "cam-0", "url": bad_url}]}
+                )
 
     def test_rejects_bad_stream_id(self) -> None:
         for bad_id in ("cam 0", "cam/0", "", "x" * 65):
@@ -308,3 +344,74 @@ class PTZFocusTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CameraIngestTests(unittest.TestCase):
+    """How a configured source is turned into something a backend can open."""
+
+    def test_rtsp_sources_are_dialed_unchanged(self) -> None:
+        url = "rtsp://user:pw@10.0.0.5:554/s"
+        self.assertFalse(is_websocket_url(url))
+        self.assertEqual(ingest_url("cam-0", url), url)
+
+    def test_websocket_sources_are_read_from_the_local_relay(self) -> None:
+        for url in ("ws://192.168.1.123:12351", "wss://192.168.1.123:12351"):
+            with self.subTest(url=url):
+                self.assertTrue(is_websocket_url(url))
+                self.assertEqual(
+                    ingest_url("cam-1", url),
+                    "http://127.0.0.1:8000/camera/cam-1/stream",
+                )
+
+    def test_the_relay_url_names_the_stream_it_serves(self) -> None:
+        self.assertEqual(
+            relay_url("cam-2"), "http://127.0.0.1:8000/camera/cam-2/stream"
+        )
+
+    def test_go2rtc_registers_an_rtsp_source_as_a_plain_url(self) -> None:
+        url = "rtsp://10.0.0.5/s"
+        self.assertEqual(go2rtc_source("cam-0", url, "h264"), url)
+
+    def test_go2rtc_registers_a_relayed_source_with_the_detected_demuxer(self) -> None:
+        source = go2rtc_source("cam-1", "ws://192.168.1.123:12351", "mjpeg")
+        self.assertTrue(source.startswith("exec:ffmpeg "))
+        # The relay serves a bare bytestream, so the demuxer has to be named
+        # and it has to come before the input.
+        self.assertIn("-f mjpeg -i http://127.0.0.1:8000/camera/cam-1/stream", source)
+        self.assertIn("-c:v copy", source)
+        self.assertTrue(source.endswith("-f rtsp {output}"))
+
+    def test_a_relayed_source_is_never_reencoded(self) -> None:
+        source = go2rtc_source("cam-1", "ws://h:1/", "h264")
+        self.assertIn("-c:v copy", source)
+        self.assertNotIn("libx264", source)
+
+
+class CameraPayloadTests(unittest.TestCase):
+    """Picking the demuxer for a raw camera bytestream."""
+
+    def test_a_jpeg_start_of_image_is_mjpeg(self) -> None:
+        self.assertEqual(detect_payload_format(b"\xff\xd8\xff\xe0rest"), "mjpeg")
+
+    def test_three_and_four_byte_annexb_start_codes_are_h264(self) -> None:
+        self.assertEqual(detect_payload_format(b"\x00\x00\x01\x67rest"), "h264")
+        self.assertEqual(detect_payload_format(b"\x00\x00\x00\x01\x67x"), "h264")
+
+    def test_an_unrecognized_payload_is_undecidable(self) -> None:
+        self.assertIsNone(detect_payload_format(b"not video at all"))
+        self.assertIsNone(detect_payload_format(b""))
+
+    def test_only_non_empty_binary_messages_carry_video(self) -> None:
+        self.assertTrue(should_forward(b"\x00\x00\x01\x67"))
+        self.assertFalse(should_forward(b""))
+        # The camera interleaves text status frames with the video payloads.
+        self.assertFalse(should_forward('<playback_status status="ok" />'))
+
+
+class CameraReconnectTests(unittest.TestCase):
+    def test_backoff_doubles_and_is_capped(self) -> None:
+        delays = [reconnect_delay(attempt) for attempt in range(1, 8)]
+        self.assertEqual(delays, [1.0, 2.0, 4.0, 8.0, 15.0, 15.0, 15.0])
+
+    def test_the_first_reconnect_is_not_instant(self) -> None:
+        self.assertGreater(reconnect_delay(0), 0)

@@ -83,8 +83,7 @@ const statusLabel = computed(() => {
 <template>
   <div class="home-layout">
     <CameraFeed v-for="feed in cameraFeeds" v-show="feed.index === activeCameraIndex" :key="feed.key"
-      :mode="feed.type" :stream-id="feed.streamId" :ws-url="feed.wsUrl"
-      @status-change="(state) => onFeedStatus(feed.id, state)" />
+      :stream-id="feed.streamId" @status-change="(state) => onFeedStatus(feed.id, state)" />
 
     <header class="hud-brand" aria-label="Application title">
       <span>

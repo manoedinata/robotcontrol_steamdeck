@@ -2,17 +2,16 @@
 import { nextTick, onUnmounted, ref, watch } from 'vue'
 import { Camera, Unplug } from '@lucide/vue'
 import { useBackendConnection } from '../composables/useBackendConnection'
-import { useCameraWebSocket } from '../composables/useCameraWebSocket'
 
 // One camera source that stays connected for its whole lifetime. The Home
 // view mounts one instance per configured source and only shows the active
 // one, so switching sources never pays a reconnect.
+//
+// Every source arrives the same way: the backend owns the camera transport --
+// RTSP dialed directly, direct camera WebSocket pulled in and re-served -- and
+// hands it to the renderer as WebRTC. The renderer only needs the stream id.
 const props = defineProps({
-  // 'rtsp' streams are dialed by the backend and addressed by `streamId`;
-  // 'websocket' streams are reached directly from the renderer via `wsUrl`.
-  mode: { type: String, required: true },
   streamId: { type: String, default: '' },
-  wsUrl: { type: String, default: '' },
 })
 
 const emit = defineEmits(['statusChange'])
@@ -20,25 +19,12 @@ const emit = defineEmits(['statusChange'])
 const { cameraSignalingUrl } = useBackendConnection()
 
 const videoElement = ref(null)
-const canvasElement = ref(null)
 const cameraState = ref('idle')
 const cameraError = ref(null)
 const RECONNECT_DELAY_MS = 2000
 let connectionRequest = 0
 let reconnectTimer = null
 let peerConnection = null
-
-const cameraWebSocket = useCameraWebSocket(canvasElement, (state, error) => {
-  if (state === 'connected') {
-    cameraState.value = state
-    cameraError.value = null
-    clearReconnectTimer()
-  } else if (state === 'error') {
-    handleCameraError(error || 'Camera WebSocket failed.')
-  } else {
-    cameraState.value = state
-  }
-})
 
 function clearReconnectTimer() {
   if (reconnectTimer !== null) {
@@ -69,7 +55,7 @@ function waitForIceGatheringComplete(peer, timeoutMs = 5000) {
 }
 
 function currentTarget() {
-  return props.mode === 'websocket' ? props.wsUrl.trim() : props.streamId.trim()
+  return props.streamId.trim()
 }
 
 function scheduleReconnect() {
@@ -93,14 +79,6 @@ async function closePeer() {
   if (videoElement.value) videoElement.value.srcObject = null
 }
 
-async function closeCameraWebSocket() {
-  cameraWebSocket.close()
-  if (canvasElement.value) {
-    const context = canvasElement.value.getContext('2d')
-    context?.clearRect(0, 0, canvasElement.value.width, canvasElement.value.height)
-  }
-}
-
 async function connectCamera(preserveErrorState = false) {
   connectionRequest += 1
   const requestId = connectionRequest
@@ -109,7 +87,6 @@ async function connectCamera(preserveErrorState = false) {
   if (!target) {
     clearReconnectTimer()
     await closePeer()
-    await closeCameraWebSocket()
     cameraState.value = 'idle'
     cameraError.value = null
     return
@@ -120,25 +97,11 @@ async function connectCamera(preserveErrorState = false) {
     cameraError.value = null
   }
   await closePeer()
-  await closeCameraWebSocket()
   await nextTick()
   console.info('[camera] Loading camera stream', {
-    mode: props.mode,
-    streamId: props.mode === 'rtsp' ? props.streamId : undefined,
+    streamId: props.streamId,
     reconnecting: preserveErrorState,
   })
-
-  if (props.mode === 'websocket') {
-    try {
-      await cameraWebSocket.connect(target)
-      if (requestId === connectionRequest) clearReconnectTimer()
-    } catch (error) {
-      if (requestId === connectionRequest) {
-        handleCameraError(error.message || 'Camera WebSocket failed.')
-      }
-    }
-    return
-  }
 
   const peer = new RTCPeerConnection()
   peerConnection = peer
@@ -187,11 +150,11 @@ async function connectCamera(preserveErrorState = false) {
 function handleCameraError(detail = 'WebRTC camera stream could not be loaded.') {
   cameraState.value = 'error'
   cameraError.value = detail
-  console.error('[camera] Stream failed', { mode: props.mode })
+  console.error('[camera] Stream failed', { streamId: props.streamId })
   scheduleReconnect()
 }
 
-watch([() => props.mode, () => props.streamId, () => props.wsUrl], () => {
+watch(() => props.streamId, () => {
   clearReconnectTimer()
   connectCamera()
 }, { immediate: true })
@@ -201,16 +164,14 @@ onUnmounted(() => {
   clearReconnectTimer()
   connectionRequest += 1
   void closePeer()
-  void closeCameraWebSocket()
 })
 </script>
 
 <template>
   <section class="camera-section">
     <div class="camera-viewport">
-      <video v-if="mode === 'rtsp'" v-show="cameraState === 'connected'" ref="videoElement" autoplay muted
+      <video v-show="cameraState === 'connected'" ref="videoElement" autoplay muted
         playsinline aria-label="Live camera feed" />
-      <canvas v-else v-show="cameraState === 'connected'" ref="canvasElement" aria-label="Live camera feed" />
       <div v-if="cameraState !== 'connected'" class="camera-message">
         <!-- Error: Unplug icon, else Camera icon -->
         <Camera v-if="cameraState !== 'error'" :size="34" aria-hidden="true" />

@@ -12,10 +12,10 @@ class Settings:
         self.udp_ip = udp_ip
         self.udp_port = udp_port
         self.udp_listen_port = udp_listen_port
-        # Every configured RTSP source is kept warm at once as (id, url) pairs
-        # so the UI can switch between them without a reconnect. WebSocket
-        # camera sources are not listed here; the renderer connects to those
-        # directly.
+        # Every configured camera source is kept warm at once as (id, url)
+        # pairs so the UI can switch between them without a reconnect. Both
+        # kinds are listed here: an RTSP url the camera backend dials itself,
+        # and a ws/wss url the backend pulls in and re-serves over HTTP.
         self.camera_streams = camera_streams
         self.camera_backend = camera_backend
         self.ptz_ip = ptz_ip

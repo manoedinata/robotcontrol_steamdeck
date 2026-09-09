@@ -11,8 +11,7 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 - `src/App.vue`: persistent command shell (Settings/Exit stack on the right, PTZ focus near/far buttons on the left), backend connection lifecycle, and Settings drawer state.
 - `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition.
 - `src/views/SettingsView.vue`: camera sources, UDP destination, velocity limits, and keyboard settings.
-- `src/components/CameraFeed.vue`: one always-connected camera source (RTSP backend WebRTC via `/offer?src=<id>`, or direct camera WebSocket) with its own reconnect state. `HomeView.vue` mounts one per source and shows only the active one.
-- `src/composables/useCameraWebSocket.js`: direct camera WebSocket handshake and WebCodecs H.264 canvas playback.
+- `src/components/CameraFeed.vue`: one always-connected camera source, negotiated as backend WebRTC via `/offer?src=<id>`, with its own reconnect state. Every source kind arrives this way. `HomeView.vue` mounts one per source and shows only the active one.
 - `src/components/ControllerPanel.vue`: Y/theta input mapping and generic packet updates.
 - `src/composables/useBackendConnection.js`: singleton typed WebSocket transport, telemetry freshness, reconnect, replay, and backend WebRTC signaling URL.
 - `src/composables/useControlState.js`: generic reactive command packet and frame-coalesced publication.
@@ -35,7 +34,7 @@ The default backend base URL is `http://127.0.0.1:8000`; `VITE_BACKEND_URL` may 
 
 WebSocket messages are separated by `type`:
 
-- `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_streams", "camera_backend", "ptz_ip" } }` — `camera_streams` is `[{ "id", "url" }]`, one entry per configured RTSP source (WebSocket sources are omitted).
+- `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_streams", "camera_backend", "ptz_ip" } }` — `camera_streams` is `[{ "id", "url" }]`, one entry per configured source. A url is `rtsp://`, `ws://`, or `wss://`; the backend owns all of them.
 - `{ "type": "send", "packet": { ...schemaFields } }`
 - `{ "type": "ptz", "direction", "zoom", "focus" }` — held PTZ requests; any field null when nothing is held.
 - Backend telemetry uses `{ "type": "receive", "packet": { "battery_level": 0..100 } }`.
@@ -86,11 +85,11 @@ Preserve this persisted contract:
 
 Legacy top-level `cameraType`/`cameraUrl`/`cameraUsername`/`cameraPassword` files must keep loading as a single source and be rewritten into `cameraSources` on save.
 
-Empty UDP host and port `0` disable transmission. The camera form supports RTSP and direct camera WebSocket mode, one row per source, with at least one row always present. RTSP preserves credentials in separate persisted fields and sends them only as URL-encoded userinfo inside that source's `camera_streams[].url`. Every RTSP source is synced to the backend and stays connected at once; `activeCameraIndex` only selects which warm feed the Home view shows, and B (Circle) cycles it with no reconnect. Stream ids are `cam-<sourceIndex>`. Keep `useSettings.js` as the renderer source of truth.
+Empty UDP host and port `0` disable transmission. The camera form supports RTSP and direct camera WebSocket mode, one row per source, with at least one row always present. RTSP preserves credentials in separate persisted fields and sends them only as URL-encoded userinfo inside that source's `camera_streams[].url`. Every source is synced to the backend and stays connected at once; `activeCameraIndex` only selects which warm feed the Home view shows, and B (Circle) cycles it with no reconnect. Stream ids are `cam-<sourceIndex>`. Keep `useSettings.js` as the renderer source of truth.
 
 ### Camera
 
-`HomeView.vue` renders one `CameraFeed.vue` per source from `useSettings().cameraFeeds`, keyed so an edited source remounts while a plain switch does not, and `v-show`s only the active one. Each `CameraFeed` holds its connection for its whole lifetime regardless of visibility, so switching never reconnects. For RTSP it negotiates backend `/offer?src=<streamId>`; in WebSocket mode it connects directly to the camera, sends `PlayStream2`, and decodes H.264 through WebCodecs into a canvas. An empty target shows idle. Errors retry every two seconds; transports close on prop change and unmount. The selectable `cameraBackend` setting remains for RTSP (`go2rtc` default, or `aiortc`). Do not silently fall back between backends or add Electron camera relays. Keeping every source warm scales CPU/GPU/bandwidth with the source count — a deliberate trade for instant switching.
+`HomeView.vue` renders one `CameraFeed.vue` per source from `useSettings().cameraFeeds`, keyed so an edited source remounts while a plain switch does not, and `v-show`s only the active one. Each `CameraFeed` holds its connection for its whole lifetime regardless of visibility, so switching never reconnects. It negotiates backend `/offer?src=<streamId>` for every source kind, whatever transport the backend uses upstream. An empty stream id shows idle. Errors retry every two seconds; transports close on prop change and unmount. The selectable `cameraBackend` setting applies to every source (`go2rtc` default, or `aiortc`). Do not silently fall back between backends, add Electron camera relays, or give the renderer a direct camera connection. Keeping every source warm scales CPU/GPU/bandwidth with the source count — a deliberate trade for instant switching.
 
 ### UI and Navigation
 

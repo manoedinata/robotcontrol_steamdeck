@@ -4,7 +4,7 @@ The Settings drawer stores camera source, UDP destination, velocity limits, and 
 
 ## Fields
 
-- One or more camera sources, each with a stream type (RTSP or direct WebSocket), source IP, port, and optional subpath.
+- One or more camera sources, each with a stream type (RTSP or direct WebSocket), source IP, port, and optional subpath. The type selects how the backend reaches the camera; the renderer receives both kinds identically.
 - Optional RTSP username and password per source.
 - Camera backend: `go2rtc` (default) or `aiortc`.
 - UDP command target host/port and telemetry listening port.
@@ -46,7 +46,7 @@ The persisted contract remains:
 
 Legacy files with top-level `cameraUrl`, `cameraType`, `cameraUsername`, and `cameraPassword` keys are read as a single source and rewritten into `cameraSources` on the next save.
 
-`activeCameraIndex` selects which source is shown. Settings lists every source with a Show button, and pressing B (Circle) on the Home view cycles to the next source. Every source is connected at once and kept warm — the Home view mounts one `CameraFeed` per source and only shows the active one — so switching is instant with no reconnect. The backend receives every RTSP source in `camera_streams` and holds them all open. This trades steady CPU/GPU/bandwidth (one live decode per source) for an instant switch.
+`activeCameraIndex` selects which source is shown. Settings lists every source with a Show button, and pressing B (Circle) on the Home view cycles to the next source. Every source is connected at once and kept warm — the Home view mounts one `CameraFeed` per source and only shows the active one — so switching is instant with no reconnect. The backend receives every source in `camera_streams`, whatever its transport, and holds them all open. This trades steady CPU/GPU/bandwidth (one live decode per source) for an instant switch.
 
 `packetLimits` bounds each field of the command packet, keyed by field name. The backend announces the settable fields (everything but padding) over the controls WebSocket on connect as `{ "type": "schema", "fields": [...] }`, and the Robot controls section renders one minimum/maximum row per field, so a schema change reaches the UI without a renderer edit. Values are clamped into the bounds `packets-schema.json` declares: the operator can narrow a field's range, never widen it past what the backend accepts. Files predating this setting are migrated from the old `maxYVelocity`/`maxThetaVelocity` caps, which became `{ "min": -cap, "max": cap }` for the fields with the `yVelocity` and `thetaVelocity` roles.
 
@@ -54,11 +54,11 @@ Empty UDP host and port `0` disable command transmission. `udpListenPort` remain
 
 ## Camera Path
 
-For RTSP, every source and `cameraBackend` are sent to the backend as `camera_streams` (a list of `{ id, url }`, `id` = `cam-<sourceIndex>`) and `camera_backend`. With the default `go2rtc` backend, FastAPI starts one local go2rtc process on demand, registers one named stream per source, and proxies receive-only WebRTC signaling through `POST /offer?src=<id>`. `aiortc` remains available as an explicit alternative. Each RTSP `CameraFeed.vue` negotiates one peer with FastAPI for its stream and renders the media track in `<video>`; holding that peer open is what keeps the source warm.
+Every source and `cameraBackend` are sent to the backend as `camera_streams` (a list of `{ id, url }`, `id` = `cam-<sourceIndex>`) and `camera_backend`. With the default `go2rtc` backend, FastAPI starts one local go2rtc process on demand, registers one named stream per source, and proxies receive-only WebRTC signaling through `POST /offer?src=<id>`. `aiortc` remains available as an explicit alternative. Each `CameraFeed.vue` negotiates one peer with FastAPI for its stream and renders the media track in `<video>`; holding that peer open is what keeps the source warm.
 
-For WebSocket mode, Settings stores `ws://<IP>:<port>`. That `CameraFeed` connects directly to the camera, sends `PlayStream2`, ignores text status messages, and decodes binary H.264 messages with WebCodecs into a canvas. WebSocket sources are not sent in `camera_streams`. This path minimizes latency by avoiding a localhost camera relay and transcode.
+Both transports reach the renderer this way. For WebSocket mode, Settings still stores `ws://<IP>:<port>`, but the renderer no longer touches the camera: the backend opens the socket, sends `PlayStream2`, ignores text status messages, and re-serves the binary payloads at `GET /camera/<id>/stream` for its own camera backend to consume. This costs some latency compared with the previous renderer-direct WebCodecs path, and buys one camera transport instead of two — the renderer has no camera code, and anything the backend does across "all sources" works for every source kind. Nothing is re-encoded on the relay hop.
 
-Camera errors are surfaced by the WebRTC connection and retried by the existing camera lifecycle. Camera source URLs are not logged in full because they may contain credentials. Local development can override the go2rtc executable with `GO2RTC_BINARY`; Docker bundles a pinned, checksum-verified binary.
+Camera errors are surfaced by the WebRTC connection and retried by the existing camera lifecycle. A WebSocket source that drops is redialed by the backend hub with backoff, independently of the renderer's own retry. Camera source URLs are not logged in full because they may contain credentials. Local development can override the go2rtc executable with `GO2RTC_BINARY`; Docker bundles a pinned, checksum-verified binary.
 
 ## PTZ Control
 

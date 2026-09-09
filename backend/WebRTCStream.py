@@ -14,9 +14,39 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaPlayer
 
 import utils
+from CameraWebSocketSource import CameraWebSocketHub, is_websocket_url, relay_url
 
-# A config carries every RTSP source that should stay warm as (id, url) pairs.
+# A config carries every camera source that should stay warm as (id, url)
+# pairs. A url is either an RTSP source dialed directly, or a WebSocket source
+# the backend re-serves over HTTP (see CameraWebSocketSource).
 CameraStreams = tuple[tuple[str, str], ...]
+
+
+def ingest_url(stream_id: str, url: str) -> str:
+    """The address the camera backend should actually open for one source.
+
+    RTSP passes straight through. A WebSocket source is not something go2rtc or
+    ffmpeg can dial, so it is read from the local relay that re-serves it.
+    """
+    return relay_url(stream_id) if is_websocket_url(url) else url
+
+
+def go2rtc_source(stream_id: str, url: str, input_format: str) -> str:
+    """The go2rtc source string for one camera.
+
+    A relayed source is registered as `exec:` rather than as a plain URL: the
+    relay serves a bare bytestream with no container to identify it, so ffmpeg
+    has to be told the demuxer, and only the exec form lets us pass it.
+    """
+    if not is_websocket_url(url):
+        return url
+    return (
+        "exec:ffmpeg -hide_banner -loglevel error"
+        " -fflags nobuffer -flags low_delay"
+        f" -use_wallclock_as_timestamps 1 -f {input_format}"
+        f" -i {ingest_url(stream_id, url)}"
+        " -c:v copy -f rtsp {output}"
+    )
 
 
 def _resolve_stream_id(streams: dict[str, str], requested: str | None) -> str:
@@ -62,9 +92,15 @@ class _AiortcStream:
     # connection then goes quiet) before giving up on an RTSP dial, so bound it.
     RTSP_OPEN_TIMEOUT_US = "5000000"
 
-    def __init__(self, streams: CameraStreams, logger: logging.Logger) -> None:
+    def __init__(
+        self,
+        streams: CameraStreams,
+        logger: logging.Logger,
+        ws_hub: CameraWebSocketHub | None = None,
+    ) -> None:
         self._streams: dict[str, str] = dict(streams)
         self._logger = logger
+        self._ws_hub = ws_hub
         # Each peer remembers the stream id and URL it was opened with so a
         # config change can close only the peers whose source actually changed.
         self._sessions: dict[
@@ -80,8 +116,21 @@ class _AiortcStream:
         self._closing = asyncio.Event()
         self._lock = asyncio.Lock()
 
-    def _open_player(self, camera_url: str) -> MediaPlayer:
-        """Dial the RTSP source. Blocking: only call this in a worker thread."""
+    def _open_player(self, camera_url: str, input_format: str | None) -> MediaPlayer:
+        """Dial the camera source. Blocking: only call this in a worker thread."""
+        if input_format is not None:
+            # A relayed WebSocket source: a bare bytestream over HTTP, so the
+            # demuxer has to be named and the packets need wallclock stamps
+            # because the stream carries no timing of its own.
+            return MediaPlayer(
+                camera_url,
+                format=input_format,
+                options={
+                    "fflags": "nobuffer",
+                    "flags": "low_delay",
+                    "use_wallclock_as_timestamps": "1",
+                },
+            )
         return MediaPlayer(
             camera_url,
             format="rtsp",
@@ -119,11 +168,12 @@ class _AiortcStream:
         peer = RTCPeerConnection()
         player: MediaPlayer | None = None
         try:
+            input_format = await self._input_format(resolved_id, camera_url)
             # MediaPlayer() opens the RTSP container synchronously and does not
             # return until the camera answers or ffmpeg times out. Run it off
             # the event loop so an unreachable camera cannot stall the UDP send
             # loop, telemetry and PTZ along with it.
-            player = await self._dial(resolved_id, camera_url)
+            player = await self._dial(resolved_id, camera_url, input_format)
             if player.video is None:
                 raise RuntimeError("RTSP source does not provide a video track")
 
@@ -149,10 +199,21 @@ class _AiortcStream:
             async with self._lock:
                 self._dialing.discard(resolved_id)
 
-    async def _dial(self, stream_id: str, camera_url: str) -> MediaPlayer:
-        """Open the RTSP source, giving up the wait as soon as we are closing."""
+    async def _input_format(self, stream_id: str, camera_url: str) -> str | None:
+        """The demuxer for a relayed source, or None when the source is RTSP."""
+        if not is_websocket_url(camera_url) or self._ws_hub is None:
+            return None
+        return await self._ws_hub.detect_format(stream_id, camera_url)
+
+    async def _dial(
+        self, stream_id: str, camera_url: str, input_format: str | None
+    ) -> MediaPlayer:
+        """Open the camera source, giving up the wait as soon as we are closing."""
         dial = utils.run_detached(
-            self._open_player, camera_url, thread_name=f"rtsp-dial-{stream_id}"
+            self._open_player,
+            ingest_url(stream_id, camera_url),
+            input_format,
+            thread_name=f"camera-dial-{stream_id}",
         )
         closing = asyncio.ensure_future(self._closing.wait())
         try:
@@ -194,9 +255,15 @@ class _Go2RtcStream:
     API_URL = "http://127.0.0.1:1984"
     API_TIMEOUT_SECONDS = 15
 
-    def __init__(self, streams: CameraStreams, logger: logging.Logger) -> None:
+    def __init__(
+        self,
+        streams: CameraStreams,
+        logger: logging.Logger,
+        ws_hub: CameraWebSocketHub | None = None,
+    ) -> None:
         self._logger = logger
         self._streams: dict[str, str] = dict(streams)
+        self._ws_hub = ws_hub
         self._registered: dict[str, str] = {}
         self._process: subprocess.Popen[bytes] | None = None
         self._config_path: str | None = None
@@ -308,6 +375,15 @@ class _Go2RtcStream:
                 pass
             self._config_path = None
 
+    async def _source_string(self, stream_id: str, url: str) -> str:
+        """What go2rtc should be told to open for one configured source."""
+        if not is_websocket_url(url):
+            return url
+        input_format = "h264"
+        if self._ws_hub is not None:
+            input_format = await self._ws_hub.detect_format(stream_id, url)
+        return go2rtc_source(stream_id, url, input_format)
+
     async def _sync_streams(self) -> None:
         """Register/refresh/drop go2rtc streams to match the config."""
         if self._process is None or self._process.poll() is not None:
@@ -325,11 +401,12 @@ class _Go2RtcStream:
                         f"/api/streams?src={stream_id}",
                         phase="RTSP stream refresh",
                     )
-            query = urlencode({"name": stream_id, "src": url})
+            source = await self._source_string(stream_id, url)
+            query = urlencode({"name": stream_id, "src": source})
             await self._api_request(
                 "PUT",
                 f"/api/streams?{query}",
-                phase="RTSP stream registration",
+                phase="camera stream registration",
             )
             self._registered[stream_id] = url
 
@@ -386,18 +463,22 @@ class WebRTCStream:
         streams: CameraStreams,
         logger: logging.Logger,
         backend: str = "go2rtc",
+        ws_hub: CameraWebSocketHub | None = None,
     ) -> None:
         self._logger = logger
         self._backend = backend
         self._streams: CameraStreams = tuple(streams)
+        # Resolves the demuxer for WebSocket sources, which reach both backends
+        # through the local relay rather than being dialed directly.
+        self._ws_hub = ws_hub
         self._stream: _AiortcStream | _Go2RtcStream
         self._set_backend(backend)
 
     def _set_backend(self, backend: str) -> None:
         if backend == "aiortc":
-            self._stream = _AiortcStream(self._streams, self._logger)
+            self._stream = _AiortcStream(self._streams, self._logger, self._ws_hub)
         elif backend == "go2rtc":
-            self._stream = _Go2RtcStream(self._streams, self._logger)
+            self._stream = _Go2RtcStream(self._streams, self._logger, self._ws_hub)
         else:
             raise ValueError("camera_backend must be 'go2rtc' or 'aiortc'")
 

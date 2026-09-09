@@ -1,8 +1,8 @@
 # Steam Deck Robot Monitor
 
-All-in-one camera and control UI for a differential-drive robot, designed for the Steam Deck. Camera input supports RTSP through backend WebRTC and direct camera WebSocket H.264 playback.
+All-in-one camera and control UI for a differential-drive robot, designed for the Steam Deck. Camera input supports RTSP and direct camera WebSocket sources; the backend owns both and delivers every one to the UI as WebRTC.
 
-The application consists of a FastAPI backend that handles camera transport (every configured RTSP source kept connected at once for instant switching), binary UDP command encoding, a 50 Hz command sender, battery telemetry reception, host ping measurements, and PTZ camera control (pan/tilt/zoom/focus over ISAPI), plus an Electron + Vue 3 frontend that provides the gamepad/touch/keyboard UI and telemetry HUD.
+The application consists of a FastAPI backend that handles camera transport (every configured source kept connected at once for instant switching, whatever its transport), binary UDP command encoding, a 50 Hz command sender, battery telemetry reception, host ping measurements, and PTZ camera control (pan/tilt/zoom/focus over ISAPI), plus an Electron + Vue 3 frontend that provides the gamepad/touch/keyboard UI and telemetry HUD.
 
 ## Repository Layout
 
@@ -72,7 +72,7 @@ Inside the image, `/usr/local/bin/docker-entrypoint.sh`:
 3. Starts Electron (`/app/frontend/main.js`) with the production renderer bundle
 4. Shuts down both processes together when Electron exits
 
-The image also bundles pinned, checksum-verified go2rtc binaries for `amd64` and `arm64`. FastAPI starts go2rtc on demand for the default `go2rtc` camera backend, using localhost API port `1984` and WebRTC listener port `8555`, and registers one stream per configured RTSP source. The renderer still uses only FastAPI `POST /offer?src=<id>`. Select `aiortc` explicitly in Settings when that backend is required; there is no automatic fallback. For local development, `GO2RTC_BINARY` overrides the executable path.
+The image also bundles pinned, checksum-verified go2rtc binaries for `amd64` and `arm64`. FastAPI starts go2rtc on demand for the default `go2rtc` camera backend, using localhost API port `1984` and WebRTC listener port `8555`, and registers one stream per configured source. The renderer still uses only FastAPI `POST /offer?src=<id>`. Select `aiortc` explicitly in Settings when that backend is required; there is no automatic fallback. For local development, `GO2RTC_BINARY` overrides the executable path.
 
 Settings are written under `/app/config`, which the launcher bind-mounts from the host config directory. Set `APP_SETTINGS_DIR` inside the container to change the settings path.
 
@@ -109,4 +109,4 @@ docker run --rm --network host -v "$PWD:/app" -w /app/backend \
 	steamdeck-robot-monitor:latest python -m unittest test_utils
 ```
 
-Interactive runtime validation should be performed by the user on the target device. RTSP playback requires a reachable RTSP source and is converted to local WebRTC by FastAPI; every configured source is dialed at once. WebSocket playback requires a reachable camera WebSocket endpoint and an Electron build with WebCodecs H.264 support; the renderer sends `PlayStream2` and decodes frames directly.
+Interactive runtime validation should be performed by the user on the target device. RTSP playback requires a reachable RTSP source and is converted to local WebRTC by FastAPI; every configured source is dialed at once. WebSocket playback requires a reachable camera WebSocket endpoint: FastAPI sends `PlayStream2`, re-serves the bytestream at `GET /camera/<id>/stream`, and converts it to WebRTC through the same camera backend.

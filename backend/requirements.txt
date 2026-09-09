@@ -4,3 +4,6 @@ fastapi==0.141.1
 uvicorn[standard]==0.52.3
 opencv-python==5.0.0.93
 aiortc==1.14.0
+# Pulled in transitively by uvicorn[standard], but CameraWebSocketSource.py
+# imports it directly to dial camera WebSocket sources, so pin it explicitly.
+websockets==17.0.1
