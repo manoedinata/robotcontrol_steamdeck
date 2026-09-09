@@ -227,6 +227,16 @@ def packet_struct(schema: dict, packet_type: str = "send") -> struct.Struct:
     return struct.Struct(byte_order + format_codes)
 
 
+def do_additional_step_before_sending(packet_field: str) -> Any:
+    processed_packet = packet_field
+
+    # if packet_field == "pwm":
+    #     # Example processing for "pwm" field
+    #     processed_packet = float(packet_field)  # Convert to float if needed
+
+    return processed_packet
+
+
 def encode_binary_packet(
     packet: dict[str, Any], schema: dict, packet_type: str = "send"
 ) -> bytes:
@@ -245,6 +255,7 @@ def encode_binary_packet(
             values.extend([default] * count)
         else:
             value = packet[name]
+            value = do_additional_step_before_sending(value)
             if count > 1:
                 if isinstance(value, list):
                     if len(value) != count:

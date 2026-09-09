@@ -98,7 +98,7 @@ def encode_current_packet() -> bytes:
 default_packet = utils.generate_default_state(PACKET_SCHEMA)
 runtime = RuntimeState(
     config=settings_module.Settings(
-        udp_ip="127.0.0.1",
+        # udp_ip="192.168.1.153",
         udp_port=8888,
         udp_listen_port=8889,
         camera_streams=(),
@@ -185,7 +185,9 @@ def validate_packet_slew(value: Any) -> dict[str, float]:
 
 def validate_config(
     config: dict[str, Any],
-) -> tuple[str, int, int, tuple[tuple[str, str], ...], str, bool, str, dict[str, float]]:
+) -> tuple[
+    str, int, int, tuple[tuple[str, str], ...], str, bool, str, dict[str, float]
+]:
     allowed_keys = {
         "udp_host",
         "udp_port",
@@ -287,6 +289,8 @@ async def broadcast_ping(ping_ms: float | None) -> None:
     if not runtime.clients:
         return
 
+    LOGGER.warning("PING UDP COKKK: " + str(ping_ms))
+
     await asyncio.gather(
         *(
             send_client_message(
@@ -303,10 +307,12 @@ async def udp_ping_loop() -> None:
     while True:
         if runtime.clients:
             if not runtime.udp_enabled:
+                # print("PING: UDP BLM NYALA COKK")
                 await broadcast_ping(None)
                 await asyncio.sleep(PING_INTERVAL_S)
                 continue
             try:
+                # print("PING: LAGI NGIRIMMMM")
                 process = await asyncio.create_subprocess_exec(
                     "ping",
                     "-n",
@@ -325,7 +331,11 @@ async def udp_ping_loop() -> None:
                 ping_ms = (
                     float(match.group(1)) if process.returncode == 0 and match else None
                 )
-            except (OSError, TimeoutError):
+            except (OSError, TimeoutError) as e:
+                LOGGER.warning("PING: GAGAL COKK")
+                LOGGER.warning("PING: " + str(OSError))
+                LOGGER.warning("PING: " + str(TimeoutError))
+                LOGGER.warning("PING: " + str(e))
                 ping_ms = None
             await broadcast_ping(ping_ms)
         await asyncio.sleep(PING_INTERVAL_S)
@@ -461,9 +471,7 @@ def send_field_limits() -> list[dict[str, Any]]:
             "type": field["type"],
             "min": field.get("min"),
             "max": field.get("max"),
-            "default": field.get(
-                "default", utils.default_for_wire_type(field["type"])
-            ),
+            "default": field.get("default", utils.default_for_wire_type(field["type"])),
             # Units per second the command may change by. None leaves the
             # field unramped.
             "slew_rate": effective_slew_rates().get(field["name"]),
@@ -613,12 +621,12 @@ async def udp_receive_loop() -> None:
                 bound_port = None
                 continue
 
-            LOGGER.warning(
-                "Received UDP telemetry from %s:%s, payload=%s",
-                address[0],
-                address[1],
-                payload,
-            )
+            # LOGGER.warning(
+            #     "Received UDP telemetry from %s:%s, payload=%s",
+            #     address[0],
+            #     address[1],
+            #     payload,
+            # )
 
             try:
                 packet = utils.decode_binary_packet(payload, PACKET_SCHEMA, "receive")
@@ -736,6 +744,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 message_type = incoming_data.get("type")
 
                 if message_type == "config":
+                    # print("JANCOKKKK DAPET DATA DARI WEBUI")
                     config = incoming_data.get("config", {})
                     if not isinstance(config, dict):
                         raise ValueError("config must be an object")
@@ -759,7 +768,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.config.packet_slew = packet_slew
                     sync_ptz_controller()
                     await video_stream.update_config(camera_streams, camera_backend)
-                    print(
+                    LOGGER.info(
                         "UDP config accepted: "
                         f"enabled={udp_enabled} destination="
                         f"{udp_host}:{udp_port} telemetry_port={udp_listen_port} "

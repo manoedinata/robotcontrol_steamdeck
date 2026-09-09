@@ -1,7 +1,7 @@
 class Settings:
     def __init__(
         self,
-        udp_ip: str = "127.0.0.1",
+        udp_ip: str = "192.168.1.153",
         udp_port: int = 8888,
         udp_listen_port: int = 8889,
         camera_streams: tuple[tuple[str, str], ...] = (),
