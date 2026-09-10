@@ -9,7 +9,6 @@ from pathlib import Path
 
 from Recorder import (
     APP_FOLDER_NAME,
-    STALL_TIMEOUT_S,
     MIN_FREE_START_BYTES,
     PR_SET_PDEATHSIG,
     describe_storage_target,
@@ -137,9 +136,22 @@ class FfmpegArgumentTests(unittest.TestCase):
         self.assertIn("-dn", args)
         self.assertIn("-sn", args)
 
-    def test_rtsp_does_not_override_the_cameras_own_timestamps(self) -> None:
+    def test_rtsp_stamps_packets_on_arrival(self) -> None:
+        # A source that declares a framerate it does not deliver stamps frames
+        # faster than they happen, and a stream copy preserves that: the
+        # recording plays back fast by exactly the ratio of the two rates. The
+        # live view never shows it, because it draws frames as they arrive.
         args = rtsp_record_args("rtsp://h/s", "/out/a.mkv")
-        self.assertNotIn("-use_wallclock_as_timestamps", args)
+        self.assertIn("-use_wallclock_as_timestamps", input_options(args))
+        self.assertEqual(args[args.index("-use_wallclock_as_timestamps") + 1], "1")
+
+    def test_every_source_kind_records_in_real_time(self) -> None:
+        for args in (
+            rtsp_record_args("rtsp://h/s", "/out/a.mkv"),
+            relay_record_args("h264", "http://127.0.0.1:8000/x", "/out/a.mkv"),
+        ):
+            with self.subTest(args=args[0]):
+                self.assertIn("-use_wallclock_as_timestamps", input_options(args))
 
     def test_relay_names_the_demuxer_before_the_input(self) -> None:
         for fmt in ("h264", "mjpeg"):
@@ -173,13 +185,7 @@ class FfmpegArgumentTests(unittest.TestCase):
                 self.assertIn("-t", args)
                 self.assertGreater(int(args[args.index("-t") + 1]), 0)
 
-    def test_both_write_through_so_the_file_size_tracks_reality(self) -> None:
-        # The stall watchdog and the HUD counter read the file's size, so a
-        # recording that buffers looks identical to a wedged one. Flushing
-        # alone is not enough -- the Matroska muxer holds a whole cluster, and
-        # measured against a real RTSP source the file sat unchanged for 6-8
-        # seconds at a time, which a low-bitrate camera would stretch past the
-        # stall timeout and get a healthy recording killed.
+    def test_both_write_through_rather_than_buffering(self) -> None:
         for args in (
             rtsp_record_args("rtsp://h/s", "/out/a.mkv"),
             relay_record_args("h264", "http://127.0.0.1:8000/x", "/out/a.mkv"),
@@ -187,9 +193,19 @@ class FfmpegArgumentTests(unittest.TestCase):
             with self.subTest(args=args[0]):
                 self.assertIn("-flush_packets", args)
                 self.assertEqual(args[args.index("-flush_packets") + 1], "1")
-                self.assertIn("-cluster_time_limit", args)
-                limit = int(args[args.index("-cluster_time_limit") + 1])
-                self.assertLess(limit / 1000, STALL_TIMEOUT_S)
+
+    def test_neither_caps_the_cluster_alongside_wallclock_timestamps(self) -> None:
+        # -cluster_time_limit would make the file grow more evenly, but with
+        # epoch-based wallclock timestamps the muxer cannot close a cluster at
+        # all and writes an empty file. Measured: 563 bytes of header and
+        # "Output file is empty, nothing was encoded".
+        for args in (
+            rtsp_record_args("rtsp://h/s", "/out/a.mkv"),
+            relay_record_args("h264", "http://127.0.0.1:8000/x", "/out/a.mkv"),
+        ):
+            with self.subTest(args=args[0]):
+                self.assertIn("-use_wallclock_as_timestamps", args)
+                self.assertNotIn("-cluster_time_limit", args)
 
     def test_neither_reads_stdin(self) -> None:
         for args in (

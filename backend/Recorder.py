@@ -231,8 +231,19 @@ def rtsp_record_args(
     dropped RTP packet is permanent corruption of that GOP in a stream copy and
     there is no second chance at it. Recording has no latency requirement.
 
-    No wallclock timestamps here -- RTSP carries RTP timing, and overriding it
-    would make the recording worse.
+    Timestamped on arrival rather than from the stream's own clock. RTP timing
+    is authoritative in principle, but only if the sender's clock is honest: a
+    source that declares a framerate it does not actually deliver stamps frames
+    faster than they happen, and a stream copy preserves that faithfully, so
+    the recording plays back fast by exactly the ratio of the two rates. A live
+    view never shows this -- it draws frames as they arrive -- so the recording
+    is the only place it appears. Stamping on arrival makes the file match the
+    wall clock, which is what "record what the camera shows" means.
+
+    The cost is that frame intervals carry network jitter instead of the
+    sender's spacing. For a live camera being recorded for review that is the
+    right trade: a file whose duration matches reality beats one with tidier
+    intervals and the wrong length.
 
     Deliberately no socket-timeout option. It was spelled ``-stimeout`` until
     ffmpeg 6 removed it in favour of ``-timeout``, and choosing between them
@@ -260,6 +271,10 @@ def rtsp_record_args(
         # Input options; meaningless after -i.
         "-rtsp_transport",
         "tcp",
+        "-use_wallclock_as_timestamps",
+        "1",
+        "-fflags",
+        "+genpts",
         "-i",
         url,
         # Take video, and audio only when the camera has it. "-map 0" instead
@@ -273,18 +288,17 @@ def rtsp_record_args(
         "-sn",
         "-c",
         "copy",
-        # Write through instead of sitting in ffmpeg's AVIO buffer, and cap how
-        # much a Matroska cluster accumulates before it is emitted. Flushing
-        # alone is not enough: the muxer buffers a whole cluster, so the file
-        # can sit unchanged for many seconds while recording perfectly well.
-        # The stall watchdog and the HUD byte counter both read the file's
-        # size, so a healthy low-bitrate source would look wedged and get
-        # killed. Capping the cluster also shrinks the window of unwritten
-        # video lost when the power goes.
+        # Write through instead of sitting in ffmpeg's AVIO buffer, so less
+        # video is lost when the power goes.
+        #
+        # No -cluster_time_limit here, though it would make the file grow more
+        # evenly: it cannot coexist with the wallclock timestamps above, whose
+        # epoch-based values leave the muxer unable to close a cluster at all,
+        # and the output comes out empty. Nothing depends on smooth growth any
+        # more -- the stall watchdog reads ffmpeg's media clock, and the byte
+        # counter only has to be roughly right.
         "-flush_packets",
         "1",
-        "-cluster_time_limit",
-        "1000",
         "-t",
         str(max_seconds),
         # Explicit: never infer the container from an operator-influenced path.
@@ -337,18 +351,17 @@ def relay_record_args(
         "-sn",
         "-c",
         "copy",
-        # Write through instead of sitting in ffmpeg's AVIO buffer, and cap how
-        # much a Matroska cluster accumulates before it is emitted. Flushing
-        # alone is not enough: the muxer buffers a whole cluster, so the file
-        # can sit unchanged for many seconds while recording perfectly well.
-        # The stall watchdog and the HUD byte counter both read the file's
-        # size, so a healthy low-bitrate source would look wedged and get
-        # killed. Capping the cluster also shrinks the window of unwritten
-        # video lost when the power goes.
+        # Write through instead of sitting in ffmpeg's AVIO buffer, so less
+        # video is lost when the power goes.
+        #
+        # No -cluster_time_limit here, though it would make the file grow more
+        # evenly: it cannot coexist with the wallclock timestamps above, whose
+        # epoch-based values leave the muxer unable to close a cluster at all,
+        # and the output comes out empty. Nothing depends on smooth growth any
+        # more -- the stall watchdog reads ffmpeg's media clock, and the byte
+        # counter only has to be roughly right.
         "-flush_packets",
         "1",
-        "-cluster_time_limit",
-        "1000",
         "-t",
         str(max_seconds),
         "-f",
