@@ -249,6 +249,14 @@ def rtsp_record_args(
         "-nostats",
         "-loglevel",
         "error",
+        # ffmpeg's own account of how far it has got. Its media clock is the
+        # only honest liveness signal: the output file's size moves in cluster-
+        # sized jumps, so a healthy low-bitrate source can look wedged for many
+        # seconds at a time.
+        "-progress",
+        "pipe:1",
+        "-stats_period",
+        "1",
         # Input options; meaningless after -i.
         "-rtsp_transport",
         "tcp",
@@ -308,6 +316,14 @@ def relay_record_args(
         "-nostats",
         "-loglevel",
         "error",
+        # ffmpeg's own account of how far it has got. Its media clock is the
+        # only honest liveness signal: the output file's size moves in cluster-
+        # sized jumps, so a healthy low-bitrate source can look wedged for many
+        # seconds at a time.
+        "-progress",
+        "pipe:1",
+        "-stats_period",
+        "1",
         "-use_wallclock_as_timestamps",
         "1",
         "-fflags",
@@ -385,6 +401,32 @@ def last_meaningful_line(lines: list[str]) -> str | None:
     return None
 
 
+def parse_progress_line(line: str) -> tuple[str, str] | None:
+    """Split one ``key=value`` line of ffmpeg's -progress output."""
+    key, separator, value = line.strip().partition("=")
+    if not separator or not key:
+        return None
+    return key, value.strip()
+
+
+def progress_media_microseconds(key: str, value: str) -> int | None:
+    """How far into the media ffmpeg has muxed, from one progress field.
+
+    ``out_time_us`` is the field to watch: it advances only as media is
+    actually written, so it stands still exactly when a source has gone quiet.
+    Progress blocks keep arriving either way, which is why their arrival is not
+    itself a sign of life.
+    """
+    if key not in {"out_time_us", "out_time_ms"}:
+        return None
+    try:
+        microseconds = int(value)
+    except ValueError:
+        return None
+    # out_time_ms is a misnomer: ffmpeg reports microseconds in both.
+    return microseconds if microseconds >= 0 else None
+
+
 def scrub_credentials(text: str) -> str:
     """Strip userinfo from any URL in a message.
 
@@ -393,11 +435,6 @@ def scrub_credentials(text: str) -> str:
     log and every connected UI.
     """
     return _USERINFO_RE.sub("://***@", text)
-
-
-def is_stalled(bytes_now: int, bytes_then: int, seconds_since: float) -> bool:
-    """Whether a recording has stopped growing for long enough to be wedged."""
-    return bytes_now <= bytes_then and seconds_since >= STALL_TIMEOUT_S
 
 
 def has_free_space(free_bytes: int, minimum_bytes: int) -> bool:
@@ -500,9 +537,12 @@ class _Writer:
         # Set once this source has actually written video. It separates a
         # camera that is merely away from one that was never reachable.
         self._ever_recorded = False
-        # Stall tracking, driven by the state loop rather than a timer here.
+        # Stall tracking. Liveness follows ffmpeg's media clock; the byte
+        # counter separately follows the file, which is what actually consumes
+        # the card.
         self._last_size = 0
-        self._last_growth = 0.0
+        self._media_us = -1
+        self._media_advanced_at = 0.0
 
     @property
     def state(self) -> SourceRecording:
@@ -603,26 +643,48 @@ class _Writer:
         self._process = await asyncio.create_subprocess_exec(
             *args,
             stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             # Children stay in the backend's process group, and the kernel
             # takes them down with it even if it is killed outright.
             preexec_fn=die_with_parent,
         )
         self._last_size = 0
-        self._last_growth = asyncio.get_running_loop().time()
+        self._media_us = -1
+        self._media_advanced_at = asyncio.get_running_loop().time()
         self._set_status("recording", None)
         # stderr must be drained: with a PIPE and no reader, a chatty ffmpeg
         # fills the 64 KiB pipe buffer and blocks forever.
         reader = asyncio.create_task(self._read_stderr(self._process))
+        progress = asyncio.create_task(self._read_progress(self._process))
         try:
             await self._process.wait()
         finally:
             reader.cancel()
+            progress.cancel()
             if self._process.returncode not in (0, None):
                 reason = last_meaningful_line(list(self._state.stderr_tail))
                 if reason:
                     self._state.error = reason
+
+    async def _read_progress(self, process: asyncio.subprocess.Process) -> None:
+        """Follow ffmpeg's media clock so the watchdog has a real signal."""
+        if process.stdout is None:
+            return
+        try:
+            async for line in process.stdout:
+                parsed = parse_progress_line(line.decode("utf-8", "replace"))
+                if parsed is None:
+                    continue
+                microseconds = progress_media_microseconds(*parsed)
+                if microseconds is None or microseconds <= self._media_us:
+                    continue
+                self._media_us = microseconds
+                self._media_advanced_at = asyncio.get_running_loop().time()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - progress is best-effort
+            return
 
     async def _read_stderr(self, process: asyncio.subprocess.Process) -> None:
         if process.stderr is None:
@@ -640,30 +702,31 @@ class _Writer:
             return
 
     def poll_size(self, now: float) -> bool:
-        """Refresh the byte counter; report whether the file looks wedged."""
+        """Refresh the byte counter; report whether the source has gone quiet.
+
+        The counter follows the file, because that is what fills the card. The
+        stall verdict follows ffmpeg's media clock instead: the file grows in
+        cluster-sized jumps, so size standing still means nothing on its own,
+        and a source that is merely low-bitrate would be killed for it.
+        """
         if self._state.status != "recording" or self._path is None:
             return False
         try:
-            size = self._path.stat().st_size
+            self._state.bytes_written = self._path.stat().st_size
         except OSError:
-            # ffmpeg has not created the output yet. Treated as no growth, not
-            # as "nothing to see": a dial that hangs before opening the file is
-            # precisely the case the watchdog has to catch, now that there is
-            # no socket timeout to catch it first.
-            size = 0
-        self._state.bytes_written = size
-        if size > self._last_size:
-            self._last_size = size
-            self._last_growth = now
-            return False
-        return is_stalled(size, self._last_size, now - self._last_growth)
+            # ffmpeg has not created the output yet; nothing has reached the
+            # card, which is exactly what the counter should say.
+            self._state.bytes_written = 0
+        return now - self._media_advanced_at >= STALL_TIMEOUT_S
 
     async def restart_stalled(self) -> None:
         """Kill a wedged ffmpeg so the supervisor rolls to a new part."""
         self._logger.warning(
-            "Recording %s stopped growing; restarting it", self._state.source_id
+            "Recording %s produced no media for %.0fs; restarting it",
+            self._state.source_id,
+            STALL_TIMEOUT_S,
         )
-        self._last_growth = asyncio.get_running_loop().time()
+        self._media_advanced_at = asyncio.get_running_loop().time()
         process = self._process
         if process is not None and process.returncode is None:
             process.kill()

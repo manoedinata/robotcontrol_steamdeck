@@ -21,8 +21,9 @@ from Recorder import (
     backoff_delay,
     classify_exit,
     has_free_space,
-    is_stalled,
     last_meaningful_line,
+    parse_progress_line,
+    progress_media_microseconds,
     normalize_record_action,
     recording_path,
     recording_state_payload,
@@ -223,16 +224,24 @@ class SupervisionTests(unittest.TestCase):
                     classify_exit(1, 0.2, attempt, ever_recorded=True), "retry"
                 )
 
-    def test_an_output_that_never_appears_counts_as_stalled(self) -> None:
-        # A dial that hangs before ffmpeg opens the file is what the watchdog
-        # has to catch now that there is no socket timeout to catch it first.
-        self.assertTrue(is_stalled(0, 0, 20.0))
-        self.assertFalse(is_stalled(0, 0, 2.0))
+    def test_progress_lines_are_split_into_fields(self) -> None:
+        self.assertEqual(parse_progress_line("out_time_us=1234"), ("out_time_us", "1234"))
+        self.assertEqual(parse_progress_line("progress=continue"), ("progress", "continue"))
+        self.assertIsNone(parse_progress_line("no separator here"))
+        self.assertIsNone(parse_progress_line(""))
 
-    def test_a_file_that_stopped_growing_is_stalled(self) -> None:
-        self.assertTrue(is_stalled(1000, 1000, 20.0))
-        self.assertFalse(is_stalled(2000, 1000, 20.0))
-        self.assertFalse(is_stalled(1000, 1000, 2.0))
+    def test_only_the_media_clock_counts_as_progress(self) -> None:
+        # Progress blocks keep arriving whether or not media is flowing, so
+        # their arrival proves nothing; out_time advancing is the real signal.
+        self.assertEqual(progress_media_microseconds("out_time_us", "500000"), 500000)
+        self.assertEqual(progress_media_microseconds("out_time_ms", "500000"), 500000)
+        self.assertIsNone(progress_media_microseconds("total_size", "999"))
+        self.assertIsNone(progress_media_microseconds("progress", "continue"))
+
+    def test_an_unparsable_media_clock_is_ignored(self) -> None:
+        # ffmpeg emits N/A before the first frame is muxed.
+        self.assertIsNone(progress_media_microseconds("out_time_us", "N/A"))
+        self.assertIsNone(progress_media_microseconds("out_time_us", "-1"))
 
 
 class RedactionTests(unittest.TestCase):
