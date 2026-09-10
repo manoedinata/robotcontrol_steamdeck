@@ -38,6 +38,18 @@ from CameraWebSocketSource import is_websocket_url, relay_url
 # would be a path-injection surface for no benefit.
 RECORDINGS_DIR_ENV = "RECORDINGS_DIR"
 
+# Where SteamOS mounts removable media. The operator picks a card in Settings
+# rather than typing a path: the mount point is named after the card's label,
+# or its UUID when it has none, so it is neither guessable nor memorable.
+# Overridable because this is not universal: other distributions mount
+# removable media under /media, and it makes the scan testable against a
+# stand-in.
+REMOVABLE_ROOT = os.environ.get("REMOVABLE_MEDIA_ROOT", "/run/media")
+
+# The folder the app makes on a chosen card. A freshly formatted card is empty,
+# so recordings would otherwise land loose in its root.
+APP_FOLDER_NAME = "steamdeck-robot-monitor"
+
 # Refuse to start below the first, stop cleanly below the second. Stopping on
 # purpose trailers every file; running into ENOSPC leaves N broken ones.
 MIN_FREE_START_BYTES = 2 * 1024**3
@@ -108,6 +120,69 @@ def die_with_parent() -> None:
 
 _USERINFO_RE = re.compile(r"://[^/@\s]*@")
 _UNSAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def storage_target_path(mount_point: str) -> str:
+    """The recordings folder the app uses on a chosen card."""
+    return str(Path(mount_point) / APP_FOLDER_NAME)
+
+
+def removable_mount_points(root: str = REMOVABLE_ROOT) -> list[str]:
+    """Every mounted removable filesystem, newest layout and old one alike.
+
+    SteamOS 3.4+ mounts under ``/run/media/<user>/<name>``; older builds used
+    ``/run/media/<name>``. Both are scanned, and each candidate has to actually
+    be a mount point -- an unmounted card can leave its directory behind, and
+    offering that would put recordings on the internal drive under a name that
+    says otherwise.
+    """
+    base = Path(root)
+    if not base.is_dir():
+        return []
+
+    found: set[str] = set()
+    for entry in _child_dirs(base):
+        if os.path.ismount(entry):
+            found.add(str(entry))
+            continue
+        # Not a mount itself, so treat it as a per-user directory and look
+        # one level deeper.
+        for child in _child_dirs(entry):
+            if os.path.ismount(child):
+                found.add(str(child))
+    return sorted(found)
+
+
+def _child_dirs(path: Path) -> list[Path]:
+    try:
+        return [entry for entry in path.iterdir() if entry.is_dir()]
+    except OSError:
+        return []
+
+
+def describe_storage_target(
+    target_id: str, kind: str, label: str, path: str, probe: str
+) -> dict[str, Any]:
+    """One selectable recording destination, with its capacity.
+
+    ``probe`` is the directory whose free space is reported -- the card's mount
+    point rather than the app folder, which may not exist yet.
+    """
+    try:
+        usage = shutil.disk_usage(probe)
+        free_bytes: int | None = usage.free
+        total_bytes: int | None = usage.total
+    except OSError:
+        free_bytes = total_bytes = None
+    return {
+        "id": target_id,
+        "kind": kind,
+        "label": label,
+        "path": path,
+        "free_bytes": free_bytes,
+        "total_bytes": total_bytes,
+        "writable": os.access(probe, os.W_OK),
+    }
 
 
 def session_dir_name(now: datetime) -> str:
@@ -655,6 +730,50 @@ class Recorder:
                 "Recording in progress; source list change applies to the next session"
             )
 
+    def storage_targets(self) -> dict[str, Any]:
+        """The recording destinations the operator can pick between.
+
+        Internal storage is always offered and is the default. Each mounted
+        card is offered as itself: the app supplies the folder on it, so the
+        operator never sees or types a path.
+
+        A card chosen earlier and now absent is still listed, marked as not
+        connected, so the selection reads as "that card is out" instead of
+        silently reverting to internal storage.
+        """
+        default_root = self._default_root()
+        targets = [
+            describe_storage_target(
+                "internal", "internal", "Internal storage", "", str(default_root)
+            )
+        ]
+        for mount_point in removable_mount_points():
+            targets.append(
+                describe_storage_target(
+                    mount_point,
+                    "removable",
+                    Path(mount_point).name,
+                    storage_target_path(mount_point),
+                    mount_point,
+                )
+            )
+
+        selected = self._root_override
+        if selected and not any(target["path"] == selected for target in targets):
+            targets.append(
+                {
+                    "id": selected,
+                    "kind": "removable",
+                    "label": Path(selected).parent.name or selected,
+                    "path": selected,
+                    "free_bytes": None,
+                    "total_bytes": None,
+                    "writable": False,
+                }
+            )
+
+        return {"targets": targets, "selected": selected}
+
     def state(self) -> dict[str, Any]:
         return recording_state_payload(
             active=self.active,
@@ -677,11 +796,14 @@ class Recorder:
         # Fire and forget: a slow client must never stall a supervisor.
         asyncio.create_task(self._listener(self.state()))
 
+    def _default_root(self) -> Path:
+        default = Path(__file__).resolve().parent.parent / "recordings"
+        return Path(os.environ.get(RECORDINGS_DIR_ENV, str(default)))
+
     def _root(self) -> Path:
         if self._root_override:
             return Path(self._root_override)
-        default = Path(__file__).resolve().parent.parent / "recordings"
-        return Path(os.environ.get(RECORDINGS_DIR_ENV, str(default)))
+        return self._default_root()
 
     async def _ffmpeg_timeout_option(self) -> tuple[str, ...]:
         if self._timeout_option is not None:
@@ -716,7 +838,19 @@ class Recorder:
             # Deck runs out. An absent card must read as "not available", which
             # is exactly what a missing directory says.
             if not root.is_dir():
-                raise ValueError(f"recordings folder is not available: {root}")
+                # A freshly formatted card has no app folder yet. Making one
+                # inside a directory that is genuinely a mount point is safe;
+                # what must never happen is creating the mount point itself,
+                # which is how recordings end up in tmpfs or in the container.
+                if os.path.ismount(root.parent):
+                    try:
+                        root.mkdir()
+                    except OSError as error:
+                        raise ValueError(
+                            f"recordings folder could not be created: {error}"
+                        ) from error
+                else:
+                    raise ValueError(f"recordings folder is not available: {root}")
             if not os.access(root, os.W_OK):
                 raise ValueError(f"recordings folder is not writable: {root}")
 

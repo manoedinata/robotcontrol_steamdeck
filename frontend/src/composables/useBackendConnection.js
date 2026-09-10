@@ -26,6 +26,9 @@ const recordingState = ref(null)
 // moved on without us.
 const recordingStale = ref(false)
 const signalingUrl = new URL('/offer', backendUrl).toString()
+// Recording destinations the operator can pick between, read on demand by
+// Settings rather than pushed, since it only changes when media is inserted.
+const storageTargetsUrl = new URL('/storage/targets', backendUrl).toString()
 
 // Receive-only WebRTC signaling for one backend-dialed RTSP stream. The
 // stream id selects which warm source the answer is for.
@@ -238,6 +241,7 @@ export function useBackendConnection() {
         recordingStale: readonly(recordingStale),
         signalingUrl,
         cameraSignalingUrl,
+        storageTargetsUrl,
         connect,
         disconnect,
         updateConfig,

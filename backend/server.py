@@ -795,6 +795,16 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/storage/targets")
+async def storage_targets() -> JSONResponse:
+    """Recording destinations the Settings picker offers.
+
+    The operator chooses a card, not a path: mount points are named after a
+    card's label or its UUID, so a path is neither guessable nor worth showing.
+    """
+    return JSONResponse(recorder.storage_targets())
+
+
 @app.get("/camera/{stream_id}/stream")
 async def camera_relay(stream_id: str) -> StreamingResponse:
     """Re-serve one direct camera WebSocket source as an HTTP byte stream.

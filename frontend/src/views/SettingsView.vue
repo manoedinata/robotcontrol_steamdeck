@@ -1,9 +1,10 @@
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
-import { Camera, Disc, Gauge, Keyboard, Network, Plus, Save, Trash2 } from '@lucide/vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { Camera, Disc, Gauge, HardDrive, Keyboard, MemoryStick, Network, Plus, RefreshCw, Save, Trash2 } from '@lucide/vue'
 import OnScreenKeyboard from '../components/OnScreenKeyboard.vue'
 import { useSettingsGamepadNavigation } from '../composables/useSettingsGamepadNavigation'
 import { useSettings } from '../composables/useSettings'
+import { useBackendConnection } from '../composables/useBackendConnection'
 
 const emit = defineEmits(['close'])
 
@@ -29,6 +30,46 @@ const cameras = ref([])
 const backend = ref(cameraBackend.value)
 const ptzAddress = ref(ptzIp.value)
 const recordingsPath = ref(recordingsDir.value)
+
+// The operator picks a card, never a path: mount points are named after a
+// card's label or its UUID, so a path is neither guessable nor worth showing.
+const { storageTargetsUrl } = useBackendConnection()
+const storageTargets = ref([])
+const storageState = ref('idle')
+
+function formatCapacity(bytes) {
+  if (!Number.isFinite(bytes)) return ''
+  const gigabytes = bytes / 1024 ** 3
+  if (gigabytes >= 1) return `${gigabytes.toFixed(gigabytes < 10 ? 1 : 0)} GB free`
+  return `${Math.max(Math.round(bytes / 1024 ** 2), 0)} MB free`
+}
+
+function describeTarget(target) {
+  if (!target.writable && target.free_bytes === null) return 'Not connected'
+  if (!target.writable) return 'Not writable'
+  return formatCapacity(target.free_bytes)
+}
+
+async function loadStorageTargets() {
+  storageState.value = 'loading'
+  try {
+    const response = await fetch(storageTargetsUrl)
+    if (!response.ok) throw new Error(`status ${response.status}`)
+    const payload = await response.json()
+    storageTargets.value = Array.isArray(payload?.targets) ? payload.targets : []
+    storageState.value = 'ready'
+  } catch (error) {
+    console.warn('[settings] Could not read storage targets:', error)
+    storageTargets.value = []
+    storageState.value = 'error'
+  }
+}
+
+function selectStorageTarget(target) {
+  recordingsPath.value = target.path
+}
+
+onMounted(loadStorageTargets)
 // One editable min/max row per operator-settable send-packet field.
 const limits = ref([])
 const targetHost = ref(udpHost.value)
@@ -56,10 +97,9 @@ const keyboardFields = {
   targetPort: { label: 'UDP target port', layout: 'integer', maxLength: 5 },
   listenPort: { label: 'UDP telemetry listen port', layout: 'integer', maxLength: 5 },
   ptzAddress: { label: 'PTZ camera IP', layout: 'ip', maxLength: 253 },
-  recordingsPath: { label: 'Recordings folder', layout: 'path', maxLength: 4096 },
 }
 
-const fieldValues = { targetHost, targetPort, listenPort, ptzAddress, recordingsPath }
+const fieldValues = { targetHost, targetPort, listenPort, ptzAddress }
 
 // Camera sources and packet limits are lists, so their fields are addressed as
 // `<kind>:<index>:<field>` and the on-screen keyboard can target any row.
@@ -253,13 +293,6 @@ async function persistSettings({ focusSave = false } = {}) {
   if (invalidLimit) {
     settingsState.value = 'error'
     settingsMessage.value = `${invalidLimit.name}: minimum must be below maximum.`
-    return false
-  }
-
-  const recordingsFolder = recordingsPath.value.trim()
-  if (recordingsFolder && !recordingsFolder.startsWith('/')) {
-    settingsState.value = 'error'
-    settingsMessage.value = 'Recordings folder must be an absolute path, starting with "/".'
     return false
   }
 
@@ -541,24 +574,36 @@ defineExpose({ saveBeforeClose })
         <div>
           <h2>Recording</h2>
           <p>Where the record button writes. One folder per recording, one file per camera
-            source. Leave empty to use the location this install was set up with.</p>
-          <p>For an SD card, use its mount path plus a folder, like
-            <code>/run/media/deck/&lt;card&gt;/recordings</code>. Run
-            <code>ls /run/media/deck/</code> in Konsole to see what your card is called.
-            The folder has to exist already &mdash; recording reports it as unavailable
-            while the card is out, rather than writing somewhere else.</p>
+            source. Insert a formatted SD card and pick it here; the app makes its own
+            folder on the card.</p>
         </div>
       </div>
 
-      <div class="udp-settings-row">
-        <div class="settings-field">
-          <label for="recordings-dir">Recordings folder <span>(optional)</span></label>
-          <input id="recordings-dir" v-model.trim="recordingsPath" class="form-control" type="text"
-            :inputmode="oskEnabled ? 'none' : 'text'" :readonly="oskEnabled"
-            placeholder="/run/media/deck/&lt;card&gt;/recordings" autocomplete="off" data-gamepad-control
-            @pointerdown="oskEnabled && $event.preventDefault()" @click="openKeyboard('recordingsPath')"
-            @keydown="handleInputKeydown($event, 'recordingsPath')" />
-        </div>
+      <div class="storage-targets" role="radiogroup" aria-label="Recording destination">
+        <button v-for="target in storageTargets" :key="target.id" type="button" class="storage-target"
+          :class="{ selected: recordingsPath === target.path, unavailable: !target.writable }" role="radio"
+          :aria-checked="recordingsPath === target.path" data-gamepad-control
+          @click="selectStorageTarget(target)">
+          <MemoryStick v-if="target.kind === 'removable'" :size="20" aria-hidden="true" />
+          <HardDrive v-else :size="20" aria-hidden="true" />
+          <span class="storage-target-text">
+            <strong>{{ target.label }}</strong>
+            <span>{{ describeTarget(target) }}</span>
+          </span>
+        </button>
+
+        <p v-if="storageState === 'ready' && storageTargets.length < 2" class="storage-empty">
+          No SD card detected. Insert one, then refresh.
+        </p>
+        <p v-else-if="storageState === 'error'" class="storage-empty">
+          Could not read storage. Is the backend running?
+        </p>
+
+        <button type="button" class="btn btn-secondary btn-sm storage-refresh" data-gamepad-control
+          :disabled="storageState === 'loading'" @click="loadStorageTargets">
+          <RefreshCw :size="16" aria-hidden="true" />
+          {{ storageState === 'loading' ? 'Checking...' : 'Refresh' }}
+        </button>
       </div>
 
       <div class="settings-panel-heading settings-panel-heading-divided">

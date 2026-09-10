@@ -8,8 +8,12 @@ from datetime import datetime
 from pathlib import Path
 
 from Recorder import (
+    APP_FOLDER_NAME,
     MIN_FREE_START_BYTES,
     PR_SET_PDEATHSIG,
+    describe_storage_target,
+    removable_mount_points,
+    storage_target_path,
     MIN_FREE_STOP_BYTES,
     Recorder,
     SourceRecording,
@@ -389,6 +393,46 @@ class RecordingsFolderTests(unittest.TestCase):
             with self.assertRaises(ValueError) as caught:
                 asyncio.run(recorder.start())
         self.assertIn("no camera source", str(caught.exception))
+
+
+class StorageTargetTests(unittest.TestCase):
+    """Picking a card, so the operator never sees or types a path."""
+
+    def test_the_app_makes_its_own_folder_on_a_card(self) -> None:
+        # A freshly formatted card is empty, so recordings would otherwise land
+        # loose in its root.
+        self.assertEqual(
+            storage_target_path("/run/media/deck/CARD"),
+            f"/run/media/deck/CARD/{APP_FOLDER_NAME}",
+        )
+
+    def test_no_removable_root_means_no_cards(self) -> None:
+        with tempfile.TemporaryDirectory() as parent:
+            self.assertEqual(
+                removable_mount_points(os.path.join(parent, "absent")), []
+            )
+
+    def test_a_directory_that_is_not_a_mount_is_never_offered(self) -> None:
+        # An unmounted card can leave its directory behind. Offering it would
+        # put recordings on the internal drive under a name saying otherwise.
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, "deck", "leftover-card"))
+            os.makedirs(os.path.join(root, "bare-leftover"))
+            self.assertEqual(removable_mount_points(root), [])
+
+    def test_a_target_reports_capacity_and_writability(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            target = describe_storage_target("internal", "internal", "Internal", "", root)
+            self.assertEqual(target["id"], "internal")
+            self.assertEqual(target["kind"], "internal")
+            self.assertTrue(target["writable"])
+            self.assertGreater(target["total_bytes"], 0)
+
+    def test_an_unreadable_target_reports_no_capacity_rather_than_failing(self) -> None:
+        target = describe_storage_target("x", "removable", "Card", "/x/y", "/does/not/exist")
+        self.assertIsNone(target["free_bytes"])
+        self.assertIsNone(target["total_bytes"])
+        self.assertFalse(target["writable"])
 
 
 class RecorderConstructionTests(unittest.TestCase):

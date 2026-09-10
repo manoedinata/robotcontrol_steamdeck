@@ -11,6 +11,7 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 - `src/App.vue`: persistent command shell (Settings/Exit stack on the right, PTZ focus near/far buttons on the left), backend connection lifecycle, and Settings drawer state.
 - `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition.
 - `src/views/SettingsView.vue`: camera sources, UDP destination, velocity limits, and keyboard settings.
+- `src/views/SettingsView.vue` reads `GET /storage/targets` for the recording destination picker. The operator selects a card, never a path; the stored value is the folder the backend reported for it.
 - `src/components/CameraFeed.vue`: one always-connected camera source, negotiated as backend WebRTC via `/offer?src=<id>`, with its own reconnect state. Every source kind arrives this way. `HomeView.vue` mounts one per source and shows only the active one.
 - `src/components/ControllerPanel.vue`: Y/theta input mapping and generic packet updates.
 - `src/composables/useBackendConnection.js`: singleton typed WebSocket transport, telemetry freshness, reconnect, replay, and backend WebRTC signaling URL.

@@ -10,7 +10,7 @@ The Settings drawer stores camera source, UDP destination, velocity limits, and 
 - UDP command target host/port and telemetry listening port.
 - Maximum linear Y and angular theta velocity, `0.1..100`.
 - Built-in on-screen keyboard toggle.
-- Optional recordings folder. Empty uses the location the install was set up with; a value must be an absolute path.
+- Recording destination, chosen from the detected storage rather than typed.
 - Optional PTZ camera IP address for camera pan/tilt/zoom/focus control. The camera credentials are hardcoded in the backend, not stored here.
 
 The persisted contract remains:
@@ -84,17 +84,20 @@ field takes an absolute path and is validated in the form before saving, so a
 relative one is reported on the field rather than bouncing off the backend as a
 rejected config message.
 
-To record to an SD card, give it the card's mount path plus a folder. SteamOS
-mounts removable media at `/run/media/deck/<label>`, or `/run/media/deck/<uuid>`
-when the card has no label, which is what Steam's own "Format SD Card" leaves
-it as -- so the path differs per card and has to be read off the device with
-`ls /run/media/deck/` rather than assumed. The launcher passes `/run/media`
-through to the container at the same path, so what is listed there is exactly
-what goes in the field.
+To record to an SD card, insert a formatted one and pick it from the list.
+Settings reads `GET /storage/targets` on open and offers internal storage plus
+every mounted card, each with its free space; Refresh re-reads it after inserting
+one. Picking a card stores its folder, so the operator never sees a path — which
+matters because SteamOS names the mount point after the card's label, or its UUID
+when it has none, and Steam's own "Format SD Card" leaves it unlabeled.
 
-The folder must exist before recording starts. With the card out, the record
-button reports it as unavailable and the rest of the app is unaffected; pulling
-the card mid-recording stops the session rather than writing into nowhere.
+The app creates its own `steamdeck-robot-monitor` folder on a chosen card, so a
+blank card works as-is. With the card out, the record button reports it as
+unavailable and the rest of the app is unaffected; pulling the card mid-recording
+stops the session rather than writing into nowhere. A card that was selected and
+is now absent stays in the list marked "Not connected", so the selection reads as
+"that card is out" rather than silently reverting to internal storage.
+
 Playback and stream history are not part of the app.
 
 ## PTZ Control

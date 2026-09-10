@@ -9,6 +9,7 @@ Two source kinds share one path. An RTSP url is dialed by the camera backend dir
 - `WS /ws/controls`: typed configuration and control messages.
 - `POST /offer?src=<stream id>`: WebRTC SDP signaling for a receive-only video peer, for every source kind. `src` selects which configured stream the answer is for; it may be omitted only when exactly one stream is configured.
 - `GET /camera/<stream id>/stream`: the raw bytestream of one direct camera WebSocket source. This is an internal seam between the WebSocket hub and the camera backend, not a renderer endpoint.
+- `GET /storage/targets`: the recording destinations Settings offers — internal storage plus each mounted removable filesystem, with capacity and writability.
 - `GET /health`: readiness probe used by the Docker entrypoint and external health checks.
 
 Configuration message (RTSP credentials may be supplied as URL-encoded userinfo). `camera_streams` is the list of camera sources to keep connected, each with a renderer-assigned `id`:
@@ -68,15 +69,25 @@ default". A relative path is rejected because it would resolve against whatever
 directory the backend happened to be started from. Like the source list, a
 change to it applies to the next session rather than moving a running one.
 
-**The folder must already exist; the backend never creates it.** That is what
-makes an SD card work safely. The launcher passes the host's `/run/media`
-through at the same path, so a card path means the same thing inside the
-container as out, and an absent card is simply a missing directory: recording
-refuses with "recordings folder is not available" and everything else keeps
-running. Creating it instead would invent a directory where the card is not --
-in the container's ephemeral filesystem, or under `/run`, which is tmpfs, where
-recording would fill RAM until the Deck ran out. Pulling the card mid-recording
-stops the session cleanly with `stopped_reason: "folder_lost"`.
+The operator does not type this path. Settings lists the cards found under
+`/run/media` (overridable with `REMOVABLE_MEDIA_ROOT`) and sends the folder for
+the one they pick, so a mount point named after a card's label or UUID never has
+to be read, remembered, or typed.
+
+**A folder is only ever created inside a directory that is genuinely a mount
+point.** A freshly formatted card is empty, so the app makes its own
+`steamdeck-robot-monitor` folder on it — but only once `os.path.ismount` confirms
+the card is really there. Creating the mount point itself is what must never
+happen: with the card absent that would invent a directory in the container's
+ephemeral filesystem, or under `/run`, which is tmpfs, where recording fills RAM
+until the Deck runs out. An absent card is therefore just a missing directory,
+and recording refuses with "recordings folder is not available" while everything
+else keeps running. Pulling the card mid-recording stops the session cleanly with
+`stopped_reason: "folder_lost"`.
+
+A candidate that is not a mount point is never offered: an unmounted card can
+leave its directory behind, and recording into that would quietly fill the
+internal drive under a name claiming otherwise.
 
 Behavior worth knowing:
 
