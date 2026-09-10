@@ -9,6 +9,7 @@ from pathlib import Path
 
 from Recorder import (
     APP_FOLDER_NAME,
+    STALL_TIMEOUT_S,
     MIN_FREE_START_BYTES,
     PR_SET_PDEATHSIG,
     describe_storage_target,
@@ -21,13 +22,12 @@ from Recorder import (
     classify_exit,
     has_free_space,
     is_stalled,
+    last_meaningful_line,
     normalize_record_action,
-    parse_ffmpeg_major,
     recording_path,
     recording_state_payload,
     relay_record_args,
     rtsp_record_args,
-    rtsp_timeout_option,
     safe_component,
     scrub_credentials,
     seconds_remaining,
@@ -35,7 +35,6 @@ from Recorder import (
 )
 
 ROOT = Path("/tmp/recordings")
-TIMEOUT_OPTION = ("-stimeout", "5000000")
 
 
 def input_options(args: tuple[str, ...]) -> tuple[str, ...]:
@@ -101,25 +100,9 @@ class SessionPathTests(unittest.TestCase):
         self.assertTrue(path.resolve().is_relative_to(ROOT.resolve()))
 
 
-class FfmpegVersionTests(unittest.TestCase):
-    def test_reads_the_major_from_a_banner(self) -> None:
-        self.assertEqual(parse_ffmpeg_major("ffmpeg version 5.1.6-0+deb12u1"), 5)
-        self.assertEqual(parse_ffmpeg_major("ffmpeg version 8.0.1-3ubuntu2"), 8)
-        self.assertEqual(parse_ffmpeg_major("ffmpeg version n6.1.1"), 6)
-
-    def test_an_unreadable_banner_falls_back_to_the_older_spelling(self) -> None:
-        self.assertEqual(parse_ffmpeg_major("something else entirely"), 5)
-        self.assertEqual(rtsp_timeout_option(parse_ffmpeg_major("")), ("-stimeout", "5000000"))
-
-    def test_the_timeout_option_was_renamed_in_ffmpeg_6(self) -> None:
-        self.assertEqual(rtsp_timeout_option(5)[0], "-stimeout")
-        self.assertEqual(rtsp_timeout_option(6)[0], "-timeout")
-        self.assertEqual(rtsp_timeout_option(8)[0], "-timeout")
-
-
 class FfmpegArgumentTests(unittest.TestCase):
     def test_rtsp_is_never_reencoded_and_is_always_matroska(self) -> None:
-        args = rtsp_record_args("rtsp://h/s", "/out/cam-0_001.mkv", TIMEOUT_OPTION)
+        args = rtsp_record_args("rtsp://h/s", "/out/cam-0_001.mkv")
         self.assertIn("-c", args)
         self.assertEqual(args[args.index("-c") + 1], "copy")
         self.assertEqual(args[args.index("-f", args.index("-i")) + 1], "matroska")
@@ -128,26 +111,33 @@ class FfmpegArgumentTests(unittest.TestCase):
     def test_rtsp_records_over_tcp(self) -> None:
         # A lost RTP packet is permanent corruption in a stream copy, and
         # recording has no latency requirement, unlike the live path.
-        args = rtsp_record_args("rtsp://h/s", "/out/a.mkv", TIMEOUT_OPTION)
+        args = rtsp_record_args("rtsp://h/s", "/out/a.mkv")
         self.assertIn("-rtsp_transport", input_options(args))
         self.assertEqual(args[args.index("-rtsp_transport") + 1], "tcp")
 
     def test_rtsp_input_options_precede_the_input(self) -> None:
-        args = rtsp_record_args("rtsp://h/s", "/out/a.mkv", TIMEOUT_OPTION)
-        before = input_options(args)
-        self.assertIn("-rtsp_transport", before)
-        self.assertIn(TIMEOUT_OPTION[0], before)
+        args = rtsp_record_args("rtsp://h/s", "/out/a.mkv")
+        self.assertIn("-rtsp_transport", input_options(args))
+
+    def test_rtsp_carries_no_socket_timeout_option(self) -> None:
+        # -stimeout was removed in ffmpeg 6 and renamed to -timeout. Picking
+        # between them from the version banner is guesswork, and guessing wrong
+        # is fatal: an unrecognized option kills the recording at startup. The
+        # stall watchdog covers the same ground.
+        args = rtsp_record_args("rtsp://h/s", "/out/a.mkv")
+        self.assertNotIn("-stimeout", args)
+        self.assertNotIn("-timeout", args)
 
     def test_rtsp_takes_audio_only_when_present_and_drops_data_streams(self) -> None:
         # "-map 0" picks up a Hikvision private data stream and fails the mux.
-        args = rtsp_record_args("rtsp://h/s", "/out/a.mkv", TIMEOUT_OPTION)
+        args = rtsp_record_args("rtsp://h/s", "/out/a.mkv")
         self.assertIn("0:v:0", args)
         self.assertIn("0:a?", args)
         self.assertIn("-dn", args)
         self.assertIn("-sn", args)
 
     def test_rtsp_does_not_override_the_cameras_own_timestamps(self) -> None:
-        args = rtsp_record_args("rtsp://h/s", "/out/a.mkv", TIMEOUT_OPTION)
+        args = rtsp_record_args("rtsp://h/s", "/out/a.mkv")
         self.assertNotIn("-use_wallclock_as_timestamps", args)
 
     def test_relay_names_the_demuxer_before_the_input(self) -> None:
@@ -175,28 +165,34 @@ class FfmpegArgumentTests(unittest.TestCase):
         # An ffmpeg orphaned by a killed backend must not hold the camera and
         # fill the disk forever.
         for args in (
-            rtsp_record_args("rtsp://h/s", "/out/a.mkv", TIMEOUT_OPTION),
+            rtsp_record_args("rtsp://h/s", "/out/a.mkv"),
             relay_record_args("h264", "http://127.0.0.1:8000/x", "/out/a.mkv"),
         ):
             with self.subTest(args=args[0]):
                 self.assertIn("-t", args)
                 self.assertGreater(int(args[args.index("-t") + 1]), 0)
 
-    def test_both_flush_output_so_the_file_size_tracks_reality(self) -> None:
-        # Unflushed, ffmpeg holds output in its AVIO buffer and an on-disk size
-        # of zero is indistinguishable from a wedged recording, so the stall
-        # watchdog would kill healthy low-bitrate sources.
+    def test_both_write_through_so_the_file_size_tracks_reality(self) -> None:
+        # The stall watchdog and the HUD counter read the file's size, so a
+        # recording that buffers looks identical to a wedged one. Flushing
+        # alone is not enough -- the Matroska muxer holds a whole cluster, and
+        # measured against a real RTSP source the file sat unchanged for 6-8
+        # seconds at a time, which a low-bitrate camera would stretch past the
+        # stall timeout and get a healthy recording killed.
         for args in (
-            rtsp_record_args("rtsp://h/s", "/out/a.mkv", TIMEOUT_OPTION),
+            rtsp_record_args("rtsp://h/s", "/out/a.mkv"),
             relay_record_args("h264", "http://127.0.0.1:8000/x", "/out/a.mkv"),
         ):
             with self.subTest(args=args[0]):
                 self.assertIn("-flush_packets", args)
                 self.assertEqual(args[args.index("-flush_packets") + 1], "1")
+                self.assertIn("-cluster_time_limit", args)
+                limit = int(args[args.index("-cluster_time_limit") + 1])
+                self.assertLess(limit / 1000, STALL_TIMEOUT_S)
 
     def test_neither_reads_stdin(self) -> None:
         for args in (
-            rtsp_record_args("rtsp://h/s", "/out/a.mkv", TIMEOUT_OPTION),
+            rtsp_record_args("rtsp://h/s", "/out/a.mkv"),
             relay_record_args("h264", "http://127.0.0.1:8000/x", "/out/a.mkv"),
         ):
             self.assertIn("-nostdin", args)
@@ -227,6 +223,12 @@ class SupervisionTests(unittest.TestCase):
                     classify_exit(1, 0.2, attempt, ever_recorded=True), "retry"
                 )
 
+    def test_an_output_that_never_appears_counts_as_stalled(self) -> None:
+        # A dial that hangs before ffmpeg opens the file is what the watchdog
+        # has to catch now that there is no socket timeout to catch it first.
+        self.assertTrue(is_stalled(0, 0, 20.0))
+        self.assertFalse(is_stalled(0, 0, 2.0))
+
     def test_a_file_that_stopped_growing_is_stalled(self) -> None:
         self.assertTrue(is_stalled(1000, 1000, 20.0))
         self.assertFalse(is_stalled(2000, 1000, 20.0))
@@ -246,6 +248,19 @@ class RedactionTests(unittest.TestCase):
         scrubbed = scrub_credentials("rtsp://a:b@h/1 failed over rtsp://c:d@h/2")
         self.assertNotIn("b@", scrubbed)
         self.assertNotIn("d@", scrubbed)
+
+    def test_the_repeat_notice_is_never_reported_as_the_reason(self) -> None:
+        # ffmpeg collapses repeats into a notice, so the newest line is often
+        # boilerplate standing in for the error the operator needs to see.
+        lines = ["Connection refused", "    Last message repeated 6 times"]
+        self.assertEqual(last_meaningful_line(lines), "Connection refused")
+
+    def test_blank_lines_are_skipped_too(self) -> None:
+        self.assertEqual(last_meaningful_line(["real error", "", "   "]), "real error")
+
+    def test_no_output_at_all_yields_nothing(self) -> None:
+        self.assertIsNone(last_meaningful_line([]))
+        self.assertIsNone(last_meaningful_line(["Last message repeated 2 times"]))
 
     def test_text_without_credentials_is_unchanged(self) -> None:
         for text in ("Connection refused", "rtsp://10.0.0.5/s: timeout"):

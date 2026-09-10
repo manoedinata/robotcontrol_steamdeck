@@ -119,6 +119,9 @@ def die_with_parent() -> None:
 
 
 _USERINFO_RE = re.compile(r"://[^/@\s]*@")
+# ffmpeg collapses repeats into this instead of repeating the message, so the
+# newest stderr line is often boilerplate rather than the actual failure.
+_REPEAT_NOTICE_RE = re.compile(r"^\s*Last message repeated \d+ times?\s*$")
 _UNSAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]")
 
 
@@ -217,29 +220,9 @@ def recording_path(root: Path, session: str, source_id: str, part: int) -> Path:
     return resolved
 
 
-def parse_ffmpeg_major(version_output: str) -> int:
-    """Read the major version out of an ``ffmpeg -version`` banner."""
-    match = re.search(r"ffmpeg version n?(\d+)", version_output)
-    # Assume the oldest supported option spelling when the banner is
-    # unreadable: a wrong guess fails instantly and visibly, and the Docker
-    # image ships the older ffmpeg anyway.
-    return int(match.group(1)) if match else 5
-
-
-def rtsp_timeout_option(ffmpeg_major: int) -> tuple[str, ...]:
-    """The RTSP socket-timeout option, whose name changed in ffmpeg 6.
-
-    Microseconds. The Docker image ships ffmpeg 5.x while a development host
-    may have 6 or newer, so this cannot be hardcoded.
-    """
-    name = "-timeout" if ffmpeg_major >= 6 else "-stimeout"
-    return (name, "5000000")
-
-
 def rtsp_record_args(
     url: str,
     output: str,
-    timeout_option: tuple[str, ...],
     max_seconds: int = MAX_SESSION_S,
 ) -> tuple[str, ...]:
     """ffmpeg arguments for recording one RTSP source.
@@ -250,6 +233,14 @@ def rtsp_record_args(
 
     No wallclock timestamps here -- RTSP carries RTP timing, and overriding it
     would make the recording worse.
+
+    Deliberately no socket-timeout option. It was spelled ``-stimeout`` until
+    ffmpeg 6 removed it in favour of ``-timeout``, and choosing between them
+    from the version banner is guesswork that fails hard when it guesses wrong:
+    an unrecognized option kills every RTSP recording at startup. The stall
+    watchdog covers what the timeout was for, and covers more besides -- it
+    also catches a source that connects and then goes quiet, which no socket
+    timeout notices.
     """
     return (
         "ffmpeg",
@@ -261,7 +252,6 @@ def rtsp_record_args(
         # Input options; meaningless after -i.
         "-rtsp_transport",
         "tcp",
-        *timeout_option,
         "-i",
         url,
         # Take video, and audio only when the camera has it. "-map 0" instead
@@ -275,12 +265,18 @@ def rtsp_record_args(
         "-sn",
         "-c",
         "copy",
-        # Write through instead of sitting in ffmpeg's AVIO buffer. The stall
-        # watchdog and the HUD byte counter both read the file's size, and an
-        # unflushed recording looks identical to a wedged one. It also leaves
-        # less unwritten data to lose when the power goes.
+        # Write through instead of sitting in ffmpeg's AVIO buffer, and cap how
+        # much a Matroska cluster accumulates before it is emitted. Flushing
+        # alone is not enough: the muxer buffers a whole cluster, so the file
+        # can sit unchanged for many seconds while recording perfectly well.
+        # The stall watchdog and the HUD byte counter both read the file's
+        # size, so a healthy low-bitrate source would look wedged and get
+        # killed. Capping the cluster also shrinks the window of unwritten
+        # video lost when the power goes.
         "-flush_packets",
         "1",
+        "-cluster_time_limit",
+        "1000",
         "-t",
         str(max_seconds),
         # Explicit: never infer the container from an operator-influenced path.
@@ -325,12 +321,18 @@ def relay_record_args(
         "-sn",
         "-c",
         "copy",
-        # Write through instead of sitting in ffmpeg's AVIO buffer. The stall
-        # watchdog and the HUD byte counter both read the file's size, and an
-        # unflushed recording looks identical to a wedged one. It also leaves
-        # less unwritten data to lose when the power goes.
+        # Write through instead of sitting in ffmpeg's AVIO buffer, and cap how
+        # much a Matroska cluster accumulates before it is emitted. Flushing
+        # alone is not enough: the muxer buffers a whole cluster, so the file
+        # can sit unchanged for many seconds while recording perfectly well.
+        # The stall watchdog and the HUD byte counter both read the file's
+        # size, so a healthy low-bitrate source would look wedged and get
+        # killed. Capping the cluster also shrinks the window of unwritten
+        # video lost when the power goes.
         "-flush_packets",
         "1",
+        "-cluster_time_limit",
+        "1000",
         "-t",
         str(max_seconds),
         "-f",
@@ -368,6 +370,19 @@ def classify_exit(
     if ran_seconds >= FAST_FAILURE_S:
         return "retry"
     return "give_up" if attempt >= MAX_FAST_FAILURES else "retry"
+
+
+def last_meaningful_line(lines: list[str]) -> str | None:
+    """The newest stderr line that actually says something.
+
+    ffmpeg replaces repeated messages with "Last message repeated N times", so
+    taking the newest line blindly reports that to the operator instead of the
+    error it stands in for.
+    """
+    for line in reversed(lines):
+        if line.strip() and not _REPEAT_NOTICE_RE.match(line):
+            return line
+    return None
 
 
 def scrub_credentials(text: str) -> str:
@@ -469,7 +484,6 @@ class _Writer:
         session_dir: Path,
         root: Path,
         session: str,
-        timeout_option: tuple[str, ...],
         logger: logging.Logger,
         on_change: Callable[[], None],
     ) -> None:
@@ -477,7 +491,6 @@ class _Writer:
         self._session_dir = session_dir
         self._root = root
         self._session = session
-        self._timeout_option = timeout_option
         self._logger = logger
         self._on_change = on_change
         self._process: asyncio.subprocess.Process | None = None
@@ -512,7 +525,7 @@ class _Writer:
                 relay_url(self._state.source_id),
                 output,
             )
-        return rtsp_record_args(self._state.url, output, self._timeout_option)
+        return rtsp_record_args(self._state.url, output)
 
     async def _supervise(self) -> None:
         attempt = 0
@@ -606,8 +619,10 @@ class _Writer:
             await self._process.wait()
         finally:
             reader.cancel()
-            if self._process.returncode not in (0, None) and self._state.stderr_tail:
-                self._state.error = self._state.stderr_tail[-1]
+            if self._process.returncode not in (0, None):
+                reason = last_meaningful_line(list(self._state.stderr_tail))
+                if reason:
+                    self._state.error = reason
 
     async def _read_stderr(self, process: asyncio.subprocess.Process) -> None:
         if process.stderr is None:
@@ -631,7 +646,11 @@ class _Writer:
         try:
             size = self._path.stat().st_size
         except OSError:
-            return False
+            # ffmpeg has not created the output yet. Treated as no growth, not
+            # as "nothing to see": a dial that hangs before opening the file is
+            # precisely the case the watchdog has to catch, now that there is
+            # no socket timeout to catch it first.
+            size = 0
         self._state.bytes_written = size
         if size > self._last_size:
             self._last_size = size
@@ -714,7 +733,6 @@ class Recorder:
         self._started_at: float | None = None
         self._directory: str | None = None
         self._stopped_reason: str | None = None
-        self._timeout_option: tuple[str, ...] | None = None
         self._free_bytes: int | None = None
         self._rate: float | None = None
         self._rate_sample: tuple[float, int] | None = None
@@ -829,24 +847,6 @@ class Recorder:
             return Path(self._root_override)
         return self._default_root()
 
-    async def _ffmpeg_timeout_option(self) -> tuple[str, ...]:
-        if self._timeout_option is not None:
-            return self._timeout_option
-        banner = ""
-        try:
-            process = await asyncio.create_subprocess_exec(
-                "ffmpeg",
-                "-version",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            out, _ = await process.communicate()
-            banner = out.decode("utf-8", "replace")
-        except OSError as error:
-            raise ValueError(f"ffmpeg is not available: {error}") from error
-        self._timeout_option = rtsp_timeout_option(parse_ffmpeg_major(banner))
-        return self._timeout_option
-
     async def start(self) -> dict[str, Any]:
         async with self._lock:
             if self.active:
@@ -885,7 +885,11 @@ class Recorder:
                     f"({usage.free // 1024**2} MiB available)"
                 )
 
-            timeout_option = await self._ffmpeg_timeout_option()
+            # Cheap presence check, so a missing ffmpeg is one clear error
+            # rather than every source failing separately.
+            if shutil.which("ffmpeg") is None:
+                raise ValueError("ffmpeg is not available")
+
             session = session_dir_name(datetime.now())
             session_dir = root / session
             try:
@@ -913,7 +917,6 @@ class Recorder:
                         session_dir,
                         root,
                         session,
-                        timeout_option,
                         self._logger,
                         self._notify,
                     )
