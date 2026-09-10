@@ -539,19 +539,32 @@ class _Writer:
                 break
 
             ran = loop.time() - started
+            returncode = self._process.returncode if self._process else None
+            if returncode not in (0, None):
+                self._logger.warning(
+                    "Recording %s: ffmpeg exited %s after %.1fs: %s",
+                    self._state.source_id,
+                    returncode,
+                    ran,
+                    self._state.error or "no error output",
+                )
             if self._wrote_video():
                 self._ever_recorded = True
             if ran >= HEALTHY_RUNTIME_S:
                 attempt = 0
             attempt += 1
-            returncode = self._process.returncode if self._process else None
             if (
                 classify_exit(returncode, ran, attempt, self._ever_recorded)
                 == "give_up"
             ):
-                self._set_status(
-                    "failed", self._state.error or "recording stopped immediately"
+                reason = self._state.error or "recording stopped immediately"
+                self._logger.error(
+                    "Recording %s gave up after %d attempts: %s",
+                    self._state.source_id,
+                    attempt,
+                    reason,
                 )
+                self._set_status("failed", reason)
                 return
             self._state.restarts += 1
             self._set_status("reconnecting", self._state.error)
@@ -568,6 +581,12 @@ class _Writer:
 
     async def _run_once(self, output: str) -> None:
         args = self._args(output)
+        if self._state.part == 1:
+            self._logger.info(
+                "Recording %s: %s",
+                self._state.source_id,
+                scrub_credentials(" ".join(args)),
+            )
         self._process = await asyncio.create_subprocess_exec(
             *args,
             stdin=asyncio.subprocess.DEVNULL,
@@ -665,6 +684,11 @@ class _Writer:
                 self._path.unlink()
                 self._state.filename = ""
                 self._state.error = self._state.error or "no video was received"
+                self._logger.warning(
+                    "Recording %s wrote no video; removed the empty %s",
+                    self._state.source_id,
+                    self._path.name,
+                )
         except OSError:
             pass
 
@@ -929,11 +953,38 @@ class Recorder:
             self._session = None
             self._started_at = None
             self._stopped_reason = reason
-            self._logger.info("Recording stopped (%s)", reason)
+            self._remove_empty_session()
+            written = sum(writer.state.bytes_written for writer in writers)
+            self._logger.info(
+                "Recording stopped (%s): %s",
+                reason,
+                ", ".join(
+                    f"{writer.state.source_id}="
+                    f"{writer.state.bytes_written}B/{writer.state.part} part(s)"
+                    f"{' [' + writer.state.error + ']' if writer.state.error else ''}"
+                    for writer in writers
+                )
+                or "no sources",
+            )
+            if writers and written == 0:
+                self._logger.error(
+                    "Recording produced no video at all; every source failed"
+                )
 
         state = self.state()
         await self._emit(state)
         return state
+
+    def _remove_empty_session(self) -> None:
+        """Drop a session folder nothing was written into.
+
+        A run where every source failed would otherwise leave an empty dated
+        directory on the card for each attempt.
+        """
+        if self._directory is None:
+            return
+        with suppress(OSError):
+            Path(self._directory).rmdir()
 
     async def poll(self) -> dict[str, Any]:
         """Refresh counters, restart wedged sources, and stop on low disk."""
