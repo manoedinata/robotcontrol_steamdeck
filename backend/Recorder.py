@@ -299,6 +299,15 @@ def rtsp_record_args(
         # counter only has to be roughly right.
         "-flush_packets",
         "1",
+        # Start the file at its first decodable frame. A stream copy cannot
+        # keep the packets before the first keyframe -- nothing can decode them
+        # without their reference frame -- but their timestamps still set where
+        # the timeline begins, so without this the recording opens with several
+        # seconds of dead air before any picture appears. How much depends on
+        # the camera's keyframe interval, which on an IP camera is commonly ten
+        # seconds.
+        "-avoid_negative_ts",
+        "make_zero",
         "-t",
         str(max_seconds),
         # Explicit: never infer the container from an operator-influenced path.
@@ -362,6 +371,15 @@ def relay_record_args(
         # counter only has to be roughly right.
         "-flush_packets",
         "1",
+        # Start the file at its first decodable frame. A stream copy cannot
+        # keep the packets before the first keyframe -- nothing can decode them
+        # without their reference frame -- but their timestamps still set where
+        # the timeline begins, so without this the recording opens with several
+        # seconds of dead air before any picture appears. How much depends on
+        # the camera's keyframe interval, which on an IP camera is commonly ten
+        # seconds.
+        "-avoid_negative_ts",
+        "make_zero",
         "-t",
         str(max_seconds),
         "-f",

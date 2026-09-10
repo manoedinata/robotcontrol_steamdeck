@@ -194,6 +194,19 @@ class FfmpegArgumentTests(unittest.TestCase):
                 self.assertIn("-flush_packets", args)
                 self.assertEqual(args[args.index("-flush_packets") + 1], "1")
 
+    def test_both_start_the_timeline_at_the_first_decodable_frame(self) -> None:
+        # The packets before the first keyframe cannot be kept, but their
+        # timestamps still set where the timeline starts, so the recording
+        # would otherwise open with seconds of dead air. Measured at 4.5s
+        # against a 10s keyframe interval.
+        for args in (
+            rtsp_record_args("rtsp://h/s", "/out/a.mkv"),
+            relay_record_args("h264", "http://127.0.0.1:8000/x", "/out/a.mkv"),
+        ):
+            with self.subTest(args=args[0]):
+                self.assertIn("-avoid_negative_ts", args)
+                self.assertEqual(args[args.index("-avoid_negative_ts") + 1], "make_zero")
+
     def test_neither_caps_the_cluster_alongside_wallclock_timestamps(self) -> None:
         # -cluster_time_limit would make the file grow more evenly, but with
         # epoch-based wallclock timestamps the muxer cannot close a cluster at
