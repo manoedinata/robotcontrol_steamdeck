@@ -7,7 +7,7 @@ This directory is the sole owner of UDP and camera transport, for every source k
 ## Structure
 
 - `server.py`: FastAPI lifecycle, typed controls/telemetry WebSocket, UDP sender/receiver, and WebRTC signaling endpoint.
-- `Recorder.py`: records every configured source at once, one stream-copying ffmpeg each, into Matroska. The source list is frozen at start so config churn cannot split a recording; a source that has written video is retried all session, one that never did gives up. Never log or broadcast a camera URL from here.
+- `Recorder.py`: records every configured source at once, one stream-copying ffmpeg each, into Matroska. WebSocket sources are recorded through the relay with `?preroll=1`, so the file starts at the keyframe the hub still holds rather than at the camera's next one. The source list is frozen at start so config churn cannot split a recording; a source that has written video is retried all session, one that never did gives up. Never log or broadcast a camera URL from here.
 - `WebRTCStream.py`: selectable go2rtc/aiortc RTSP-to-WebRTC backends, multi-stream registration, and lifecycle cleanup.
 - `PTZController.py`: Hikvision ISAPI pan/tilt/zoom/focus continuous-move requests and value normalizers.
 - `settings.py`: mutable runtime destination and camera configuration.
@@ -32,6 +32,7 @@ This directory is the sole owner of UDP and camera transport, for every source k
 - Announce the settable send fields to each UI on WebSocket connect as `{ "type": "schema", "fields": [...] }`, derived from `packet_types.send` with padding roles removed. The renderer must never read `packets-schema.json` itself.
 - Decode exact telemetry datagrams from `packet_types.receive` and broadcast `{ "type": "receive", "packet": { ... } }` to every connected UI.
 - Periodically measure ICMP latency to the configured UDP destination and broadcast `{ "type": "ping", "ping_ms": number | null }` to connected UIs. This is host reachability, not command acknowledgement RTT.
+- `GET /camera/<id>/stream` takes `?preroll=1`, which replays the payloads since the camera's last keyframe before the live ones. Recording needs it: a stream copy cannot start anywhere but a keyframe, so without it the front of every file is missing. Never turn it on for the live path, which would then open on stale video and race to catch up.
 - Camera sources are RTSP URLs; an empty or absent `camera_streams` list keeps playback idle. `POST /offer` takes `?src=<stream id>` to pick a stream (optional only when one stream is configured).
 - FastAPI owns camera transport and keeps every configured RTSP source connected at once so the UI switches without a reconnect. The go2rtc backend manages one localhost-only child process and one named stream per source; the aiortc backend creates one RTSP media player per WebRTC offer. On a config change close only the peers whose stream id or url changed; close everything on backend change and shutdown. Do not silently fall back between selected backends.
 - Run one Uvicorn worker because runtime state is process-local.

@@ -593,7 +593,13 @@ class _Writer:
         if self._state.kind == "websocket":
             return relay_record_args(
                 self._state.input_format or "h264",
-                relay_url(self._state.source_id),
+                # Start at the last keyframe the hub still holds rather than
+                # at the camera's next one, which on an IP camera is commonly
+                # ten seconds away -- seconds that would otherwise be missing
+                # from the front of the file. A part that follows a restart
+                # begins on a keyframe for the same reason, overlapping the
+                # part before it slightly rather than leaving a gap.
+                relay_url(self._state.source_id, preroll=True),
                 output,
             )
         return rtsp_record_args(self._state.url, output)

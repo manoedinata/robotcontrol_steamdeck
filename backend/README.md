@@ -8,7 +8,7 @@ Two source kinds share one path. An RTSP url is dialed by the camera backend dir
 
 - `WS /ws/controls`: typed configuration and control messages.
 - `POST /offer?src=<stream id>`: WebRTC SDP signaling for a receive-only video peer, for every source kind. `src` selects which configured stream the answer is for; it may be omitted only when exactly one stream is configured.
-- `GET /camera/<stream id>/stream`: the raw bytestream of one direct camera WebSocket source. This is an internal seam between the WebSocket hub and the camera backend, not a renderer endpoint.
+- `GET /camera/<stream id>/stream`: the raw bytestream of one direct camera WebSocket source. This is an internal seam between the WebSocket hub and the camera backend, not a renderer endpoint. `?preroll=1` starts the stream at the camera's last keyframe rather than its next one; only recording asks for it, because the live path would open on video that is already seconds old.
 - `GET /storage/targets`: the recording destinations Settings offers — internal storage plus each mounted removable filesystem, with capacity and writability.
 - `GET /health`: readiness probe used by the Docker entrypoint and external health checks.
 
@@ -106,6 +106,15 @@ Behavior worth knowing:
   backend shutdown ends it.
 - It refuses to start below 2 GiB free and stops cleanly below 512 MiB, which
   trailers every file rather than letting several hit `ENOSPC` at once.
+- A stream copy can only begin at a keyframe, and an IP camera commonly sends
+  one every ten seconds. For WebSocket sources the hub keeps the payloads since
+  the last one, and a recording is served them first (`?preroll=1`), so the file
+  begins when the operator pressed record instead of at the camera's next
+  keyframe. The buffered GOP arrives in a burst, so the seconds of video that
+  precede the press sit at the head of the file as a brief blip before playback
+  settles into real time. RTSP sources have no such buffer: they are dialed at
+  the camera when recording starts, so up to one keyframe interval is still
+  missing from the front of those files.
 
 ## PTZ Control
 

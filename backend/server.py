@@ -806,12 +806,17 @@ async def storage_targets() -> JSONResponse:
 
 
 @app.get("/camera/{stream_id}/stream")
-async def camera_relay(stream_id: str) -> StreamingResponse:
+async def camera_relay(stream_id: str, preroll: bool = False) -> StreamingResponse:
     """Re-serve one direct camera WebSocket source as an HTTP byte stream.
 
     This exists because neither go2rtc nor ffmpeg can read a WebSocket. It is
     an internal seam between the hub and the camera backend, not a renderer
     endpoint: the UI still gets every source as WebRTC from ``POST /offer``.
+
+    ``?preroll=1`` starts the stream at the camera's last keyframe instead of
+    at the next one, which is what lets a recording begin when the operator
+    pressed record. Only the recorder asks for it; the live path would open on
+    stale video.
     """
 
     # Checked before the response starts, so an unknown id is a 404 rather than
@@ -822,7 +827,7 @@ async def camera_relay(stream_id: str) -> StreamingResponse:
         )
 
     async def payloads():
-        async with camera_ws_hub.subscribe(stream_id) as stream:
+        async with camera_ws_hub.subscribe(stream_id, preroll=preroll) as stream:
             async for payload in stream:
                 yield payload
 

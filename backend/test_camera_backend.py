@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import unittest
 
 from PTZController import (
@@ -18,6 +20,14 @@ from server import (
     validate_recordings_dir,
 )
 from CameraWebSocketSource import (
+    CameraWebSocketHub,
+    PREROLL_MAX_BYTES,
+    PREROLL_MAX_PAYLOADS,
+    PrerollBuffer,
+    START_CODE,
+    SUBSCRIBER_QUEUE_SIZE,
+    annexb_nal_types,
+    carries_picture,
     detect_payload_format,
     is_websocket_url,
     reconnect_delay,
@@ -343,9 +353,6 @@ class PTZFocusTests(unittest.TestCase):
         self.assertEqual(normalize_focus("  FOCUS-NEAR "), "focus-near")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class CameraIngestTests(unittest.TestCase):
     """How a configured source is turned into something a backend can open."""
@@ -367,6 +374,19 @@ class CameraIngestTests(unittest.TestCase):
     def test_the_relay_url_names_the_stream_it_serves(self) -> None:
         self.assertEqual(
             relay_url("cam-2"), "http://127.0.0.1:8000/camera/cam-2/stream"
+        )
+
+    def test_the_live_path_is_never_prerolled(self) -> None:
+        # go2rtc opens this url for the live view; replaying a buffered GOP
+        # into it would start the view on video that is already seconds old.
+        self.assertNotIn("preroll", relay_url("cam-2"))
+        self.assertNotIn("preroll", ingest_url("cam-1", "ws://192.168.1.123:12351"))
+        self.assertNotIn("preroll", go2rtc_source("cam-1", "ws://h:1/", "h264"))
+
+    def test_a_recording_asks_the_relay_for_the_buffered_keyframe(self) -> None:
+        self.assertEqual(
+            relay_url("cam-2", preroll=True),
+            "http://127.0.0.1:8000/camera/cam-2/stream?preroll=1",
         )
 
     def test_go2rtc_registers_an_rtsp_source_as_a_plain_url(self) -> None:
@@ -455,3 +475,183 @@ class RecordingsDirConfigTests(unittest.TestCase):
         self.assertEqual(config[4], "go2rtc")
         self.assertEqual(config[6], "10.0.0.9")
         self.assertIsInstance(config[7], dict)
+
+
+class AnnexBTests(unittest.TestCase):
+    """Reading an H.264 bytestream well enough to find its keyframes."""
+
+    def test_nal_types_are_listed_in_order(self) -> None:
+        payload = _nal(7) + _nal(8) + _nal(5)
+        self.assertEqual(annexb_nal_types(payload), (7, 8, 5))
+
+    def test_a_four_byte_start_code_is_the_same_code_behind_a_zero(self) -> None:
+        self.assertEqual(annexb_nal_types(b"\x00" + _nal(5)), (5,))
+
+    def test_a_payload_with_no_start_code_has_no_nals(self) -> None:
+        self.assertEqual(annexb_nal_types(b"\xff\xd8\xff\xe0"), ())
+
+    def test_a_truncated_start_code_at_the_end_is_not_a_nal(self) -> None:
+        self.assertEqual(annexb_nal_types(_nal(1) + START_CODE), (1,))
+
+    def test_parameter_sets_and_delimiters_carry_no_picture(self) -> None:
+        for nal_type in (6, 7, 8, 9):
+            with self.subTest(nal_type=nal_type):
+                self.assertFalse(carries_picture(_nal(nal_type)))
+
+    def test_slices_and_whole_jpegs_carry_a_picture(self) -> None:
+        self.assertTrue(carries_picture(_nal(1)))
+        self.assertTrue(carries_picture(_nal(5)))
+        self.assertTrue(carries_picture(b"\xff\xd8\xff\xe0jpeg"))
+
+
+class PrerollBufferTests(unittest.TestCase):
+    """Holding the current GOP so a recording can start on a keyframe.
+
+    Without it a stream copy has to wait for the camera's next keyframe --
+    commonly ten seconds away on an IP camera -- and those seconds are missing
+    from the front of the file.
+    """
+
+    def setUp(self) -> None:
+        self.buffer = PrerollBuffer()
+
+    def test_nothing_is_replayed_before_a_keyframe_arrives(self) -> None:
+        # Joining a camera mid-GOP, there is nothing a decoder could use.
+        self.buffer.add(_nal(1))
+        self.buffer.add(_nal(1))
+        self.assertEqual(self.buffer.snapshot(), ())
+
+    def test_the_buffer_opens_at_a_keyframe_and_keeps_what_follows(self) -> None:
+        keyframe = _nal(7) + _nal(8) + _nal(5)
+        first, second = _nal(1), _nal(1) + _nal(1)
+        for payload in (_nal(1), keyframe, first, second):
+            self.buffer.add(payload)
+        self.assertEqual(self.buffer.snapshot(), (keyframe, first, second))
+
+    def test_parameter_sets_sent_ahead_of_their_keyframe_are_kept(self) -> None:
+        # Some cameras send the SPS, the PPS and the IDR as three messages.
+        # Restarting the buffer on the IDR would drop the parameter sets it
+        # needs, and the recording would open on an undecodable frame.
+        sps, pps, idr = _nal(7), _nal(8), _nal(5)
+        for payload in (sps, pps, idr):
+            self.buffer.add(payload)
+        self.assertEqual(self.buffer.snapshot(), (sps, pps, idr))
+
+    def test_each_new_keyframe_starts_the_buffer_over(self) -> None:
+        older, newer = _nal(7) + _nal(5), _nal(7) + _nal(5)
+        self.buffer.add(older)
+        self.buffer.add(_nal(1))
+        self.buffer.add(newer)
+        self.assertEqual(self.buffer.snapshot(), (newer,))
+
+    def test_a_bare_keyframe_starts_it_over_too(self) -> None:
+        # A camera that sends its parameter sets only once still marks every
+        # GOP with an IDR, and that is a fresh start.
+        self.buffer.add(_nal(7) + _nal(5))
+        self.buffer.add(_nal(1))
+        idr = _nal(5)
+        self.buffer.add(idr)
+        self.assertEqual(self.buffer.snapshot(), (idr,))
+
+    def test_only_the_latest_jpeg_is_held(self) -> None:
+        # Every MJPEG frame stands alone, so the buffer is one frame deep.
+        for index in range(3):
+            self.buffer.add(b"\xff\xd8" + bytes([index]))
+        self.assertEqual(self.buffer.snapshot(), (b"\xff\xd8\x02",))
+
+    def test_a_reconnect_discards_the_buffer(self) -> None:
+        self.buffer.add(_nal(7) + _nal(5))
+        self.buffer.reset()
+        self.assertEqual(self.buffer.snapshot(), ())
+
+    def test_a_gop_that_outgrows_the_payload_cap_is_dropped_whole(self) -> None:
+        # Trimming the front instead would leave a headless GOP, and splicing
+        # a consumer into the middle of one corrupts it to the next keyframe.
+        self.buffer.add(_nal(7) + _nal(5))
+        for _ in range(PREROLL_MAX_PAYLOADS + 1):
+            self.buffer.add(_nal(1))
+        self.assertEqual(self.buffer.snapshot(), ())
+        self.assertTrue(self.buffer.overflowed)
+
+    def test_a_gop_that_outgrows_the_byte_cap_is_dropped_whole(self) -> None:
+        self.buffer.add(_nal(7) + _nal(5))
+        self.buffer.add(_nal(1, b"\x11" * PREROLL_MAX_BYTES))
+        self.assertEqual(self.buffer.snapshot(), ())
+        self.assertTrue(self.buffer.overflowed)
+
+    def test_the_next_keyframe_recovers_from_an_overflow(self) -> None:
+        self.buffer.add(_nal(7) + _nal(5))
+        self.buffer.add(_nal(1, b"\x11" * PREROLL_MAX_BYTES))
+        keyframe = _nal(7) + _nal(5)
+        self.buffer.add(keyframe)
+        self.assertEqual(self.buffer.snapshot(), (keyframe,))
+
+
+class CameraHubPrerollTests(unittest.IsolatedAsyncioTestCase):
+    """What each kind of subscriber is handed when it attaches."""
+
+    async def asyncSetUp(self) -> None:
+        self.hub = CameraWebSocketHub(logging.getLogger("test-camera-hub"))
+        # Never dial the camera: these tests drive the fan-out directly.
+        self.hub._run = lambda source: asyncio.sleep(0)
+        await self.hub.update_streams((("cam", "ws://camera:1/stream"),))
+        self.source = self.hub._sources["cam"]
+
+    async def test_a_recorder_is_handed_the_buffered_gop_before_live_video(
+        self,
+    ) -> None:
+        keyframe, held = _nal(7) + _nal(5), _nal(1)
+        self.hub._publish(self.source, keyframe)
+        self.hub._publish(self.source, held)
+
+        async with self.hub.subscribe("cam", preroll=True) as stream:
+            live = _nal(1) + _nal(1)
+            self.hub._publish(self.source, live)
+            received = [await stream.__anext__() for _ in range(3)]
+
+        self.assertEqual(received, [keyframe, held, live])
+
+    async def test_the_live_path_gets_only_what_arrives_after_it_attaches(
+        self,
+    ) -> None:
+        self.hub._publish(self.source, _nal(7) + _nal(5))
+
+        async with self.hub.subscribe("cam") as stream:
+            live = _nal(1)
+            self.hub._publish(self.source, live)
+            self.assertEqual(await stream.__anext__(), live)
+
+    async def test_a_prerolled_subscriber_keeps_its_whole_live_backlog(self) -> None:
+        # The replay must not eat into the room a subscriber has to fall
+        # behind in, or priming one would be enough to make it look slow.
+        self.hub._publish(self.source, _nal(7) + _nal(5))
+        for _ in range(20):
+            self.hub._publish(self.source, _nal(1))
+
+        async with self.hub.subscribe("cam", preroll=True) as stream:
+            for _ in range(SUBSCRIBER_QUEUE_SIZE):
+                self.hub._publish(self.source, _nal(1))
+            subscriber = next(iter(self.source.subscribers))
+            self.assertFalse(subscriber.overrun)
+            self.assertEqual(await stream.__anext__(), _nal(7) + _nal(5))
+
+    async def test_a_subscriber_that_attaches_mid_gop_waits_for_a_keyframe(
+        self,
+    ) -> None:
+        # Nothing is buffered yet, so preroll can only be a no-op; the point
+        # is that it never replays undecodable video.
+        self.hub._publish(self.source, _nal(1))
+
+        async with self.hub.subscribe("cam", preroll=True) as stream:
+            live = _nal(7) + _nal(5)
+            self.hub._publish(self.source, live)
+            self.assertEqual(await stream.__anext__(), live)
+
+
+def _nal(nal_type: int, body: bytes = b"\x0a" * 8) -> bytes:
+    """One Annex-B NAL unit of the given type."""
+    return START_CODE + bytes([nal_type]) + body
+
+
+if __name__ == "__main__":
+    unittest.main()
