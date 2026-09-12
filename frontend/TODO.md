@@ -12,6 +12,7 @@
 
 - [x] Username & password support for RTSP connection
 - [x] Document how to update UDP packets easily from JSON schema
+- [x] Browse, play, and delete past recordings from the UI.
 - [ ] Improve responsive behavior and gamepad navigation after target-device validation.
 - [x] Add backend service installation/startup for Steam Gaming Mode deployment.
 - [ ] Add end-to-end transport tests with a simulated WebSocket client and UDP receiver.

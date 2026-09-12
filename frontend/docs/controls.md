@@ -4,16 +4,18 @@
 
 | Input      | Action                                                                                                                     |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
-| D-pad      | On Home: pan/tilt the PTZ camera only (see Camera Controls); it moves no focus there. Within Settings: move focus, and move within the built-in keyboard |
-| A          | Activate the focused control (on Home only the Settings/Exit button that already has focus) or press a keyboard key         |
-| B          | Switch to the next camera source on Home; close Settings or cancel the built-in keyboard                                   |
+| D-pad      | On Home: pan/tilt the PTZ camera only (see Camera Controls); it moves no focus there. Within Settings or Recordings: move focus, and move within the built-in keyboard. On a slider, left/right set it instead of moving focus |
+| A          | Activate the focused control (on Home only the Settings/Exit/Recordings button that already has focus) or press a keyboard key |
+| B          | Switch to the next camera source on Home; close Settings, Recordings, or the recording player; cancel the built-in keyboard |
 | Left stick | Navigate the built-in keyboard only                                                                                        |
 
 B only switches cameras when more than one source is configured and no modal dialog is open, so Settings and the built-in keyboard keep their cancel behavior.
 
 The camera and robot controller remain mounted while Settings is open. Focus moves spatially, remains visible while the drawer scrolls, and returns to the originating control when the keyboard closes. Saving restores focus to the Save button. Held directional input repeats after an initial delay.
 
-On the Home view, both sticks retain robot-control behavior and the D-pad stays with the camera; interface navigation consumes neither. The Settings and Exit buttons are tapped on the touchscreen, and focus returns to Settings when the drawer closes so A reopens it.
+On the Home view, both sticks retain robot-control behavior and the D-pad stays with the camera; interface navigation consumes neither. The Settings, Recordings, and Exit buttons are tapped on the touchscreen, and focus returns to the button that opened a page when it closes, so A reopens it.
+
+The recordings page navigates the same way Settings does, at a higher handler priority; the two are never open at once. A on a session expands it, and A on a file plays it. While the player is up it takes the D-pad entirely -- focus cannot walk back onto the list behind it -- and B closes the player before it closes the page. The player's start-from slider is the one control where left/right set a value rather than moving focus, in twentieths of the clip.
 
 ## Robot Controls
 

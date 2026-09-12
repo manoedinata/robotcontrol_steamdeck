@@ -1,0 +1,517 @@
+/* Recordings library: a full-view list of what the record button produced. */
+.recordings-shell-backdrop {
+    position: fixed;
+    z-index: 60;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    background: rgb(0 0 0 / 52%);
+    animation: backdrop-in 180ms ease-out;
+}
+
+.recordings-shell {
+    // Full bleed: this is a page, not a drawer. The backdrop stays only so the
+    // shell has something to sit on while it animates in.
+    width: 100%;
+    max-width: 1400px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    color: #20252b;
+    background: #f7f8f9;
+    box-shadow: 0 0 60px rgb(0 0 0 / 34%);
+    animation: recordings-in 200ms ease-out;
+}
+
+@keyframes recordings-in {
+    from {
+        transform: translateY(18px);
+        opacity: 0;
+    }
+}
+
+.recordings-shell-header {
+    min-height: 76px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px 14px 22px;
+    color: #f4f7f8;
+    border-bottom: 1px solid rgb(255 255 255 / 10%);
+    background: #12191c;
+}
+
+.recordings-shell-header h1 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+
+.recordings-shell-header svg {
+    color: var(--hud-accent);
+}
+
+#recordings-page {
+    flex: 1 1 auto;
+    padding: 0 22px 28px;
+    overflow-y: auto;
+    scroll-padding: 24px 0;
+    scrollbar-gutter: stable;
+}
+
+.recordings-toolbar {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 0 12px;
+    background: linear-gradient(#f7f8f9 78%, rgb(247 248 249 / 0%));
+}
+
+.recordings-storage {
+    margin: 0;
+    color: #687078;
+    font-size: 0.82rem;
+}
+
+.recordings-storage-missing {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #a5501a;
+    font-weight: 600;
+}
+
+.recordings-empty {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 32px 0;
+    color: #687078;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.recordings-empty-detail {
+    color: #98a0a6;
+    font-size: 0.78rem;
+}
+
+.recordings-error {
+    margin: 0 0 12px;
+    padding: 9px 12px;
+    color: #8a1f1f;
+    font-size: 0.83rem;
+    border: 1px solid #f0c2c2;
+    border-radius: 6px;
+    background: #fdf0f0;
+}
+
+/* --- The list --- */
+.recording-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.recording-card {
+    overflow: hidden;
+    border: 1px solid #dfe3e5;
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.recording-card.open {
+    border-color: #c4cace;
+    box-shadow: 0 6px 18px rgb(18 25 28 / 8%);
+}
+
+// The session still being written gets the same red the HUD uses, so the one
+// row that must not be deleted reads as live at a glance.
+.recording-card.live {
+    border-color: rgb(255 92 92 / 58%);
+    box-shadow: inset 3px 0 0 var(--hud-red);
+}
+
+.recording-summary {
+    width: 100%;
+    display: grid;
+    // The title takes the slack so the metrics and the source chips sit
+    // together on the right, where the eye scans down a column of them.
+    grid-template-columns: 22px minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    color: inherit;
+    text-align: left;
+    border: 0;
+    background: transparent;
+}
+
+.recording-summary:hover {
+    background: #f4f6f8;
+}
+
+.recording-summary:focus-visible {
+    outline: 3px solid rgb(245 185 66 / 42%);
+    outline-offset: -3px;
+}
+
+.recording-chevron {
+    display: grid;
+    place-items: center;
+    color: #98a0a6;
+}
+
+.recording-headline {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.recording-title {
+    overflow: hidden;
+    font-size: 0.95rem;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+// Named -state, not -status: .recording-status is the HUD's live REC badge,
+// which is absolutely positioned, and reusing it here pulled these pills out
+// of their cards and onto the camera view.
+.recording-state {
+    align-self: flex-start;
+    padding: 1px 7px;
+    color: #5c646a;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    border-radius: 999px;
+    background: #eceff1;
+}
+
+.recording-state.is-recording {
+    color: #ffffff;
+    background: var(--hud-red);
+}
+
+.recording-state.is-complete {
+    color: #146c43;
+    background: #d6f2e2;
+}
+
+.recording-state.is-interrupted {
+    color: #8a5a06;
+    background: #fdeece;
+}
+
+.recording-meta {
+    display: flex;
+    gap: 18px;
+    margin-right: 10px;
+}
+
+.recording-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.recording-metric-label {
+    color: #98a0a6;
+    font-size: 0.62rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.recording-metric-value {
+    font-size: 0.86rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.recording-sources {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    justify-content: flex-end;
+    // Wide enough that a two-camera row and a four-camera row still line their
+    // metrics up with each other down the list.
+    min-width: 150px;
+}
+
+.recording-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    color: #2f6f4c;
+    font-size: 0.73rem;
+    font-weight: 600;
+    border: 1px solid #bfe3cf;
+    border-radius: 999px;
+    background: #eaf7f0;
+}
+
+// A source that was recording and produced nothing is the case this page
+// exists to show, so it is never silently absent from the row.
+.recording-chip.missing {
+    color: #8a4b14;
+    border-color: #f0d3ac;
+    background: #fdf2e3;
+}
+
+/* --- One opened session --- */
+.recording-detail {
+    padding: 4px 16px 16px;
+    border-top: 1px solid #e9ecee;
+    background: #fbfcfc;
+}
+
+.recording-note {
+    margin: 10px 0 0;
+    color: #687078;
+    font-size: 0.8rem;
+}
+
+.recording-note-quiet {
+    color: #98a0a6;
+    font-size: 0.74rem;
+}
+
+.recording-source {
+    margin-top: 14px;
+}
+
+.recording-source-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 8px;
+    font-size: 0.85rem;
+    font-weight: 650;
+}
+
+.recording-source-kind {
+    padding: 1px 6px;
+    color: #687078;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    border-radius: 4px;
+    background: #eceff1;
+}
+
+.recording-source-empty {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
+    padding: 9px 12px;
+    color: #8a4b14;
+    font-size: 0.82rem;
+    border: 1px solid #f0d3ac;
+    border-radius: 6px;
+    background: #fdf2e3;
+}
+
+.recording-parts {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.recording-part {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px;
+    border: 1px solid #e4e8ea;
+    border-radius: 6px;
+    background: #ffffff;
+}
+
+.recording-thumb {
+    width: 96px;
+    height: 54px;
+    flex: none;
+    object-fit: cover;
+    border-radius: 4px;
+    background: #dfe3e5;
+}
+
+.recording-part-text {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.recording-part-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.recording-part-meta {
+    color: #687078;
+    font-size: 0.76rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.recording-part-actions {
+    display: flex;
+    flex: none;
+    gap: 6px;
+}
+
+.recording-part-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none;
+}
+
+.recording-detail-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #e9ecee;
+}
+
+.recording-detail-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.recording-detail-actions .recording-note {
+    margin: 0;
+}
+
+/* --- The player --- */
+.recording-player-backdrop {
+    position: fixed;
+    z-index: 70;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: rgb(0 0 0 / 68%);
+    animation: backdrop-in 160ms ease-out;
+}
+
+.recording-player {
+    width: min(920px, 100%);
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    color: #f4f7f8;
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 10px;
+    background: #12191c;
+    box-shadow: 0 24px 70px rgb(0 0 0 / 52%);
+}
+
+.recording-player-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 10px 10px 16px;
+    border-bottom: 1px solid rgb(255 255 255 / 10%);
+}
+
+.recording-player-header h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 650;
+}
+
+.recording-player-file {
+    overflow: hidden;
+    color: var(--hud-muted);
+    font-size: 0.78rem;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.recording-video {
+    width: 100%;
+    max-height: 60vh;
+    background: #000000;
+}
+
+.recording-player-footer {
+    padding: 10px 16px 14px;
+    border-top: 1px solid rgb(255 255 255 / 10%);
+}
+
+.recording-player-footer .recording-note {
+    color: var(--hud-muted);
+}
+
+.recording-seek {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.recording-seek span {
+    flex: none;
+    color: var(--hud-muted);
+}
+
+.recording-seek input {
+    flex: 1 1 auto;
+    accent-color: var(--hud-accent);
+}
+
+/* The Deck in one hand, or a narrow window: the row becomes two lines. */
+@media (max-width: 820px) {
+    .recording-summary {
+        grid-template-columns: 22px minmax(0, 1fr);
+        row-gap: 8px;
+    }
+
+    .recording-meta,
+    .recording-sources {
+        grid-column: 2;
+        justify-content: flex-start;
+    }
+
+    .recording-part {
+        flex-wrap: wrap;
+    }
+
+    .recording-part-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}

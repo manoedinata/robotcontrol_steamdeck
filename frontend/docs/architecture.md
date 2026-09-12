@@ -51,8 +51,9 @@ frontend/
     useBackendConnection.js       WebSocket, telemetry state, WebRTC signaling
     useControlState.js            Generic packet state
     useSettings.js                Persisted settings/config sync
-  src/components/                 Camera, controls, Settings shell, keyboard
-  src/views/                      Home and Settings content
+    useRecordings.js              Recordings library state and delete
+  src/components/                 Camera, controls, Settings and Recordings shells, keyboard
+  src/views/                      Home, Settings, and Recordings content
 backend/
   server.py                       WebSocket, UDP send/receive, WebRTC signaling
   WebRTCStream.py                 Camera backend selection and SDP
@@ -66,20 +67,28 @@ scripts/
 packets-schema.json               Ordered command and telemetry layouts
 ```
 
-The backend also serves the recordings library. `GET /recordings` lists past
-sessions in the folder the record button writes to, and `GET /recordings/<session>`
-adds the per-file detail a player needs. The renderer never reads a recording off
-disk: it plays one from the backend origin at
-`GET /recordings/<session>/<file>/play`, which remuxes the Matroska into
-fragmented MP4 on the fly because Chromium cannot play Matroska. That response
-honours no Range, so a `<video>` cannot seek in it -- re-request with
-`?t=<seconds>` instead, using the duration from the detail endpoint, and add the
-offset back yourself. A part whose `playable` is `false` must not be mounted in a
-`<video>` at all; offer the download, or `?transcode=1` as a deliberate choice.
+The backend also serves the recordings library, which `RecordingsView.vue`
+renders as a full-bleed page over the camera. `GET /recordings` fills the list;
+expanding one session reads `GET /recordings/<session>` for the per-file detail
+the list deliberately leaves out, because the backend does not probe files it was
+only asked to enumerate.
 
-Playing and showing posters from the backend origin needs the CSP in
-`frontend/index.html` widened: `media-src` for `<video>` and `img-src` for
-`<img>` thumbnails. `connect-src` already allows the backend, so listing and
-deleting work today.
+The renderer never reads a recording off disk and never assembles a path: every
+URL comes from `recordingFileUrl()` in `useBackendConnection.js`, so the backend
+origin is defined once. Playback is `GET /recordings/<session>/<file>/play`,
+which remuxes Matroska into fragmented MP4 on the fly, Chromium being unable to
+play Matroska. That response carries no index and honours no Range, so a
+`<video>` cannot seek in it; the player shows a start-from slider that re-opens
+the clip with `?t=<seconds>`. The backend re-bases the stream to zero, so the
+elapsed time the native controls show is relative to that jump and the offset is
+displayed separately. A part reported as `playable: false` -- an MJPEG camera --
+is never mounted in a plain `<video>`: its button asks for `?transcode=1`
+outright, because the backend answers 415 otherwise and this device does not pay
+for an encode unless the operator asks for one.
+
+Playing and showing poster frames from the backend origin is why the CSP in
+`frontend/index.html` lists it under `media-src` and `img-src` as well as
+`connect-src`: the packaged app loads over `file://`, where `'self'` is not the
+backend.
 
 The backend is a separately launched local service. Electron does not spawn, restart, or terminate it.

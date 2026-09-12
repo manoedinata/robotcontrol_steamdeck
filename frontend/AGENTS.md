@@ -8,10 +8,15 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 
 - `main.js`: BrowserWindow, application lifecycle, settings load/save IPC, and Exit IPC.
 - `electron-components/preload.js`: narrow `quitApp`, `loadSettings`, and `saveSettings` bridge.
-- `src/App.vue`: persistent command shell (Settings/Exit stack on the right, PTZ focus near/far buttons on the left), backend connection lifecycle, and Settings drawer state.
+- `src/App.vue`: persistent command shell (Record/Recordings/Exit/Settings stack on the right, PTZ focus near/far buttons on the left), backend connection lifecycle, and Settings/Recordings page state.
 - `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition.
 - `src/views/SettingsView.vue`: camera sources, UDP destination, velocity limits, and keyboard settings.
 - `src/views/SettingsView.vue` reads `GET /storage/targets` for the recording destination picker. The operator selects a card, never a path; the stored value is the folder the backend reported for it.
+- `src/views/RecordingsView.vue`: the recordings library -- a scrollable list of past sessions, each expandable into its files, with playback, save, and delete. Reads `GET /recordings`; opening one session reads `GET /recordings/<session>`.
+- `src/components/RecordingsShell.vue`: the full-bleed page the library is shown in, mirroring `SettingsShell.vue`.
+- `src/composables/useRecordings.js`: module-scoped library state, the open session, and the delete call.
+- `src/composables/useRecordingsGamepadNavigation.js`: D-pad/A/B for that page, scoped to the player while it is open.
+- `src/utils/formatRecording.js`: sizes, durations, session times, and the wording for a source that recorded nothing.
 - `src/components/CameraFeed.vue`: one always-connected camera source, negotiated as backend WebRTC via `/offer?src=<id>`, with its own reconnect state. Every source kind arrives this way. `HomeView.vue` mounts one per source and shows only the active one.
 - `src/components/ControllerPanel.vue`: Y/theta input mapping and generic packet updates.
 - `src/composables/useBackendConnection.js`: singleton typed WebSocket transport, telemetry freshness, reconnect, replay, and backend WebRTC signaling URL.
@@ -31,7 +36,7 @@ Settings directory is configurable through `APP_SETTINGS_DIR` at runtime. Defaul
 
 ### Backend Connection
 
-The default backend base URL is `http://127.0.0.1:8000`; `VITE_BACKEND_URL` may replace it at build/dev time. Keep `index.html` CSP aligned with allowed local WebSocket and stream endpoints.
+The default backend base URL is `http://127.0.0.1:8000`; `VITE_BACKEND_URL` may replace it at build/dev time. Keep `index.html` CSP aligned with allowed local WebSocket and stream endpoints. The recordings page plays video and shows poster frames from the backend origin, so `media-src` and `img-src` list it too -- the packaged app loads over `file://`, where `'self'` is not the backend.
 
 WebSocket messages are separated by `type`:
 
@@ -89,13 +94,23 @@ Legacy top-level `cameraType`/`cameraUrl`/`cameraUsername`/`cameraPassword` file
 
 Empty UDP host and port `0` disable transmission. The camera form supports RTSP and direct camera WebSocket mode, one row per source, with at least one row always present. RTSP preserves credentials in separate persisted fields and sends them only as URL-encoded userinfo inside that source's `camera_streams[].url`. Every source is synced to the backend and stays connected at once; `activeCameraIndex` only selects which warm feed the Home view shows, and B (Circle) cycles it with no reconnect. Stream ids are `cam-<sourceIndex>`. Keep `useSettings.js` as the renderer source of truth.
 
+### Recordings
+
+The library is read-only apart from delete. The renderer never reads a recording off disk and never builds a path: every URL comes from `recordingFileUrl()` in `useBackendConnection.js`, so the backend origin is defined in one place.
+
+Playback is `GET .../play`, which remuxes Matroska to fragmented MP4 because Chromium cannot play Matroska. That response carries no index and honours no Range, so a `<video>` cannot seek in it: the page shows a start-from slider that re-opens the clip with `?t=<seconds>`, and the backend re-bases the stream to zero, so the elapsed time the player shows is relative to that jump. A part the backend reports as `playable: false` -- an MJPEG camera -- must never be mounted in a plain `<video>`; its button asks for `?transcode=1` outright, since the backend answers 415 otherwise. This device does not pay for an encode unless the operator asks.
+
+An unavailable root is a `200` with `available: false`, not an error: render the "insert the card" empty state, never a failure. A session with `active: true` is still being written and must not offer Delete.
+
+A source listed with `recorded: false` is the reason the page exists: it was configured, it was recording, and it produced no file. It is always shown, never filtered out.
+
 ### Camera
 
 `HomeView.vue` renders one `CameraFeed.vue` per source from `useSettings().cameraFeeds`, keyed so an edited source remounts while a plain switch does not, and `v-show`s only the active one. Each `CameraFeed` holds its connection for its whole lifetime regardless of visibility, so switching never reconnects. It negotiates backend `/offer?src=<streamId>` for every source kind, whatever transport the backend uses upstream. An empty stream id shows idle. Errors retry every two seconds; transports close on prop change and unmount. The selectable `cameraBackend` setting applies to every source (`go2rtc` default, or `aiortc`). Do not silently fall back between backends, add Electron camera relays, or give the renderer a direct camera connection. Keeping every source warm scales CPU/GPU/bandwidth with the source count — a deliberate trade for instant switching.
 
 ### UI and Navigation
 
-Keep the camera-first operational surface mounted while Settings opens as a drawer. Preserve the 1280x800 target, 960x640 minimum, existing Bootstrap/Lucide/local Sass design, joystick dimensions, shell action focus, on-screen keyboard behavior, and Gamepad API ownership in `useGamepad.js`.
+Keep the camera-first operational surface mounted while Settings opens as a drawer and Recordings opens as a full-bleed page over it. Preserve the 1280x800 target, 960x640 minimum, existing Bootstrap/Lucide/local Sass design, joystick dimensions, shell action focus, on-screen keyboard behavior, and Gamepad API ownership in `useGamepad.js`.
 
 ## Commands
 

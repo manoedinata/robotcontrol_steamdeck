@@ -1,11 +1,12 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Crosshair, Disc, Focus, LogOut, Settings } from '@lucide/vue'
+import { Clapperboard, Crosshair, Disc, Focus, LogOut, Settings } from '@lucide/vue'
 import { useGamepad } from './composables/useGamepad'
 import { useBackendConnection } from './composables/useBackendConnection'
 import { usePTZState } from './composables/usePTZState'
 import HomeView from './views/HomeView.vue'
 import SettingsShell from './components/SettingsShell.vue'
+import RecordingsShell from './components/RecordingsShell.vue'
 
 const { registerHandler } = useGamepad()
 const {
@@ -39,6 +40,8 @@ function toggleRecording() {
 const actionBar = ref(null)
 const settingsOpen = ref(false)
 const settingsButton = ref(null)
+const recordingsOpen = ref(false)
+const recordingsButton = ref(null)
 let unregisterGamepadHandler
 
 function quitApp() {
@@ -57,16 +60,30 @@ async function closeSettings() {
   settingsButton.value?.focus({ preventScroll: true })
 }
 
-// Settings navigates with the same D-Pad the camera uses, so hand the gamepad
-// over to the drawer while it is open and stop the camera.
-watch(settingsOpen, (open) => setUiOwnsGamepad(open), { immediate: true })
+async function openRecordings() {
+  recordingsOpen.value = true
+  await nextTick()
+  document.querySelector('#recordings-page [data-gamepad-control]')?.focus()
+}
+
+async function closeRecordings() {
+  recordingsOpen.value = false
+  await nextTick()
+  recordingsButton.value?.focus({ preventScroll: true })
+}
+
+// Settings and the recordings page both navigate with the same D-Pad the
+// camera uses, so hand the gamepad over while either is open and stop the
+// camera.
+const uiOwnsGamepad = computed(() => settingsOpen.value || recordingsOpen.value)
+watch(uiOwnsGamepad, (owns) => setUiOwnsGamepad(owns), { immediate: true })
 
 // On Home the D-Pad belongs to the camera alone, so directions are never
 // consumed here: the Settings/Exit stack is reached by touch and A only fires
 // the shell button that already holds focus.
 function handleGamepadNavigation(action) {
   if (action !== 'activate') return false
-  if (settingsOpen.value || document.querySelector('[role="dialog"][aria-modal="true"]')) return false
+  if (uiOwnsGamepad.value || document.querySelector('[role="dialog"][aria-modal="true"]')) return false
 
   const items = [...(actionBar.value?.querySelectorAll('[data-shell-action]') ?? [])]
   if (!items.includes(document.activeElement)) return false
@@ -111,6 +128,10 @@ onBeforeUnmount(() => {
         data-shell-action @click="toggleRecording">
         <Disc :size="21" aria-hidden="true" />
       </button>
+      <button ref="recordingsButton" class="floating-icon-button recordings-trigger" type="button"
+        title="Recordings" aria-label="Open recordings" data-shell-action @click="openRecordings">
+        <Clapperboard :size="21" aria-hidden="true" />
+      </button>
       <button class="floating-icon-button exit-trigger" type="button" title="Exit application"
         aria-label="Exit application" data-shell-action @click="quitApp">
         <LogOut :size="21" aria-hidden="true" />
@@ -122,5 +143,6 @@ onBeforeUnmount(() => {
     </nav>
 
     <SettingsShell v-if="settingsOpen" @close="closeSettings" />
+    <RecordingsShell v-if="recordingsOpen" @close="closeRecordings" />
   </div>
 </template>

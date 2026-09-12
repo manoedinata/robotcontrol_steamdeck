@@ -10,6 +10,7 @@ A Steam Deck-oriented Electron and Vue UI for viewing a camera stream and contro
 - Pointer, touch, Steam Deck, and compatible gamepad controls
 - Configurable linear Y and angular theta limits
 - PTZ camera control (pan/tilt via D-pad, zoom via shoulder buttons, focus via on-screen buttons on the left edge) using an optional ISAPI camera address; the camera credentials are hardcoded in the backend
+- Recordings library: a scrollable list of past sessions with time, length, size, and which cameras actually produced video, expandable into per-file playback, save, and delete
 - Settings drawer and built-in gamepad-navigable keyboard
 - Automatic backend WebSocket reconnect and current-state replay
 - Host ping latency to the configured UDP destination in the Home HUD

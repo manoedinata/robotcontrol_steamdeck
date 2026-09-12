@@ -29,6 +29,28 @@ const signalingUrl = new URL('/offer', backendUrl).toString()
 // Recording destinations the operator can pick between, read on demand by
 // Settings rather than pushed, since it only changes when media is inserted.
 const storageTargetsUrl = new URL('/storage/targets', backendUrl).toString()
+// The recordings library. Read on demand by the recordings page: it describes
+// files at rest, so pushing it would be traffic for something that only changes
+// when a recording stops or the operator deletes one.
+const recordingsUrl = new URL('/recordings', backendUrl).toString()
+
+// One session, with the per-file detail the list deliberately leaves out.
+function recordingSessionUrl(sessionId) {
+    return new URL(`/recordings/${encodeURIComponent(sessionId)}`, backendUrl).toString()
+}
+
+// A URL for one recorded file. `kind` is the backend's verb: `play` remuxes to
+// MP4 on the fly, `download` is the Matroska itself, `thumbnail` is a poster.
+function recordingFileUrl(sessionId, filename, kind, params = {}) {
+    const path = `/recordings/${encodeURIComponent(sessionId)}/${encodeURIComponent(filename)}/${kind}`
+    const url = new URL(path, backendUrl)
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== null && value !== undefined && value !== false) {
+            url.searchParams.set(key, String(value))
+        }
+    }
+    return url.toString()
+}
 
 // Receive-only WebRTC signaling for one backend-dialed RTSP stream. The
 // stream id selects which warm source the answer is for.
@@ -242,6 +264,9 @@ export function useBackendConnection() {
         signalingUrl,
         cameraSignalingUrl,
         storageTargetsUrl,
+        recordingsUrl,
+        recordingSessionUrl,
+        recordingFileUrl,
         connect,
         disconnect,
         updateConfig,
