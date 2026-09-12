@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from aiortc import RTCSessionDescription
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 import settings as settings_module
 from PTZController import (
@@ -26,6 +26,7 @@ from PTZController import (
 )
 from CameraWebSocketSource import CameraWebSocketHub
 from Recorder import Recorder, normalize_record_action
+import RecordingLibrary
 from WebRTCStream import WebRTCStream
 import utils
 
@@ -788,7 +789,7 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:5173",
     ],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type"],
 )
 
@@ -807,6 +808,191 @@ async def storage_targets() -> JSONResponse:
     card's label or its UUID, so a path is neither guessable nor worth showing.
     """
     return JSONResponse(recorder.storage_targets())
+
+
+@app.get("/recordings")
+async def list_recordings() -> JSONResponse:
+    """Every session in the folder the record button writes to.
+
+    Deliberately that one folder and no other: ``GET /storage/targets`` already
+    exists for choosing between cards. An absent card is reported as
+    ``available: false`` with an empty list rather than as an error -- "that
+    card is out" is an answer the page can render.
+
+    Nothing is probed here. A card can hold hundreds of sessions, and one
+    ffprobe per file to fill in the durations a manifest already carries would
+    fork hundreds of processes on a page load. The detail endpoint probes the
+    one session the operator opens.
+    """
+    library = await asyncio.to_thread(
+        RecordingLibrary.scan_library,
+        recorder.recordings_root(),
+        recorder.active_session_id(),
+    )
+    return JSONResponse(library)
+
+
+@app.get("/recordings/{session}")
+async def read_recording(session: str) -> JSONResponse:
+    """One session, with its files, their codecs, and their durations."""
+    try:
+        directory = RecordingLibrary.session_path(recorder.recordings_root(), session)
+    except ValueError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    if not await asyncio.to_thread(directory.is_dir):
+        return JSONResponse(
+            {"error": f"unknown recording session: {session!r}"}, status_code=404
+        )
+
+    payload = await asyncio.to_thread(
+        RecordingLibrary.load_session,
+        directory,
+        directory.name,
+        directory.name == recorder.active_session_id(),
+    )
+    # Fills the durations a manifest-less folder cannot carry, and the codec
+    # that decides whether the UI may mount a <video> at all.
+    await RecordingLibrary.fill_part_details(payload, directory, LOGGER)
+    return JSONResponse({"session": payload})
+
+
+@app.get("/recordings/{session}/{file}/download")
+async def download_recording(session: str, file: str) -> Response:
+    """The Matroska file itself, Range and all, for copying off the Deck."""
+    try:
+        path = RecordingLibrary.part_path(recorder.recordings_root(), session, file)
+    except ValueError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    if not await asyncio.to_thread(path.is_file):
+        return JSONResponse({"error": "unknown recording"}, status_code=404)
+    return FileResponse(
+        path,
+        media_type="video/x-matroska",
+        filename=f"{path.parent.name}_{path.name}",
+    )
+
+
+@app.get("/recordings/{session}/{file}/play")
+async def play_recording(
+    session: str, file: str, t: str | None = None, transcode: bool = False
+) -> Response:
+    """One part remuxed to fragmented MP4, which Chromium can play.
+
+    Matroska cannot be played in the renderer at all, and a fragmented MP4 is
+    the only shape that can be produced on a pipe. It carries no index, so the
+    response honours no Range and cannot be seeked: ``?t=<seconds>`` re-opens
+    the stream at an offset instead, which the UI drives from the duration the
+    detail endpoint gave it.
+    """
+    try:
+        start = RecordingLibrary.normalize_seek(t) if t is not None else 0.0
+        path = RecordingLibrary.part_path(recorder.recordings_root(), session, file)
+    except ValueError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    if not await asyncio.to_thread(path.is_file):
+        return JSONResponse({"error": "unknown recording"}, status_code=404)
+
+    measured = await RecordingLibrary.probe_part(path, LOGGER)
+    codec = measured["codec"]
+    playable = RecordingLibrary.is_browser_playable(codec)
+    # An MJPEG recording muxes into MP4 happily and then renders as nothing at
+    # all, which is the worst way to fail. Say so instead, and let the operator
+    # ask for the encode explicitly -- this device never pays for one by
+    # default. An unreadable codec is given the benefit of the doubt.
+    if codec is not None and not playable and not transcode:
+        return JSONResponse(
+            {
+                "error": f"{codec} recordings cannot be played in the browser",
+                "codec": codec,
+                "transcodable": True,
+            },
+            status_code=415,
+        )
+    if not RecordingLibrary.acquire_remux_slot():
+        return JSONResponse(
+            {"error": "too many recordings are already playing"},
+            status_code=503,
+            headers={"Retry-After": "1"},
+        )
+
+    async def body():
+        try:
+            async for chunk in RecordingLibrary.stream_remux(
+                path,
+                LOGGER,
+                start,
+                transcode and not playable,
+                measured["audio_codec"],
+            ):
+                yield chunk
+        finally:
+            RecordingLibrary.release_remux_slot()
+
+    return StreamingResponse(
+        body(),
+        media_type="video/mp4",
+        headers={"Accept-Ranges": "none", "Cache-Control": "no-store"},
+    )
+
+
+@app.get("/recordings/{session}/{file}/thumbnail")
+async def recording_thumbnail(
+    session: str, file: str, request: Request, w: str | None = None
+) -> Response:
+    """A poster frame. Cached outside the recordings folder, never inside it."""
+    try:
+        width = RecordingLibrary.normalize_thumbnail_width(w)
+        path = RecordingLibrary.part_path(recorder.recordings_root(), session, file)
+    except ValueError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    if not await asyncio.to_thread(path.is_file):
+        return JSONResponse({"error": "unknown recording"}, status_code=404)
+
+    data, key = await RecordingLibrary.render_thumbnail(path, width, LOGGER)
+    etag = None if key is None else f'"{key}"'
+    if etag is not None and request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+    if data is None:
+        # A missing poster must never break the grid.
+        return JSONResponse(
+            {"error": "no poster frame is available"}, status_code=404
+        )
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={"ETag": etag or "", "Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.delete("/recordings/{session}")
+async def delete_recording(session: str) -> JSONResponse:
+    """Remove one session and everything in it."""
+    try:
+        directory = RecordingLibrary.session_path(recorder.recordings_root(), session)
+    except ValueError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    # Checked against the live recorder, not the manifest: a session whose
+    # backend was killed also reads as "recording" on disk, and refusing those
+    # would block exactly the folders the operator most wants gone.
+    if recorder.active and directory.name == recorder.active_session_id():
+        return JSONResponse(
+            {"error": "that recording is still running"}, status_code=409
+        )
+    if not await asyncio.to_thread(directory.is_dir):
+        return JSONResponse(
+            {"error": f"unknown recording session: {session!r}"}, status_code=404
+        )
+    try:
+        freed, free_bytes = await asyncio.to_thread(
+            RecordingLibrary.remove_session, directory
+        )
+    except OSError as error:
+        LOGGER.warning("Could not delete recording %s: %s", directory.name, error)
+        return JSONResponse({"error": str(error)}, status_code=500)
+    LOGGER.info("Deleted recording %s, freeing %d bytes", directory.name, freed)
+    return JSONResponse(
+        {"deleted": directory.name, "bytes": freed, "free_bytes": free_bytes}
+    )
 
 
 @app.get("/camera/{stream_id}/stream")

@@ -18,6 +18,7 @@ costs no extra camera connection because the hub is already holding one.
 
 import asyncio
 import ctypes
+import json
 import logging
 import os
 import re
@@ -79,6 +80,15 @@ FINALIZE_TIMEOUT_S = 5.0
 
 # ffmpeg stderr kept per source, to surface the reason a source failed.
 STDERR_TAIL_LINES = 20
+
+# The session's own record of itself, written beside its files. It exists
+# because the filesystem cannot answer the question the recordings page asks: a
+# source that never received video leaves no file at all, so "this camera was
+# recording and failed" and "this camera was not part of the session" look
+# identical on disk.
+MANIFEST_NAME = "session.json"
+MANIFEST_TMP_NAME = "session.json.tmp"
+MANIFEST_VERSION = 1
 
 # prctl(2) option number for the parent-death signal. Linux only.
 PR_SET_PDEATHSIG = 1
@@ -539,6 +549,103 @@ def recording_state_payload(
     }
 
 
+def manifest_part(
+    filename: str,
+    bytes_written: int,
+    duration: float | None,
+    started_at: float | None,
+    ended_at: float | None,
+) -> dict[str, Any]:
+    """One finished file, as the manifest records it."""
+    return {
+        "file": filename,
+        "bytes": bytes_written,
+        "duration": duration,
+        "started_at": started_at,
+        "ended_at": ended_at,
+    }
+
+
+def manifest_source(
+    state: SourceRecording, parts: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """One source's entry. Reads only the fields the broadcast may carry.
+
+    Deliberately the same subset as ``source_state_payload``: the camera URL
+    must never reach a log, a broadcast, or -- here -- a file on a card that
+    leaves the building. ``stderr_tail`` is excluded for the same reason, and
+    because a deque is not JSON.
+    """
+    return {
+        "id": state.source_id,
+        "kind": state.kind,
+        "codec": state.input_format,
+        "status": state.status,
+        "restarts": state.restarts,
+        "error": state.error,
+        "parts": parts,
+    }
+
+
+def manifest_payload(
+    session: str,
+    started_at: float,
+    ended_at: float | None,
+    status: str,
+    stopped_reason: str | None,
+    sources: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The whole session, as it is written to ``session.json``.
+
+    ``status`` is only ever ``recording`` or ``complete``. A session that was
+    interrupted is not a third value here: a manifest still saying ``recording``
+    for a session the recorder is not running was written by a backend that
+    never got to stop, which the reader can tell for free.
+
+    No directory is recorded. An absolute path is wrong the moment the card is
+    mounted somewhere else, and whoever reads this file already knows where it
+    found it.
+    """
+    return {
+        "version": MANIFEST_VERSION,
+        "session_id": session,
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "status": status,
+        "stopped_reason": stopped_reason,
+        "sources": sources,
+    }
+
+
+def write_manifest(
+    session_dir: Path, payload: dict[str, Any], logger: logging.Logger
+) -> bool:
+    """Replace the session manifest, atomically. Never raises.
+
+    Temp file plus ``os.replace`` because the power can go mid-write and a torn
+    manifest would be worse than none: the reader falls back to the filenames
+    when it cannot parse one, but a half-written file that happens to parse
+    would be believed. ``fsync`` for the same reason -- the card can be pulled.
+
+    A failure here must cost a log line and nothing else. The card going
+    read-only is not a reason to fail a recording; the session just degrades to
+    the filename-scan path, which is what a pre-manifest folder already uses.
+    """
+    temporary = session_dir / MANIFEST_TMP_NAME
+    try:
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=1)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, session_dir / MANIFEST_NAME)
+        return True
+    except OSError as error:
+        logger.warning("Could not write the recording manifest: %s", error)
+        with suppress(OSError):
+            temporary.unlink()
+        return False
+
+
 def normalize_record_action(value: Any) -> str:
     """Validate the UI's record request."""
     if not isinstance(value, str):
@@ -560,6 +667,7 @@ class _Writer:
         session: str,
         logger: logging.Logger,
         on_change: Callable[[], None],
+        on_persist: Callable[[], None] | None = None,
     ) -> None:
         self._state = state
         self._session_dir = session_dir
@@ -567,10 +675,19 @@ class _Writer:
         self._session = session
         self._logger = logger
         self._on_change = on_change
+        # Called when a part finishes or a source gives up -- the moments the
+        # manifest on disk would otherwise go stale. Bounded by the restart
+        # count, not by wall time, so the card is not rewritten on a timer.
+        self._on_persist = on_persist or (lambda: None)
         self._process: asyncio.subprocess.Process | None = None
         self._task: asyncio.Task | None = None
         self._stopping = False
         self._path: Path | None = None
+        # Files this source has finished, for the session manifest. Only parts
+        # that actually hold video are listed.
+        self._parts: list[dict[str, Any]] = []
+        self._part_started_at: float | None = None
+        self._recorded_part = 0
         # Set once this source has actually written video. It separates a
         # camera that is merely away from one that was never reachable.
         self._ever_recorded = False
@@ -584,6 +701,14 @@ class _Writer:
     @property
     def state(self) -> SourceRecording:
         return self._state
+
+    @property
+    def parts(self) -> list[dict[str, Any]]:
+        """The files this source finished, oldest first."""
+        return self._parts
+
+    def manifest_entry(self) -> dict[str, Any]:
+        return manifest_source(self._state, list(self._parts))
 
     def start(self) -> None:
         self._task = asyncio.create_task(
@@ -621,6 +746,7 @@ class _Writer:
             self._state.filename = self._path.name
             self._set_status("starting")
             started = loop.time()
+            self._part_started_at = time.time()
             try:
                 await self._run_once(str(self._path))
             except asyncio.CancelledError:
@@ -631,8 +757,12 @@ class _Writer:
                     "Recording %s failed: %s", self._state.source_id, self._state.error
                 )
 
+            self._record_part()
             if self._stopping:
+                # stop() writes the final manifest for every source at once;
+                # one here as well would rewrite the card for nothing.
                 break
+            self._on_persist()
 
             ran = loop.time() - started
             returncode = self._process.returncode if self._process else None
@@ -661,6 +791,7 @@ class _Writer:
                     reason,
                 )
                 self._set_status("failed", reason)
+                self._on_persist()
                 return
             self._state.restarts += 1
             self._set_status("reconnecting", self._state.error)
@@ -797,8 +928,38 @@ class _Writer:
                 await task
 
         self._drop_empty_output()
+        # After the drop, so a part that never held video is not listed, and
+        # here rather than only in _supervise because cancelling the task mid
+        # run is how a normal stop reaches this writer.
+        self._record_part()
         if self._state.status != "failed":
             self._state.status = "stopped"
+
+    def _record_part(self) -> None:
+        """Remember the file that just finished, for the session manifest.
+
+        ``_media_us`` is ffmpeg's own media clock and is reset per run, so at
+        this point it is exactly this part's duration -- already measured for
+        the stall watchdog, so it costs nothing to keep.
+        """
+        if self._path is None or self._state.part == self._recorded_part:
+            return
+        try:
+            size = self._path.stat().st_size
+        except OSError:
+            return
+        if size <= 0:
+            return
+        self._recorded_part = self._state.part
+        self._parts.append(
+            manifest_part(
+                self._path.name,
+                size,
+                self._media_us / 1_000_000 if self._media_us > 0 else None,
+                self._part_started_at,
+                time.time(),
+            )
+        )
 
     def _drop_empty_output(self) -> None:
         """Remove a file ffmpeg never got far enough to write a header for."""
@@ -944,6 +1105,46 @@ class Recorder:
         # Fire and forget: a slow client must never stall a supervisor.
         asyncio.create_task(self._listener(self.state()))
 
+    def recordings_root(self) -> Path:
+        """Where recordings are, or would be. Resolved per call.
+
+        The active session's root comes first, so a reader and a running
+        recording agree even if the operator changed the folder in Settings
+        mid-session. Resolved per call rather than at construction because
+        ``__init__`` must stay inert.
+        """
+        return self._active_root or self._root()
+
+    def active_session_id(self) -> str | None:
+        """The session being written right now, if any."""
+        return self._session
+
+    def _persist_manifest(
+        self, status: str = "recording", ended_at: float | None = None
+    ) -> None:
+        """Write what this session contains, so it can be listed later."""
+        if self._directory is None or self._session is None:
+            return
+        if self._started_at is None:
+            return
+        directory = Path(self._directory)
+        # The folder is gone when a session that wrote nothing was just
+        # cleaned up, and recreating it here would undo that.
+        if not directory.is_dir():
+            return
+        write_manifest(
+            directory,
+            manifest_payload(
+                self._session,
+                self._started_at,
+                ended_at,
+                status,
+                self._stopped_reason if status != "recording" else None,
+                [writer.manifest_entry() for writer in self._writers],
+            ),
+            self._logger,
+        )
+
     def _default_root(self) -> Path:
         default = Path(__file__).resolve().parent.parent / "recordings"
         return Path(os.environ.get(RECORDINGS_DIR_ENV, str(default)))
@@ -1041,6 +1242,7 @@ class Recorder:
                         session,
                         self._logger,
                         self._notify,
+                        self._persist_manifest,
                     )
                 )
 
@@ -1052,6 +1254,10 @@ class Recorder:
             self._free_bytes = usage.free
             self._rate = None
             self._rate_sample = None
+            # Before a single ffmpeg starts, so a backend killed one second
+            # from now still leaves a folder that says which sources were
+            # configured -- the one thing the filenames can never recover.
+            self._persist_manifest()
             for writer in self._writers:
                 writer.start()
 
@@ -1075,10 +1281,13 @@ class Recorder:
             await asyncio.gather(
                 *(writer.finalize() for writer in writers), return_exceptions=True
             )
+            self._stopped_reason = reason
+            # Cleanup first: a session that wrote nothing loses its folder, and
+            # the manifest write then finds no directory and does nothing.
+            self._remove_empty_session()
+            self._persist_manifest(status="complete", ended_at=time.time())
             self._session = None
             self._started_at = None
-            self._stopped_reason = reason
-            self._remove_empty_session()
             written = sum(writer.state.bytes_written for writer in writers)
             self._logger.info(
                 "Recording stopped (%s): %s",
@@ -1104,12 +1313,29 @@ class Recorder:
         """Drop a session folder nothing was written into.
 
         A run where every source failed would otherwise leave an empty dated
-        directory on the card for each attempt.
+        directory on the card for each attempt. The manifest does not count as
+        content: it is this session's own bookkeeping, and a session with no
+        video has nothing for the library to offer -- the operator already saw
+        the failure live, with the same error text.
         """
         if self._directory is None:
             return
+        directory = Path(self._directory)
+        try:
+            remaining = set(os.listdir(directory))
+        except OSError:
+            return
+        # Anything that is not our own bookkeeping means video was written, and
+        # the folder is the operator's to keep.
+        if remaining - {MANIFEST_NAME, MANIFEST_TMP_NAME}:
+            return
+        for name in (MANIFEST_NAME, MANIFEST_TMP_NAME):
+            with suppress(OSError):
+                (directory / name).unlink()
+        # Still suppressed: a file that appeared between the listing and here
+        # means the folder is wanted after all, and half-deleting it is worse.
         with suppress(OSError):
-            Path(self._directory).rmdir()
+            directory.rmdir()
 
     async def poll(self) -> dict[str, Any]:
         """Refresh counters, restart wedged sources, and stop on low disk."""

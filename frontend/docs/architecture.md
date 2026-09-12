@@ -57,11 +57,29 @@ backend/
   server.py                       WebSocket, UDP send/receive, WebRTC signaling
   WebRTCStream.py                 Camera backend selection and SDP
   CameraWebSocketSource.py        Camera WebSocket hub and HTTP relay
+  Recorder.py                     Records every source at once, writes session.json
+  RecordingLibrary.py             Reads recordings back: list, play, thumbnail, delete
   utils.py                        Binary schema encoder/decoder
 scripts/
   udp_server_simulation.py        Bidirectional command/telemetry simulator
   udp_telemetry_simulation.py     One-shot battery telemetry sender
 packets-schema.json               Ordered command and telemetry layouts
 ```
+
+The backend also serves the recordings library. `GET /recordings` lists past
+sessions in the folder the record button writes to, and `GET /recordings/<session>`
+adds the per-file detail a player needs. The renderer never reads a recording off
+disk: it plays one from the backend origin at
+`GET /recordings/<session>/<file>/play`, which remuxes the Matroska into
+fragmented MP4 on the fly because Chromium cannot play Matroska. That response
+honours no Range, so a `<video>` cannot seek in it -- re-request with
+`?t=<seconds>` instead, using the duration from the detail endpoint, and add the
+offset back yourself. A part whose `playable` is `false` must not be mounted in a
+`<video>` at all; offer the download, or `?transcode=1` as a deliberate choice.
+
+Playing and showing posters from the backend origin needs the CSP in
+`frontend/index.html` widened: `media-src` for `<video>` and `img-src` for
+`<img>` thumbnails. `connect-src` already allows the backend, so listing and
+deleting work today.
 
 The backend is a separately launched local service. Electron does not spawn, restart, or terminate it.

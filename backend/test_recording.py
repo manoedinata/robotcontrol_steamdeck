@@ -511,10 +511,6 @@ class RecorderConstructionTests(unittest.TestCase):
         self.assertFalse(recorder.active)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class _FakeHub:
     """Stands in for the relay hub: which sources it is serving, and as what."""
 
@@ -603,3 +599,7 @@ class WriterArgumentTests(unittest.TestCase):
         self.assertIn("rtsp://camera/stream", args)
         self.assertIn("-rtsp_transport", args)
 
+
+
+if __name__ == "__main__":
+    unittest.main()

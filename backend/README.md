@@ -10,6 +10,12 @@ Two source kinds share one path. An RTSP url is dialed by the camera backend dir
 - `POST /offer?src=<stream id>`: WebRTC SDP signaling for a receive-only video peer, for every source kind. `src` selects which configured stream the answer is for; it may be omitted only when exactly one stream is configured.
 - `GET /camera/<stream id>/stream`: the raw bytestream of one source the backend holds a connection to — every WebSocket camera, and every RTSP camera while `camera_backend` is `aiortc`. This is an internal seam between the WebSocket hub and the camera backend, not a renderer endpoint. `?preroll=1` starts the stream at the camera's last keyframe rather than its next one; only recording asks for it, because the live path would open on video that is already seconds old.
 - `GET /storage/targets`: the recording destinations Settings offers — internal storage plus each mounted removable filesystem, with capacity and writability.
+- `GET /recordings`: every session in the folder the record button writes to, newest first, with each configured source and whether it produced video. Nothing is probed here.
+- `GET /recordings/<session>`: one session with its files, their durations, codecs, and whether the renderer can play them.
+- `GET /recordings/<session>/<file>/play`: that file remuxed to fragmented MP4, which Chromium can play. No Range support; `?t=<seconds>` re-opens at an offset, and `?transcode=1` is the explicit opt-in for a source the renderer cannot decode.
+- `GET /recordings/<session>/<file>/download`: the Matroska file itself, with Range support, for copying off the Deck.
+- `GET /recordings/<session>/<file>/thumbnail`: a JPEG poster frame. `?w=` is one of 160, 320, 640.
+- `DELETE /recordings/<session>`: remove one session and everything in it. Refuses the session that is currently recording.
 - `GET /health`: readiness probe used by the Docker entrypoint and external health checks.
 
 Configuration message (RTSP credentials may be supplied as URL-encoded userinfo). `camera_streams` is the list of camera sources to keep connected, each with a renderer-assigned `id`:
@@ -122,6 +128,121 @@ Behavior worth knowing:
   session, and up to one keyframe interval missing from the front of the file.
   The per-source `kind` in the broadcast is the camera's own transport either
   way.
+
+## Recordings Library
+
+The same folder, read back. `GET /recordings` lists one entry per session
+directory, newest first; opening one with `GET /recordings/<session>` adds the
+per-file detail the page needs to play a clip.
+
+The scope is deliberately the one folder the record button writes to, resolved
+per request. `GET /storage/targets` already exists for choosing between cards.
+
+### The manifest
+
+Each session directory holds a `session.json` beside its files:
+
+```json
+{"version":1,"session_id":"20260909-213435","started_at":1757416475.0,
+ "ended_at":1757416800.4,"status":"complete","stopped_reason":"operator",
+ "sources":[
+  {"id":"cam-0","kind":"rtsp","codec":null,"status":"stopped","restarts":1,
+   "error":null,
+   "parts":[{"file":"cam-0_001.mkv","bytes":18234312,"duration":121.5,
+             "started_at":1757416475.2,"ended_at":1757416596.7}]},
+  {"id":"cam-1","kind":"websocket","codec":"mjpeg","status":"failed",
+   "restarts":0,"error":"no video was received","parts":[]}]}
+```
+
+It exists because the filesystem cannot answer the question the page asks. A
+source that never received video has its empty file deleted, so "this camera
+was recording and failed" and "this camera was not in this session" look
+identical on disk. `cam-1` above is the case the manifest is for.
+
+Like every recording payload it never contains a camera URL.
+
+It is written at three moments and never on a timer: when the session starts,
+before a single ffmpeg does; when a source finishes a part or gives up; and
+when the session stops. A periodic rewrite would only add the byte count and
+duration of the one part being written per source, both of which are
+recoverable from `stat` and ffprobe — at the cost of rewriting a file on the
+Deck's SD card every two seconds while that same card is taking N video
+streams. Each write is a temp file plus `fsync` and `os.replace`, and a failure
+costs a log line rather than the recording: the session degrades to the
+filename scan below.
+
+`status` on disk is only `recording` or `complete`. A session still reading
+`recording` that the recorder is not running was written by a backend that was
+killed, and reads back as `interrupted` — detected for free, with no extra
+write.
+
+A session that produced no video at all loses its folder on stop, manifest and
+all, so a run where every source failed does not leave a dated directory per
+attempt.
+
+### When there is no manifest
+
+A missing, torn, or unrecognised-version manifest is not an error. The session
+is listed from its directory name and its filenames instead, with `manifest:
+false` and `status: "scanned"`: source ids come from `<id>_<NNN>.mkv`, sizes and
+modification times from `stat`, durations from ffprobe when the session is
+opened, and everything else — camera kind, per-source status, restart counts —
+reads as `null` or `unknown`. That one path covers recordings made before the
+manifest existed and the last part of a session whose backend was killed, so
+there is no separate crash-recovery case.
+
+Bytes always come from disk, never from the manifest: a manifest written before
+a backend was killed records what it knew at the time, and the file kept
+growing.
+
+### Playback
+
+Matroska will not play in the renderer at all, so `/play` remuxes a part into
+fragmented MP4 with `-c copy`. Fragmented is the only MP4 shape that can be
+written to a pipe — a normal one seeks backwards to write its `moov` atom — and
+the consequence is that the response carries no index and honours no Range.
+Playback is forward-only; seeking is a new request with `?t=<seconds>`, which
+lands on the nearest preceding keyframe and re-bases the output to zero, so the
+UI adds the offset back itself.
+
+An MJPEG recording is the awkward case: MP4 carries it and Chromium renders it
+as nothing at all, which is the worst way to fail. The codec is probed first,
+the detail endpoint reports `playable: false`, and `/play` answers `415` naming
+the codec. `?transcode=1` is the deliberate opt-in that encodes it — this
+device never pays for an encode by default, but review usually happens while
+nothing is recording.
+
+Two remuxes may run at once; a third is refused with `503` rather than left
+hanging with its headers already sent. Every ffmpeg is registered for the
+parent-death signal and is killed and reaped when the viewer navigates away.
+
+### Thumbnails and caching
+
+`/thumbnail` decodes one frame a second in (or halfway through a shorter clip)
+and returns it as JPEG with an `ETag`. Both the posters and the ffprobe results
+are cached **outside** the recordings folder — the posters under the system
+temp directory, overridable with `RECORDING_THUMBNAIL_DIR`. That folder is
+usually a card the operator browses in a file manager and which the recorder
+itself refuses to write to when it is nearly full; turning a read into a write
+there is the wrong trade for a file that costs one seek to rebuild. Every read
+path leaves the card untouched, which is also what keeps the "never create a
+path under `/run/media`" rule trivially true rather than conditionally true.
+
+The probe cache is keyed by path, size, and mtime, so the part being written
+right now is re-measured instead of serving a stale, short duration.
+
+### Deleting
+
+`DELETE /recordings/<session>` removes the directory and reports what it freed.
+It refuses the running session with `409`, checked against the live recorder
+rather than the manifest: a killed session's manifest also says `recording`, and
+refusing those would block exactly the folders an operator most wants gone.
+
+Session and file names from the URL are reduced to a safe component and then
+checked to still resolve inside the root, the same idiom the writer uses. That
+check is what refuses a symlink inside the recordings folder pointing out of
+it, which matters more here than for the writer: this path is handed to
+`rmtree`.
 
 ## PTZ Control
 
