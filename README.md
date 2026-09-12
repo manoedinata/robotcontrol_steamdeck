@@ -109,4 +109,4 @@ docker run --rm --network host -v "$PWD:/app" -w /app/backend \
 	steamdeck-robot-monitor:latest python -m unittest test_utils
 ```
 
-Interactive runtime validation should be performed by the user on the target device. RTSP playback requires a reachable RTSP source and is converted to local WebRTC by FastAPI; every configured source is dialed at once. WebSocket playback requires a reachable camera WebSocket endpoint: FastAPI sends `PlayStream2`, re-serves the bytestream at `GET /camera/<id>/stream`, and converts it to WebRTC through the same camera backend.
+Interactive runtime validation should be performed by the user on the target device. RTSP playback requires a reachable RTSP source and is converted to local WebRTC by FastAPI; every configured source is dialed at once. WebSocket playback requires a reachable camera WebSocket endpoint: FastAPI sends `PlayStream2`, re-serves the bytestream at `GET /camera/<id>/stream`, and converts it to WebRTC through the same camera backend. With `camera_backend` set to `aiortc`, RTSP sources are served from that same relay, so recording and the live view share one camera session.

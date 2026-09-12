@@ -6,15 +6,28 @@ import subprocess
 import tempfile
 from contextlib import suppress
 from socket import timeout as SocketTimeout
+from typing import Any
 from urllib.parse import urlencode
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-from aiortc import RTCPeerConnection, RTCSessionDescription
-from aiortc.contrib.media import MediaPlayer
+import av
+from aiortc import (
+    MediaStreamTrack,
+    RTCPeerConnection,
+    RTCRtpSender,
+    RTCSessionDescription,
+)
+from aiortc.contrib.media import MediaPlayer, MediaRelay
 
 import utils
-from CameraWebSocketSource import CameraWebSocketHub, is_websocket_url, relay_url
+from CameraWebSocketSource import (
+    CameraWebSocketHub,
+    SourceReader,
+    annexb_nal_types,
+    is_websocket_url,
+    relay_url,
+)
 
 # A config carries every camera source that should stay warm as (id, url)
 # pairs. A url is either an RTSP source dialed directly, or a WebSocket source
@@ -47,6 +60,111 @@ def go2rtc_source(stream_id: str, url: str, input_format: str) -> str:
         f" -i {ingest_url(stream_id, url)}"
         " -c:v copy -f rtsp {output}"
     )
+
+
+# NAL unit type 7, a sequence parameter set. A packet that already opens with
+# one needs nothing prepended.
+_H264_SPS = 7
+
+
+def missing_parameter_sets(packet: Any) -> bytes:
+    """The parameter sets a packet needs prepended, or nothing.
+
+    RTSP carries them in the SDP rather than in the stream, so a packet taken
+    straight off the wire has none and anything reading the result as a bare
+    bytestream -- a browser's decoder, or the recorder's demuxer -- has nothing
+    to configure itself with. They go in front of each keyframe instead, which
+    is what ffmpeg's ``dump_extra`` bitstream filter does and is legal to
+    repeat.
+    """
+    if not packet.is_keyframe:
+        return b""
+    if annexb_nal_types(bytes(packet))[:1] == (_H264_SPS,):
+        return b""
+    extradata = packet.stream.codec_context.extradata
+    return bytes(extradata) if extradata else b""
+
+
+class _AnnexBTrack(MediaStreamTrack):
+    """One camera's packets, carrying the parameter sets a decoder needs.
+
+    Wrapping the player rather than each consumer means the peers and the
+    recording see the same bytes, and the camera is still read exactly once.
+    """
+
+    kind = "video"
+
+    def __init__(self, source: MediaStreamTrack) -> None:
+        super().__init__()
+        self._source = source
+
+    async def recv(self) -> Any:
+        packet = await self._source.recv()
+        prefix = missing_parameter_sets(packet)
+        if not prefix:
+            return packet
+        # av.Packet is not mutable in place, and the sender needs only the
+        # bytes and the timestamp.
+        stamped = av.Packet(prefix + bytes(packet))
+        stamped.pts = packet.pts
+        stamped.dts = packet.dts
+        stamped.time_base = packet.time_base
+        return stamped
+
+
+class _SharedPlayer:
+    """One camera connection, fanned out to every consumer of one source.
+
+    The aiortc backend used to open a player per WebRTC peer. Sharing one means
+    a camera sees a single session however many peers are attached -- and, more
+    to the point, that recording can read the connection the live view already
+    holds instead of dialing the camera a second time.
+    """
+
+    def __init__(
+        self, stream_id: str, url: str, player: MediaPlayer, decoded: bool
+    ) -> None:
+        self.stream_id = stream_id
+        self.url = url
+        self.player = player
+        # Whether the player hands out decoded frames. MJPEG has to be decoded
+        # and re-encoded because no browser accepts it over WebRTC; H.264 is
+        # forwarded exactly as the camera sent it, which is both cheaper and
+        # the only form a recording can stream-copy.
+        self.decoded = decoded
+        # MJPEG is decoded, so there is nothing to repair; H.264 packets get
+        # their parameter sets put back once, here, for every consumer.
+        self.source = player.video if decoded else _AnnexBTrack(player.video)
+        self.relay = MediaRelay()
+        self.holders = 0
+        # Feeds the relay endpoint's buffer for as long as this connection
+        # lives, so a recording started later begins at a keyframe.
+        self.tap: asyncio.Task | None = None
+        # Set when the camera stops being readable, so the hub can retry.
+        self.ended = asyncio.Event()
+
+    def track(self) -> Any:
+        """A proxy track for one more consumer of this connection."""
+        return self.relay.subscribe(self.source)
+
+
+def _prefer_h264(peer: RTCPeerConnection) -> None:
+    """Pin the video transceiver to H.264.
+
+    Forwarding the camera's own packets only works if the peer negotiated the
+    codec they are already in. Without this aiortc may answer with its default
+    preference order and the packets would be packed as something they are not.
+    """
+    codecs = [
+        codec
+        for codec in RTCRtpSender.getCapabilities("video").codecs
+        if codec.mimeType in {"video/H264", "video/rtx"}
+    ]
+    if not codecs:
+        return
+    for transceiver in peer.getTransceivers():
+        if transceiver.kind == "video":
+            transceiver.setCodecPreferences(codecs)
 
 
 def _resolve_stream_id(streams: dict[str, str], requested: str | None) -> str:
@@ -86,7 +204,15 @@ def _stop_player(player: MediaPlayer | None) -> None:
 
 
 class _AiortcStream:
-    """Create and clean up one RTSP-backed WebRTC peer per viewer."""
+    """Serve WebRTC peers from one shared connection per camera.
+
+    One connection, not one per viewer: peers take a proxy of it, and the relay
+    takes another, so a recording reads the session the live view already holds
+    rather than asking the camera for a second one. H.264 is forwarded exactly
+    as the camera sent it -- no decode, no encode, and in a form a recording can
+    stream-copy. MJPEG still has to be transcoded, because no browser will take
+    it over WebRTC.
+    """
 
     # Microseconds. ffmpeg waits ~7s (or forever, on a camera that accepts the
     # connection then goes quiet) before giving up on an RTSP dial, so bound it.
@@ -103,9 +229,12 @@ class _AiortcStream:
         self._ws_hub = ws_hub
         # Each peer remembers the stream id and URL it was opened with so a
         # config change can close only the peers whose source actually changed.
-        self._sessions: dict[
-            RTCPeerConnection, tuple[str, str, MediaPlayer]
-        ] = {}
+        self._sessions: dict[RTCPeerConnection, tuple[str, str, _SharedPlayer]] = {}
+        # One connection per source, however many peers and recorders read it.
+        self._shared: dict[str, _SharedPlayer] = {}
+        # Serializes opening one source. Not self._lock: dialing a camera takes
+        # seconds, and that lock must stay free for config updates.
+        self._acquiring: dict[str, asyncio.Lock] = {}
         # Stream ids with an RTSP dial in flight. The renderer retries a failed
         # camera every couple of seconds, which is faster than a dead camera
         # fails, so without this the retries would stack worker threads.
@@ -140,6 +269,11 @@ class _AiortcStream:
                 "flags": "low_delay",
                 "timeout": self.RTSP_OPEN_TIMEOUT_US,
             },
+            # Hand out the camera's own packets instead of decoding them. The
+            # Deck stops paying for a decode and an encode per peer, and the
+            # packets stay in a form a recording can stream-copy -- which is
+            # what lets one connection serve both.
+            decode=False,
         )
 
     async def update_streams(self, streams: CameraStreams) -> None:
@@ -166,18 +300,14 @@ class _AiortcStream:
             self._dialing.add(resolved_id)
 
         peer = RTCPeerConnection()
-        player: MediaPlayer | None = None
+        shared: _SharedPlayer | None = None
         try:
             input_format = await self._input_format(resolved_id, camera_url)
-            # MediaPlayer() opens the RTSP container synchronously and does not
-            # return until the camera answers or ffmpeg times out. Run it off
-            # the event loop so an unreachable camera cannot stall the UDP send
-            # loop, telemetry and PTZ along with it.
-            player = await self._dial(resolved_id, camera_url, input_format)
-            if player.video is None:
-                raise RuntimeError("RTSP source does not provide a video track")
+            shared = await self._acquire(resolved_id, camera_url, input_format)
 
-            peer.addTrack(player.video)
+            peer.addTrack(shared.track())
+            if not shared.decoded:
+                _prefer_h264(peer)
 
             @peer.on("connectionstatechange")
             async def on_connectionstatechange() -> None:
@@ -189,10 +319,11 @@ class _AiortcStream:
             await peer.setLocalDescription(answer)
 
             async with self._lock:
-                self._sessions[peer] = (resolved_id, camera_url, player)
+                self._sessions[peer] = (resolved_id, camera_url, shared)
             return peer.localDescription
         except Exception:
-            _stop_player(player)
+            if shared is not None:
+                await self._release(shared)
             await peer.close()
             raise
         finally:
@@ -228,12 +359,110 @@ class _AiortcStream:
             raise RuntimeError("camera backend is shutting down")
         return dial.result()
 
+    async def _acquire(
+        self, stream_id: str, camera_url: str, input_format: str | None
+    ) -> _SharedPlayer:
+        """Take a hold on this source's connection, opening it if nobody has."""
+        lock = self._acquiring.setdefault(stream_id, asyncio.Lock())
+        async with lock:
+            shared = self._shared.get(stream_id)
+            if shared is not None and shared.url == camera_url:
+                shared.holders += 1
+                return shared
+
+            # MediaPlayer() opens the container synchronously and does not
+            # return until the camera answers or ffmpeg times out. Run it off
+            # the event loop so an unreachable camera cannot stall the UDP send
+            # loop, telemetry and PTZ along with it.
+            player = await self._dial(stream_id, camera_url, input_format)
+            if player.video is None:
+                _stop_player(player)
+                raise RuntimeError("camera source does not provide a video track")
+
+            shared = _SharedPlayer(
+                stream_id, camera_url, player, decoded=input_format is not None
+            )
+            shared.holders = 1
+            if not shared.decoded and self._ws_hub is not None:
+                if self._ws_hub.has_stream(stream_id):
+                    shared.tap = asyncio.create_task(
+                        self._tap(shared), name=f"camera-tap-{stream_id}"
+                    )
+            previous = self._shared.get(stream_id)
+            self._shared[stream_id] = shared
+            if previous is not None:
+                # The url changed under us; nothing new may join the old
+                # connection, and it goes when its last holder leaves.
+                previous.url = ""
+            return shared
+
+    async def _release(self, shared: _SharedPlayer) -> None:
+        """Give up one hold, closing the connection when the last one goes."""
+        lock = self._acquiring.setdefault(shared.stream_id, asyncio.Lock())
+        async with lock:
+            shared.holders -= 1
+            if shared.holders > 0:
+                return
+            if self._shared.get(shared.stream_id) is shared:
+                del self._shared[shared.stream_id]
+            tap = shared.tap
+            shared.tap = None
+            if tap is not None:
+                tap.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await tap
+            _stop_player(shared.player)
+
+    def packet_source(self, stream_id: str, camera_url: str) -> SourceReader:
+        """A reader the hub can use to serve this source from the relay.
+
+        This is what makes recording cost no second camera session: the bytes
+        come off the connection the live view is already holding. The hold is
+        taken when a subscriber attaches and given up when it leaves, so a
+        recording keeps the camera open even after every peer has gone.
+        """
+
+        async def reader() -> None:
+            shared = await self._acquire(stream_id, camera_url, None)
+            try:
+                # The tap is what publishes; this only holds the camera open
+                # for as long as the relay has someone reading it, and hands
+                # the hub back its retry when the connection ends.
+                await shared.ended.wait()
+                raise RuntimeError(f"camera stream {stream_id!r} ended")
+            finally:
+                # Shielded: this runs while the hub is cancelling the reader,
+                # and giving up the hold half way would leave the camera
+                # session open for the life of the process.
+                with suppress(asyncio.CancelledError):
+                    await asyncio.shield(self._release(shared))
+
+        return reader
+
+    async def _tap(self, shared: _SharedPlayer) -> None:
+        """Feed one camera's packets to the relay for as long as it is held."""
+        assert self._ws_hub is not None
+        track = shared.track()
+        try:
+            while True:
+                packet = await track.recv()
+                self._ws_hub.publish(shared.stream_id, bytes(packet))
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self._logger.warning(
+                "Camera %s stopped being readable: %s", shared.stream_id, error
+            )
+        finally:
+            track.stop()
+            shared.ended.set()
+
     async def close_peer(self, peer: RTCPeerConnection) -> None:
         async with self._lock:
             session = self._sessions.pop(peer, None)
 
         if session is not None:
-            _stop_player(session[2])
+            await self._release(session[2])
         if peer.connectionState != "closed":
             await peer.close()
 
@@ -494,6 +723,24 @@ class WebRTCStream:
             return
         self._streams = streams
         await self._stream.update_streams(streams)
+
+    def packet_source(self, stream_id: str, camera_url: str) -> SourceReader:
+        """A reader for one source, resolved when a subscriber first attaches.
+
+        Bound late on purpose: the hub is told which sources it serves before
+        the backend swap that a config change may also carry, and only aiortc
+        holds a connection in this process for anything to read.
+        """
+
+        async def reader() -> None:
+            stream = self._stream
+            if not isinstance(stream, _AiortcStream):
+                raise RuntimeError(
+                    f"camera stream {stream_id!r} is not held in this process"
+                )
+            await stream.packet_source(stream_id, camera_url)()
+
+        return reader
 
     async def create_answer(
         self, offer: RTCSessionDescription, stream_id: str | None = None

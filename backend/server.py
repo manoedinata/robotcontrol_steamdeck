@@ -129,6 +129,10 @@ video_stream = WebRTCStream(
 # work; nothing is opened until the operator starts a recording.
 recorder = Recorder(logger=LOGGER, ws_hub=camera_ws_hub)
 
+# The hub serves RTSP sources too when the camera backend holds them in this
+# process, so a recording reads the connection the live view already has.
+camera_ws_hub.set_packet_source(video_stream.packet_source)
+
 # A camera stream id is echoed straight into a go2rtc URL and used as a
 # config-map key, so keep it to an unambiguous, injection-safe alphabet.
 CAMERA_STREAM_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -922,7 +926,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     # The hub must know a WebSocket source before the camera
                     # backend is pointed at its relay URL, or the first dial
                     # 404s.
-                    await camera_ws_hub.update_streams(camera_streams)
+                    await camera_ws_hub.update_streams(camera_streams, camera_backend)
                     await video_stream.update_config(camera_streams, camera_backend)
                     recorder.update_sources(camera_streams)
                     recorder.set_root(recordings_dir)

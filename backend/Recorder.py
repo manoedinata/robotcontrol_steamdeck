@@ -487,6 +487,12 @@ class SourceRecording:
     kind: str
     url: str
     input_format: str | None = None
+    # Whether this source is read from the local relay instead of dialed at the
+    # camera. Always true for a WebSocket source, and true for an RTSP one when
+    # the camera backend holds its connection in this process for the live
+    # view. Internal: ``kind`` is what the UI is told, and that stays the
+    # camera's own transport.
+    relayed: bool = False
     status: str = "idle"
     part: int = 0
     filename: str = ""
@@ -590,7 +596,7 @@ class _Writer:
         self._on_change()
 
     def _args(self, output: str) -> tuple[str, ...]:
-        if self._state.kind == "websocket":
+        if self._state.relayed:
             return relay_record_args(
                 self._state.input_format or "h264",
                 # Start at the last keyframe the hub still holds rather than
@@ -947,6 +953,31 @@ class Recorder:
             return Path(self._root_override)
         return self._default_root()
 
+    async def _source_state(self, source_id: str, url: str) -> SourceRecording:
+        """How one source will be recorded.
+
+        A source the hub is serving is read from the relay, whatever its own
+        transport: for a WebSocket camera that is the only way in, and for an
+        RTSP camera under the aiortc backend it means recording borrows the
+        connection the live view is already holding instead of asking the
+        camera for a second session.
+        """
+        relayed = self._ws_hub is not None and self._ws_hub.has_stream(source_id)
+        websocket = is_websocket_url(url)
+        input_format = None
+        if relayed:
+            input_format = self._ws_hub.input_format(source_id)
+            if input_format is None and websocket:
+                input_format = await self._ws_hub.detect_format(source_id, url)
+        return SourceRecording(
+            source_id=source_id,
+            # What the camera is, not how it is read: the UI shows this.
+            kind="websocket" if websocket else "rtsp",
+            url=url,
+            input_format=input_format,
+            relayed=relayed,
+        )
+
     async def start(self) -> dict[str, Any]:
         async with self._lock:
             if self.active:
@@ -1001,16 +1032,7 @@ class Recorder:
 
             self._writers = []
             for source_id, url in self._sources:
-                kind = "websocket" if is_websocket_url(url) else "rtsp"
-                input_format = None
-                if kind == "websocket" and self._ws_hub is not None:
-                    input_format = await self._ws_hub.detect_format(source_id, url)
-                state = SourceRecording(
-                    source_id=source_id,
-                    kind=kind,
-                    url=url,
-                    input_format=input_format,
-                )
+                state = await self._source_state(source_id, url)
                 self._writers.append(
                     _Writer(
                         state,

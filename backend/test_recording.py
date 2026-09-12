@@ -28,6 +28,7 @@ from Recorder import (
     recording_state_payload,
     relay_record_args,
     rtsp_record_args,
+    _Writer,
     safe_component,
     scrub_credentials,
     seconds_remaining,
@@ -512,3 +513,93 @@ class RecorderConstructionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _FakeHub:
+    """Stands in for the relay hub: which sources it is serving, and as what."""
+
+    def __init__(self, served: dict[str, str]) -> None:
+        self._served = served
+
+    def has_stream(self, stream_id: str) -> bool:
+        return stream_id in self._served
+
+    def input_format(self, stream_id: str) -> str | None:
+        return self._served.get(stream_id)
+
+    async def detect_format(self, stream_id: str, url: str) -> str:
+        return self._served.get(stream_id, "h264")
+
+
+class SourceRoutingTests(unittest.IsolatedAsyncioTestCase):
+    """Whether a source is dialed at the camera or read from the relay."""
+
+    async def test_an_rtsp_source_the_hub_holds_is_read_from_the_relay(self) -> None:
+        # Under aiortc the camera backend already holds this connection for the
+        # live view, so recording borrows it instead of asking the camera for a
+        # second session.
+        recorder = Recorder(
+            logger=logging.getLogger("test"), ws_hub=_FakeHub({"cam": "h264"})
+        )
+        state = await recorder._source_state("cam", "rtsp://camera/stream")
+        self.assertTrue(state.relayed)
+        self.assertEqual(state.input_format, "h264")
+        # The UI is told what the camera is, not how it is being read.
+        self.assertEqual(state.kind, "rtsp")
+
+    async def test_an_rtsp_source_nobody_holds_is_dialed_at_the_camera(self) -> None:
+        recorder = Recorder(logger=logging.getLogger("test"), ws_hub=_FakeHub({}))
+        state = await recorder._source_state("cam", "rtsp://camera/stream")
+        self.assertFalse(state.relayed)
+        self.assertEqual(state.kind, "rtsp")
+
+    async def test_a_websocket_source_is_always_relayed(self) -> None:
+        recorder = Recorder(
+            logger=logging.getLogger("test"), ws_hub=_FakeHub({"cam": "mjpeg"})
+        )
+        state = await recorder._source_state("cam", "ws://camera:1/")
+        self.assertTrue(state.relayed)
+        self.assertEqual(state.kind, "websocket")
+        self.assertEqual(state.input_format, "mjpeg")
+
+    async def test_without_a_hub_every_source_is_dialed(self) -> None:
+        recorder = Recorder(logger=logging.getLogger("test"))
+        state = await recorder._source_state("cam", "rtsp://camera/stream")
+        self.assertFalse(state.relayed)
+
+
+class WriterArgumentTests(unittest.TestCase):
+    """That the routing decision is what picks the ffmpeg command."""
+
+    def _args(self, state: SourceRecording) -> tuple[str, ...]:
+        writer = _Writer(
+            state,
+            Path("/out"),
+            Path("/out"),
+            "session",
+            logging.getLogger("test"),
+            lambda: None,
+        )
+        return writer._args("/out/cam_001.mkv")
+
+    def test_a_relayed_rtsp_source_is_recorded_from_the_relay(self) -> None:
+        args = self._args(
+            SourceRecording(
+                source_id="cam",
+                kind="rtsp",
+                url="rtsp://camera/stream",
+                input_format="h264",
+                relayed=True,
+            )
+        )
+        self.assertIn("http://127.0.0.1:8000/camera/cam/stream?preroll=1", args)
+        self.assertNotIn("rtsp://camera/stream", args)
+        self.assertNotIn("-rtsp_transport", args)
+
+    def test_a_dialed_rtsp_source_still_goes_straight_to_the_camera(self) -> None:
+        args = self._args(
+            SourceRecording(source_id="cam", kind="rtsp", url="rtsp://camera/stream")
+        )
+        self.assertIn("rtsp://camera/stream", args)
+        self.assertIn("-rtsp_transport", args)
+

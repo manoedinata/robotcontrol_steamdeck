@@ -34,7 +34,17 @@ from CameraWebSocketSource import (
     relay_url,
     should_forward,
 )
-from WebRTCStream import _resolve_stream_id, go2rtc_source, ingest_url
+from WebRTCStream import (
+    _resolve_stream_id,
+    go2rtc_source,
+    ingest_url,
+    missing_parameter_sets,
+)
+
+
+def _nal(nal_type: int, body: bytes = b"\x0a" * 8) -> bytes:
+    """One Annex-B NAL unit of the given type."""
+    return START_CODE + bytes([nal_type]) + body
 
 
 class CameraBackendConfigTests(unittest.TestCase):
@@ -648,9 +658,99 @@ class CameraHubPrerollTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await stream.__anext__(), live)
 
 
-def _nal(nal_type: int, body: bytes = b"\x0a" * 8) -> bytes:
-    """One Annex-B NAL unit of the given type."""
-    return START_CODE + bytes([nal_type]) + body
+class _FakePacket:
+    """Enough of an av.Packet for the parameter-set check."""
+
+    def __init__(self, data: bytes, keyframe: bool, extradata: bytes | None) -> None:
+        self._data = data
+        self.is_keyframe = keyframe
+        codec = type("Codec", (), {"extradata": extradata})()
+        self.stream = type("Stream", (), {"codec_context": codec})()
+
+    def __bytes__(self) -> bytes:
+        return self._data
+
+
+class ParameterSetTests(unittest.TestCase):
+    """Putting back what RTSP carries in the SDP instead of in the stream."""
+
+    EXTRADATA = _nal(7) + _nal(8)
+
+    def test_a_keyframe_without_parameter_sets_gets_them(self) -> None:
+        packet = _FakePacket(_nal(5), keyframe=True, extradata=self.EXTRADATA)
+        self.assertEqual(missing_parameter_sets(packet), self.EXTRADATA)
+
+    def test_a_keyframe_that_already_carries_them_is_left_alone(self) -> None:
+        packet = _FakePacket(
+            self.EXTRADATA + _nal(5), keyframe=True, extradata=self.EXTRADATA
+        )
+        self.assertEqual(missing_parameter_sets(packet), b"")
+
+    def test_nothing_is_prepended_to_a_predicted_frame(self) -> None:
+        # They belong in front of a keyframe: a decoder that joins anywhere
+        # else has nothing to apply them to.
+        packet = _FakePacket(_nal(1), keyframe=False, extradata=self.EXTRADATA)
+        self.assertEqual(missing_parameter_sets(packet), b"")
+
+    def test_a_source_with_no_extradata_is_left_alone(self) -> None:
+        packet = _FakePacket(_nal(5), keyframe=True, extradata=None)
+        self.assertEqual(missing_parameter_sets(packet), b"")
+
+
+class HubSourceOwnershipTests(unittest.IsolatedAsyncioTestCase):
+    """Which sources the relay serves, and which are left to be dialed."""
+
+    def setUp(self) -> None:
+        self.hub = CameraWebSocketHub(logging.getLogger("test-camera-hub"))
+        self.readers: list[str] = []
+        self.hub.set_packet_source(lambda stream_id, url: self._reader(stream_id))
+
+    def _reader(self, stream_id: str):
+        async def reader() -> None:
+            self.readers.append(stream_id)
+            await asyncio.Event().wait()
+
+        return reader
+
+    async def test_go2rtc_leaves_rtsp_sources_to_be_dialed(self) -> None:
+        # go2rtc holds the camera inside a child process, out of reach, so
+        # there is no connection here for a recording to borrow.
+        await self.hub.update_streams(
+            (("rtsp-cam", "rtsp://h/s"), ("ws-cam", "ws://h:1/")), "go2rtc"
+        )
+        self.assertFalse(self.hub.has_stream("rtsp-cam"))
+        self.assertTrue(self.hub.has_stream("ws-cam"))
+
+    async def test_aiortc_serves_rtsp_sources_from_the_relay(self) -> None:
+        await self.hub.update_streams((("rtsp-cam", "rtsp://h/s"),), "aiortc")
+        self.assertTrue(self.hub.has_stream("rtsp-cam"))
+        self.assertEqual(self.hub.input_format("rtsp-cam"), "h264")
+
+    async def test_websocket_sources_are_held_whatever_the_backend(self) -> None:
+        for backend in ("go2rtc", "aiortc"):
+            with self.subTest(backend=backend):
+                await self.hub.update_streams((("ws-cam", "ws://h:1/"),), backend)
+                self.assertTrue(self.hub.has_stream("ws-cam"))
+
+    async def test_a_backend_switch_drops_the_sources_it_no_longer_holds(self) -> None:
+        await self.hub.update_streams((("rtsp-cam", "rtsp://h/s"),), "aiortc")
+        await self.hub.update_streams((("rtsp-cam", "rtsp://h/s"),), "go2rtc")
+        self.assertFalse(self.hub.has_stream("rtsp-cam"))
+
+    async def test_a_pushed_payload_reaches_subscribers_and_the_buffer(self) -> None:
+        # Whoever holds the camera publishes for as long as it holds it, so a
+        # recording that starts later opens on a keyframe.
+        await self.hub.update_streams((("rtsp-cam", "rtsp://h/s"),), "aiortc")
+        keyframe = _nal(7) + _nal(5)
+        self.hub.publish("rtsp-cam", keyframe)
+
+        async with self.hub.subscribe("rtsp-cam", preroll=True) as stream:
+            self.assertEqual(await stream.__anext__(), keyframe)
+
+    async def test_publishing_to_an_unknown_stream_is_ignored(self) -> None:
+        # A camera can outlive the config that named it by a moment.
+        self.hub.publish("gone", _nal(5))
+
 
 
 if __name__ == "__main__":

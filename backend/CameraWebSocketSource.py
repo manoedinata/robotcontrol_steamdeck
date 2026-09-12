@@ -15,13 +15,19 @@ The hub also keeps the payloads since each camera's last keyframe, so a
 subscriber that asks for them starts decoding at a picture that is already on
 screen instead of at the camera's next keyframe. Recording is what needs this;
 see ``PrerollBuffer``.
+
+A source does not have to be a WebSocket. Anything that can be read as a
+bytestream registers a reader here and gets the same fan-out, the same preroll
+buffer and the same relay endpoint. The aiortc backend registers its RTSP
+sources that way: it already holds one connection per camera for WebRTC, so
+recording reads that connection instead of opening a second one at the camera.
 """
 
 import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager, suppress
-from typing import AsyncIterator
+from typing import AsyncIterator, Awaitable, Callable
 from urllib.parse import urlparse
 
 from websockets.asyncio.client import connect
@@ -264,15 +270,36 @@ class _Subscriber:
             self.queue.put_nowait(payload)
 
 
-class _Source:
-    """One camera WebSocket, its reader task, and its subscribers."""
+# What drives one source: an awaitable that keeps the camera being read and
+# returns or raises when that stops being true. It publishes through the hub's
+# ``publish``, because for a source someone else already holds the payloads
+# arrive whether or not anyone is subscribed here. ``None`` means the built-in
+# WebSocket pump.
+SourceReader = Callable[[], Awaitable[None]]
 
-    def __init__(self, stream_id: str, url: str) -> None:
+# Builds the reader for one source the hub cannot dial itself, given its id and
+# url. The camera backend supplies this; see ``set_packet_source``.
+PacketSourceFactory = Callable[[str, str], SourceReader]
+
+
+class _Source:
+    """One camera connection, its reader task, and its subscribers."""
+
+    def __init__(
+        self,
+        stream_id: str,
+        url: str,
+        reader: SourceReader | None = None,
+        input_format: str | None = None,
+    ) -> None:
         self.stream_id = stream_id
         self.url = url
+        # None for a WebSocket camera, which the hub dials itself. Anything
+        # else brings its own reader; see the module docstring.
+        self.reader = reader
         self.subscribers: set[_Subscriber] = set()
         self.task: asyncio.Task | None = None
-        self.input_format: str | None = None
+        self.input_format = input_format
         self.preroll = PrerollBuffer()
 
 
@@ -285,17 +312,43 @@ class CameraWebSocketHub:
         # Format is a property of the camera, not of a connection, so it
         # survives reconnects and is shared by every subscriber.
         self._formats: dict[str, str] = {}
+        # Set once at wiring time by whoever can read a non-WebSocket source.
+        # Kept as a callback rather than an import because that reader lives in
+        # the camera backend, which already depends on this module.
+        self._packet_source: PacketSourceFactory | None = None
         self._lock = asyncio.Lock()
 
+    def set_packet_source(self, factory: "PacketSourceFactory | None") -> None:
+        """Name who can read a source the hub cannot dial itself."""
+        self._packet_source = factory
+
     def has_stream(self, stream_id: str) -> bool:
-        """Whether a WebSocket source with this id is configured."""
+        """Whether this source is served from the relay rather than dialed."""
         return stream_id in self._sources
 
-    async def update_streams(self, streams: tuple[tuple[str, str], ...]) -> None:
-        """Adopt the configured WebSocket sources, dropping the ones that left."""
-        wanted = {
-            stream_id: url for stream_id, url in streams if is_websocket_url(url)
-        }
+    def input_format(self, stream_id: str) -> str | None:
+        """The demuxer name for one relayed source, if it is already known."""
+        source = self._sources.get(stream_id)
+        return None if source is None else source.input_format
+
+    async def update_streams(
+        self, streams: tuple[tuple[str, str], ...], camera_backend: str = "go2rtc"
+    ) -> None:
+        """Adopt the sources the hub should serve, dropping the ones that left.
+
+        WebSocket cameras are always held here: nothing else can read them. An
+        RTSP camera is held only when the camera backend is one that keeps its
+        own connection the hub can borrow, which is aiortc -- go2rtc dials the
+        camera inside a child process, out of reach, so those sources are left
+        for the recorder to dial itself.
+        """
+        wanted: dict[str, str] = {}
+        for stream_id, url in streams:
+            if is_websocket_url(url):
+                wanted[stream_id] = url
+            elif camera_backend == "aiortc" and self._packet_source is not None:
+                wanted[stream_id] = url
+
         async with self._lock:
             stale = [
                 source
@@ -307,10 +360,25 @@ class CameraWebSocketHub:
                 self._formats.pop(source.url, None)
             for stream_id, url in wanted.items():
                 if stream_id not in self._sources:
-                    self._sources[stream_id] = _Source(stream_id, url)
+                    self._sources[stream_id] = self._build_source(stream_id, url)
 
         for source in stale:
             await self._stop(source)
+
+    def _build_source(self, stream_id: str, url: str) -> _Source:
+        """One source, dialed here or read by whoever already holds it."""
+        if is_websocket_url(url):
+            return _Source(stream_id, url)
+        assert self._packet_source is not None
+        # RTSP carries its own timing and its codec is known from the SDP, so
+        # unlike a WebSocket camera there is nothing to sniff: the backend
+        # hands over H.264 in Annex-B, which is what the demuxer is told.
+        return _Source(
+            stream_id,
+            url,
+            reader=self._packet_source(stream_id, url),
+            input_format="h264",
+        )
 
     async def detect_format(self, stream_id: str, url: str) -> str:
         """Return ``h264`` or ``mjpeg`` for one camera, probing it if needed.
@@ -420,11 +488,18 @@ class CameraWebSocketHub:
         attempt = 0
         while True:
             try:
-                await self._pump(source)
+                if source.reader is None:
+                    await self._pump(source)
+                else:
+                    await source.reader()
                 attempt = 0
             except asyncio.CancelledError:
                 raise
-            except (OSError, WebSocketException, asyncio.TimeoutError) as error:
+            # Broad on purpose: a reader that belongs to another module gets
+            # the same redial treatment as the built-in pump rather than
+            # killing the source's task on an exception this one did not
+            # anticipate.
+            except Exception as error:
                 attempt += 1
                 self._logger.warning(
                     "Camera %s stream ended (%s); reconnecting", source.stream_id, error
@@ -456,6 +531,18 @@ class CameraWebSocketHub:
                 if not should_forward(message):
                     continue
                 self._publish(source, bytes(message))
+
+    def publish(self, stream_id: str, payload: bytes) -> None:
+        """Take one payload for a source the hub does not read itself.
+
+        Whoever holds that camera calls this for as long as it holds it, which
+        is what keeps the preroll buffer current even when nothing is
+        subscribed here yet -- the live view being up is exactly when a
+        recording is most likely to start.
+        """
+        source = self._sources.get(stream_id)
+        if source is not None:
+            self._publish(source, payload)
 
     def _publish(self, source: _Source, payload: bytes) -> None:
         overflowed = source.preroll.overflowed
