@@ -141,19 +141,6 @@ def part_path(root: Path | str, session: str, filename: str) -> Path:
     return resolved
 
 
-def normalize_seek(value: Any) -> float:
-    """Validate a ``?t=`` playback offset in seconds."""
-    try:
-        seconds = float(value)
-    except (TypeError, ValueError) as error:
-        raise ValueError("seek offset must be a number") from error
-    if seconds != seconds or seconds in (float("inf"), float("-inf")):
-        raise ValueError("seek offset must be finite")
-    if seconds < 0:
-        raise ValueError("seek offset must not be negative")
-    return seconds
-
-
 def normalize_thumbnail_width(value: Any) -> int:
     """Validate a ``?w=`` thumbnail width.
 
@@ -764,7 +751,6 @@ async def fill_part_details(
 
 def remux_args(
     path: str,
-    start: float = 0.0,
     transcode: bool = False,
     audio_codec: str | None = None,
 ) -> tuple[str, ...]:
@@ -772,14 +758,12 @@ def remux_args(
 
     Fragmented because a plain MP4 has to seek backwards to write its ``moov``
     atom and so cannot be produced on a pipe at all. The consequence is that
-    the response has no index and honours no Range: playback is forward-only,
-    and seeking is a new request with ``?t=``.
+    the response has no index and honours no Range, so the player can only seek
+    inside what it has already buffered.
 
-    ``-ss`` goes before ``-i`` so ffmpeg seeks by index instead of decoding the
-    file from the beginning. ``-map 0:v:0 -map 0:a?`` mirrors the recorder's
-    own reasoning: a private data track the camera sends would fail the mux.
+    ``-map 0:v:0 -map 0:a?`` mirrors the recorder's own reasoning: a private
+    data track the camera sends would fail the mux.
     """
-    seek: tuple[str, ...] = ("-ss", f"{start:.3f}") if start > 0 else ()
     if transcode:
         video: tuple[str, ...] = (
             "-c:v",
@@ -802,7 +786,6 @@ def remux_args(
         "-nostats",
         "-loglevel",
         "error",
-        *seek,
         "-i",
         path,
         "-map",
@@ -863,12 +846,11 @@ async def _drain_stderr(process: asyncio.subprocess.Process, tail: list[str]) ->
 async def stream_remux(
     path: Path,
     logger: logging.Logger,
-    start: float = 0.0,
     transcode: bool = False,
     audio_codec: str | None = None,
 ) -> AsyncIterator[bytes]:
     """Yield the remuxed bytes, and take the ffmpeg down with the response."""
-    args = remux_args(str(path), start, transcode, audio_codec)
+    args = remux_args(str(path), transcode, audio_codec)
     process = await asyncio.create_subprocess_exec(
         *args,
         stdin=asyncio.subprocess.DEVNULL,

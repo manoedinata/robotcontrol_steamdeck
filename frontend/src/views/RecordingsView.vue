@@ -44,9 +44,7 @@ const {
 } = useRecordings()
 const { recordingState } = useBackendConnection()
 
-// The clip on screen, if any. `offset` is what was asked of the backend: a
-// remuxed stream is re-based to zero, so the elapsed time the player shows is
-// relative to the jump, and the offset has to be added back for display.
+// The clip on screen, if any. Seeking is the player's own business.
 const playing = ref(null)
 const confirmingDelete = ref(null)
 const deleteError = ref('')
@@ -67,7 +65,6 @@ const storageSummary = computed(() => {
 const playingSource = computed(() => {
   if (!playing.value) return ''
   return recordingFileUrl(playing.value.session, playing.value.file, 'play', {
-    t: playing.value.offset > 0 ? playing.value.offset.toFixed(3) : null,
     transcode: playing.value.transcode ? 1 : null,
   })
 })
@@ -80,32 +77,19 @@ function downloadUrl(sessionId, part) {
   return recordingFileUrl(sessionId, part.file, 'download')
 }
 
-async function play(sessionId, source, part, offset = 0) {
-  const reopening = playing.value !== null
+async function play(sessionId, source, part) {
   playing.value = {
     session: sessionId,
     file: part.file,
     sourceId: source.id,
-    duration: part.duration,
     // A codec the renderer cannot decode is refused by the backend with a 415
     // rather than played as a black rectangle, so ask for the encode outright.
     transcode: part.playable === false,
-    offset,
   }
   // The player is a dialog, so the gamepad has to land in it rather than stay
-  // on the card behind. Re-opening at a new offset keeps the focus it has.
-  if (reopening) return
+  // on the card behind.
   await nextTick()
   document.querySelector('.recording-player [data-gamepad-control]')?.focus({ preventScroll: true })
-}
-
-function seekTo(event) {
-  if (!playing.value) return
-  play(playing.value.session, { id: playing.value.sourceId }, {
-    file: playing.value.file,
-    duration: playing.value.duration,
-    playable: playing.value.transcode ? false : true,
-  }, Number(event.target.value))
 }
 
 async function closePlayer() {
@@ -331,19 +315,10 @@ watch(() => recordingState.value?.active, (now, before) => {
 
         <video class="recording-video" :src="playingSource" autoplay controls playsinline></video>
 
-        <footer class="recording-player-footer">
-          <p v-if="playing.transcode" class="recording-note">
+        <footer v-if="playing.transcode" class="recording-player-footer">
+          <p class="recording-note">
             This camera recorded a format the player cannot decode, so it is being
             converted as it plays.
-          </p>
-          <label v-if="playing.duration" class="recording-seek">
-            <span>Start from {{ formatDuration(playing.offset) }}</span>
-            <input type="range" min="0" :max="Math.floor(playing.duration)" step="1"
-              :value="playing.offset" data-gamepad-control @change="seekTo" />
-          </label>
-          <p class="recording-note recording-note-quiet">
-            The clip is converted as it plays, so the scrub bar only covers what has
-            loaded. Use the slider to start somewhere else.
           </p>
         </footer>
       </section>

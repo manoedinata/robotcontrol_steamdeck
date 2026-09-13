@@ -874,18 +874,15 @@ async def download_recording(session: str, file: str) -> Response:
 
 @app.get("/recordings/{session}/{file}/play")
 async def play_recording(
-    session: str, file: str, t: str | None = None, transcode: bool = False
+    session: str, file: str, transcode: bool = False
 ) -> Response:
     """One part remuxed to fragmented MP4, which Chromium can play.
 
     Matroska cannot be played in the renderer at all, and a fragmented MP4 is
     the only shape that can be produced on a pipe. It carries no index, so the
-    response honours no Range and cannot be seeked: ``?t=<seconds>`` re-opens
-    the stream at an offset instead, which the UI drives from the duration the
-    detail endpoint gave it.
+    response honours no Range: the player seeks inside what it has buffered.
     """
     try:
-        start = RecordingLibrary.normalize_seek(t) if t is not None else 0.0
         path = RecordingLibrary.part_path(recorder.recordings_root(), session, file)
     except ValueError as error:
         return JSONResponse({"error": str(error)}, status_code=400)
@@ -920,7 +917,6 @@ async def play_recording(
             async for chunk in RecordingLibrary.stream_remux(
                 path,
                 LOGGER,
-                start,
                 transcode and not playable,
                 measured["audio_codec"],
             ):

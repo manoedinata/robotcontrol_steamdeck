@@ -286,11 +286,6 @@
     font-size: 0.8rem;
 }
 
-.recording-note-quiet {
-    color: #98a0a6;
-    font-size: 0.74rem;
-}
-
 .recording-source {
     margin-top: 14px;
 }
@@ -472,25 +467,6 @@
 
 .recording-player-footer .recording-note {
     color: var(--hud-muted);
-}
-
-.recording-seek {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 8px;
-    font-size: 0.78rem;
-    font-variant-numeric: tabular-nums;
-}
-
-.recording-seek span {
-    flex: none;
-    color: var(--hud-muted);
-}
-
-.recording-seek input {
-    flex: 1 1 auto;
-    accent-color: var(--hud-accent);
 }
 
 /* The Deck in one hand, or a narrow window: the row becomes two lines. */

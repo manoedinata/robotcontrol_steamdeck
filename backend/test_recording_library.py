@@ -441,13 +441,7 @@ class RemoveSessionTests(unittest.TestCase):
             self.assertIsInstance(free_bytes, int)
 
 
-class SeekAndWidthTests(unittest.TestCase):
-    def test_a_seek_offset_must_be_a_finite_non_negative_number(self) -> None:
-        self.assertEqual(Library.normalize_seek("12.5"), 12.5)
-        for bad in ("-1", "abc", "nan", "inf", None):
-            with self.subTest(value=bad), self.assertRaises(ValueError):
-                Library.normalize_seek(bad)
-
+class ThumbnailWidthTests(unittest.TestCase):
     def test_a_thumbnail_width_must_be_one_of_the_offered_sizes(self) -> None:
         self.assertEqual(Library.normalize_thumbnail_width(None), Library.THUMBNAIL_WIDTH)
         self.assertEqual(Library.normalize_thumbnail_width("640"), 640)
@@ -476,14 +470,10 @@ class RemuxArgumentTests(unittest.TestCase):
         self.assertEqual(args[args.index("-c:v") + 1], "copy")
         self.assertNotIn("libx264", args)
 
-    def test_a_seek_is_an_input_option(self) -> None:
-        # Before -i, so ffmpeg seeks by index instead of decoding from the
-        # start of the file.
-        args = Library.remux_args("/x.mkv", start=12.0)
-        self.assertIn("-ss", input_options(args))
-
-    def test_no_seek_is_asked_for_at_the_beginning(self) -> None:
-        self.assertNotIn("-ss", Library.remux_args("/x.mkv", start=0.0))
+    def test_playback_never_asks_ffmpeg_to_seek(self) -> None:
+        # Every response starts at the first frame; the player does its own
+        # seeking inside what it has buffered.
+        self.assertNotIn("-ss", Library.remux_args("/x.mkv"))
 
     def test_the_transcode_variant_is_only_used_when_asked(self) -> None:
         args = Library.remux_args("/x.mkv", transcode=True)
