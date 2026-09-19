@@ -12,6 +12,7 @@ const {
   cameraSources,
   activeCameraIndex,
   cameraBackend,
+  rtspTransport,
   ptzIp,
   recordingsDir,
   packetFieldLimits,
@@ -28,6 +29,7 @@ const {
 // One editable form row per configured camera source.
 const cameras = ref([])
 const backend = ref(cameraBackend.value)
+const transport = ref(rtspTransport.value)
 const ptzAddress = ref(ptzIp.value)
 const recordingsPath = ref(recordingsDir.value)
 
@@ -234,6 +236,10 @@ watch(cameraBackend, (next) => {
   backend.value = next
 }, { immediate: true })
 
+watch(rtspTransport, (next) => {
+  transport.value = next
+}, { immediate: true })
+
 watch(recordingsDir, (next) => {
   recordingsPath.value = next
 })
@@ -316,6 +322,7 @@ async function persistSettings({ focusSave = false } = {}) {
       cameraSources: cameraSourcePayload,
       activeCameraIndex: Math.min(activeCameraIndex.value, cameraSourcePayload.length - 1),
       cameraBackend: backend.value,
+      rtspTransport: transport.value,
       ptzIp: ptzAddress.value.trim(),
       recordingsDir: recordingsPath.value.trim(),
       // Merged over the stored map so limits for fields the backend has not
@@ -472,6 +479,19 @@ defineExpose({ saveBeforeClose })
             <option value="go2rtc">go2rtc</option>
             <option value="aiortc">aiortc</option>
           </select>
+        </div>
+
+        <div class="settings-field">
+          <label for="rtsp-transport">RTSP transport</label>
+          <select id="rtsp-transport" v-model="transport" class="form-select" data-gamepad-control>
+            <option value="tcp">TCP</option>
+            <option value="udp">UDP</option>
+          </select>
+          <small class="settings-hint">
+            UDP is lower latency where it is allowed through; a VPN or a filtered
+            network drops it and leaves the camera connected but silent. Applies to
+            the aiortc backend; recording always uses TCP.
+          </small>
         </div>
       </div>
 

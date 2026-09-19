@@ -21,7 +21,7 @@ Two source kinds share one path. An RTSP url is dialed by the camera backend dir
 Configuration message (RTSP credentials may be supplied as URL-encoded userinfo). `camera_streams` is the list of camera sources to keep connected, each with a renderer-assigned `id`:
 
 ```json
-{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"udp_listen_port":8889,"camera_streams":[{"id":"cam-0","url":"rtsp://user:password@camera/stream"}],"camera_backend":"go2rtc"}}
+{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"udp_listen_port":8889,"camera_streams":[{"id":"cam-0","url":"rtsp://user:password@camera/stream"}],"camera_backend":"go2rtc","rtsp_transport":"tcp"}}
 ```
 
 Control messages may update any subset of schema fields:
@@ -299,6 +299,8 @@ The project image bundles the backend with the frontend. Inside the container th
 UDP transmission runs only while at least one controls WebSocket is connected and a complete destination is enabled. Disconnecting the final UI resets all controls to schema defaults. The app sends no special final stop datagram; the robot must enforce a UDP receive-timeout watchdog.
 
 `camera_backend` defaults to `go2rtc`; `aiortc` remains available as an explicit alternative. With go2rtc, FastAPI starts one localhost-only go2rtc process on demand and registers every configured source as a named stream (the renderer's stream id), then proxies `/offer?src=<id>` SDP to go2rtc. A relayed WebSocket source is registered as an `exec:` ffmpeg source rather than a plain url, because the relay serves a bare bytestream with no container to identify it and the demuxer has to be named; the backend sniffs the camera's first payload to pick `h264` or `mjpeg`. A renderer that holds one peer per stream keeps every source connected, so switching is instant. The go2rtc API listens on `127.0.0.1:1984` and WebRTC media uses port `8555`. Set `GO2RTC_BINARY` to override the executable path during local development. A selected but unavailable go2rtc binary reports a camera error and does not silently fall back to aiortc.
+
+`rtsp_transport` defaults to `tcp` and may be `udp`. It selects how the aiortc dial carries RTP: TCP interleaves it inside the RTSP connection, UDP gives it its own datagrams. UDP is lower latency where the network allows it, and a VPN or filtered network drops it outright -- the camera then completes the RTSP handshake and delivers nothing, which looks like a broken camera rather than a blocked port. It reaches only this process's own dial; go2rtc runs in a child process and chooses its own transport. Recording is always TCP, because a dropped RTP packet is permanent corruption of that GOP in a stream copy and a recording has no latency requirement to trade for it. Changing the setting re-dials every source.
 
 With aiortc, each `/offer` creates an aiortc peer and RTSP media player for the requested stream. A config change closes only the peers whose source id or url actually changed; removing a stream or switching backend closes its peers, and FastAPI shutdown closes everything. The current deployment assumes the renderer and backend share the Steam Deck host; no STUN/TURN service is configured.
 

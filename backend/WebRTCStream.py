@@ -36,6 +36,33 @@ from CameraWebSocketSource import (
 CameraStreams = tuple[tuple[str, str], ...]
 
 
+# How the live path carries RTP. TCP interleaves it inside the RTSP connection
+# that is already open; UDP gives it its own datagrams.
+RTSP_TRANSPORTS = ("tcp", "udp")
+DEFAULT_RTSP_TRANSPORT = RTSP_TRANSPORTS[0]
+
+
+def rtsp_open_options(
+    timeout_us: str, transport: str = DEFAULT_RTSP_TRANSPORT
+) -> dict[str, str]:
+    """ffmpeg input options for dialing a camera's RTSP service.
+
+    TCP by default. UDP is the lower-latency transport and was what this used,
+    but it is also the one a VPN or a restrictive network drops outright, and a
+    camera reached that way answers the RTSP handshake and then never delivers
+    a packet -- which looks like a broken camera, not a blocked port. TCP also
+    spares the shared connection the loss artifacts every reader would see,
+    since one dial feeds both the peers and the recorder. The operator can ask
+    for UDP where the network allows it and the latency is worth having.
+    """
+    return {
+        "rtsp_transport": transport,
+        "fflags": "nobuffer",
+        "flags": "low_delay",
+        "timeout": timeout_us,
+    }
+
+
 def ingest_url(stream_id: str, url: str) -> str:
     """The address the camera backend should actually open for one source.
 
@@ -224,10 +251,14 @@ class _AiortcStream:
         streams: CameraStreams,
         logger: logging.Logger,
         ws_hub: CameraWebSocketHub | None = None,
+        rtsp_transport: str = DEFAULT_RTSP_TRANSPORT,
     ) -> None:
         self._streams: dict[str, str] = dict(streams)
         self._logger = logger
         self._ws_hub = ws_hub
+        # Fixed for the life of this backend object: a transport change closes
+        # every connection, so WebRTCStream rebuilds rather than mutating it.
+        self._rtsp_transport = rtsp_transport
         # Each peer remembers the stream id and URL it was opened with so a
         # config change can close only the peers whose source actually changed.
         self._sessions: dict[RTCPeerConnection, tuple[str, str, _SharedPlayer]] = {}
@@ -264,12 +295,9 @@ class _AiortcStream:
         return MediaPlayer(
             camera_url,
             format="rtsp",
-            options={
-                "rtsp_transport": "udp",
-                "fflags": "nobuffer",
-                "flags": "low_delay",
-                "timeout": self.RTSP_OPEN_TIMEOUT_US,
-            },
+            options=rtsp_open_options(
+                self.RTSP_OPEN_TIMEOUT_US, self._rtsp_transport
+            ),
             # Hand out the camera's own packets instead of decoding them. The
             # Deck stops paying for a decode and an encode per peer, and the
             # packets stay in a form a recording can stream-copy -- which is
@@ -378,9 +406,14 @@ class _AiortcStream:
             player = await self._dial(stream_id, camera_url, input_format)
             if player.video is None:
                 _stop_player(player)
+                # aiortc hands out a video track for h264 and vp8 only when
+                # it is not decoding, and it is not decoding because this one
+                # connection feeds every peer and the recorder. An H.265
+                # camera reaches here having connected perfectly.
                 raise RuntimeError(
-                    f"camera source {stream_id!r} does not provide a video "
-                    f"track: {scrub_credentials(camera_url)}"
+                    f"camera source {stream_id!r} has no H.264 video track "
+                    f"(an H.265 camera has to be set to H.264): "
+                    f"{scrub_credentials(camera_url)}"
                 )
 
             shared = _SharedPlayer(
@@ -697,9 +730,11 @@ class WebRTCStream:
         logger: logging.Logger,
         backend: str = "go2rtc",
         ws_hub: CameraWebSocketHub | None = None,
+        rtsp_transport: str = DEFAULT_RTSP_TRANSPORT,
     ) -> None:
         self._logger = logger
         self._backend = backend
+        self._rtsp_transport = rtsp_transport
         self._streams: CameraStreams = tuple(streams)
         # Resolves the demuxer for WebSocket sources, which reach both backends
         # through the local relay rather than being dialed directly.
@@ -709,17 +744,27 @@ class WebRTCStream:
 
     def _set_backend(self, backend: str) -> None:
         if backend == "aiortc":
-            self._stream = _AiortcStream(self._streams, self._logger, self._ws_hub)
+            self._stream = _AiortcStream(
+                self._streams, self._logger, self._ws_hub, self._rtsp_transport
+            )
         elif backend == "go2rtc":
             self._stream = _Go2RtcStream(self._streams, self._logger, self._ws_hub)
         else:
             raise ValueError("camera_backend must be 'go2rtc' or 'aiortc'")
 
-    async def update_config(self, streams: CameraStreams, backend: str) -> None:
+    async def update_config(
+        self,
+        streams: CameraStreams,
+        backend: str,
+        rtsp_transport: str = DEFAULT_RTSP_TRANSPORT,
+    ) -> None:
         streams = tuple(streams)
-        if backend != self._backend:
+        # A transport change is as disruptive as a backend change: it decides
+        # how a connection is opened, so every open one has to be dialed again.
+        if backend != self._backend or rtsp_transport != self._rtsp_transport:
             await self.close()
             self._backend = backend
+            self._rtsp_transport = rtsp_transport
             self._streams = streams
             self._set_backend(backend)
             if streams:

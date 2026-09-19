@@ -23,7 +23,7 @@ This directory is the sole owner of UDP and camera transport, for every source k
 
 - `WS /ws/controls` accepts only `config`, `send`, `ptz`, and `record` message types.
 - `GET /health` is a lightweight readiness probe. Keep it dependency-free (no camera connect, no UDP peer) so the Docker entrypoint can poll it safely.
-- Config fields include `udp_host`, `udp_port`, `udp_listen_port`, `camera_streams`, and `camera_backend`; they never enter UDP payloads. `camera_backend` is `go2rtc` by default or `aiortc`. `camera_streams` is a list of `{ "id", "url" }` RTSP sources kept warm at once; ids match `[A-Za-z0-9_-]{1,64}` and are unique. RTSP credentials are URL-encoded in each `url` userinfo and must never be logged.
+- Config fields include `udp_host`, `udp_port`, `udp_listen_port`, `camera_streams`, `camera_backend`, and `rtsp_transport`; they never enter UDP payloads. `camera_backend` is `go2rtc` by default or `aiortc`. `rtsp_transport` is `tcp` by default or `udp`, applies to the aiortc dial only, and never to recording. `camera_streams` is a list of `{ "id", "url" }` RTSP sources kept warm at once; ids match `[A-Za-z0-9_-]{1,64}` and are unique. RTSP credentials are URL-encoded in each `url` userinfo and must never be logged.
 - `udp_listen_port` configures the independent telemetry socket, defaults to `8889`, and binds on all interfaces.
 - Empty UDP host plus port `0` disables transmission. Any partially configured destination is invalid.
 - Control messages may contain any subset of fields declared in `packets-schema.json`; merge them into the current complete packet.

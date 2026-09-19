@@ -27,7 +27,7 @@ from PTZController import (
 from CameraWebSocketSource import CameraWebSocketHub
 from Recorder import Recorder, normalize_record_action, scrub_credentials
 import RecordingLibrary
-from WebRTCStream import WebRTCStream
+from WebRTCStream import RTSP_TRANSPORTS, WebRTCStream
 import utils
 
 LOGGER = logging.getLogger(__name__)
@@ -124,6 +124,7 @@ video_stream = WebRTCStream(
     logger=LOGGER,
     backend=runtime.config.camera_backend,
     ws_hub=camera_ws_hub,
+    rtsp_transport=runtime.config.rtsp_transport,
 )
 
 # Writes every configured source to disk on request. Constructing it does no
@@ -255,6 +256,8 @@ def validate_config(
     str,
     dict[str, float],
     str,
+    # rtsp_transport, appended last with recordings_dir before it.
+    str,
 ]:
     allowed_keys = {
         "udp_host",
@@ -262,6 +265,7 @@ def validate_config(
         "udp_listen_port",
         "camera_streams",
         "camera_backend",
+        "rtsp_transport",
         "ptz_ip",
         "packet_slew",
         "recordings_dir",
@@ -281,6 +285,7 @@ def validate_config(
         else runtime.config.camera_streams
     )
     camera_backend_value = config.get("camera_backend", runtime.config.camera_backend)
+    rtsp_transport_value = config.get("rtsp_transport", runtime.config.rtsp_transport)
     ptz_ip_value = config.get("ptz_ip", runtime.config.ptz_ip)
     packet_slew = (
         validate_packet_slew(config["packet_slew"])
@@ -305,6 +310,11 @@ def validate_config(
         "aiortc",
     }:
         raise ValueError("camera_backend must be 'go2rtc' or 'aiortc'")
+    if (
+        not isinstance(rtsp_transport_value, str)
+        or rtsp_transport_value not in RTSP_TRANSPORTS
+    ):
+        raise ValueError("rtsp_transport must be 'tcp' or 'udp'")
     if not isinstance(ptz_ip_value, str):
         raise ValueError("ptz_ip must be a string")
 
@@ -330,6 +340,7 @@ def validate_config(
         # Appended last on purpose: the existing tests index this tuple
         # positionally, so a new field must never shift the ones before it.
         recordings_dir,
+        rtsp_transport_value,
     )
 
 
@@ -1115,12 +1126,14 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         ptz_ip,
                         packet_slew,
                         recordings_dir,
+                        rtsp_transport,
                     ) = validate_config(config)
                     runtime.config.udp_ip = udp_host
                     runtime.config.udp_port = udp_port
                     runtime.config.udp_listen_port = udp_listen_port
                     runtime.config.camera_streams = camera_streams
                     runtime.config.camera_backend = camera_backend
+                    runtime.config.rtsp_transport = rtsp_transport
                     runtime.udp_enabled = udp_enabled
                     runtime.config.ptz_ip = ptz_ip
                     runtime.config.packet_slew = packet_slew
@@ -1130,7 +1143,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     # backend is pointed at its relay URL, or the first dial
                     # 404s.
                     await camera_ws_hub.update_streams(camera_streams, camera_backend)
-                    await video_stream.update_config(camera_streams, camera_backend)
+                    await video_stream.update_config(
+                        camera_streams, camera_backend, rtsp_transport
+                    )
                     recorder.update_sources(camera_streams)
                     recorder.set_root(recordings_dir)
                     LOGGER.info(
@@ -1138,6 +1153,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         f"enabled={udp_enabled} destination="
                         f"{udp_host}:{udp_port} telemetry_port={udp_listen_port} "
                         f"ptz_ip={ptz_ip or 'disabled'} "
+                        f"rtsp_transport={rtsp_transport} "
                         f"camera_streams={len(camera_streams)} "
                         f"clients={len(runtime.clients)}"
                     )

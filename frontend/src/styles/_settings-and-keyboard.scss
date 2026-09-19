@@ -160,6 +160,16 @@
     font-weight: 400;
 }
 
+// Help text under a control, for a choice whose consequence is not visible
+// from the options themselves.
+.settings-hint {
+    display: block;
+    margin-top: 6px;
+    color: #687078;
+    font-size: 0.75rem;
+    line-height: 1.45;
+}
+
 .settings-field .form-control,
 .settings-field .form-select {
     min-width: 0;

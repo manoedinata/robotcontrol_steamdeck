@@ -35,10 +35,12 @@ from CameraWebSocketSource import (
     should_forward,
 )
 from WebRTCStream import (
+    RTSP_TRANSPORTS,
     _resolve_stream_id,
     go2rtc_source,
     ingest_url,
     missing_parameter_sets,
+    rtsp_open_options,
 )
 
 
@@ -62,6 +64,33 @@ class CameraBackendConfigTests(unittest.TestCase):
     def test_unknown_backend_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             validate_config({"camera_backend": "ffmpeg"})
+
+
+class RtspTransportConfigTests(unittest.TestCase):
+    """How the live path is told to carry RTP."""
+
+    def test_defaults_to_tcp(self) -> None:
+        # The transport that survives a VPN or a filtered network, where UDP
+        # leaves a camera connected and silent.
+        self.assertEqual(validate_config({})[9], "tcp")
+
+    def test_known_transports_are_accepted(self) -> None:
+        for transport in RTSP_TRANSPORTS:
+            with self.subTest(transport=transport):
+                self.assertEqual(
+                    validate_config({"rtsp_transport": transport})[9], transport
+                )
+
+    def test_unknown_transport_is_rejected(self) -> None:
+        for bad in ("http", "TCP", "", 4):
+            with self.subTest(transport=bad):
+                with self.assertRaises(ValueError):
+                    validate_config({"rtsp_transport": bad})
+
+    def test_the_transport_reaches_the_dial_options(self) -> None:
+        self.assertEqual(
+            rtsp_open_options("5000000", "udp")["rtsp_transport"], "udp"
+        )
 
 
 class CameraStreamsConfigTests(unittest.TestCase):
@@ -385,6 +414,15 @@ class CameraIngestTests(unittest.TestCase):
         self.assertEqual(
             relay_url("cam-2"), "http://127.0.0.1:8000/camera/cam-2/stream"
         )
+
+    def test_rtsp_is_dialed_over_tcp(self) -> None:
+        # A VPN or a filtered network drops RTP over UDP, and the camera then
+        # completes the handshake and sends nothing. The recorder has always
+        # dialed TCP; the live view must agree, or a recordable source is one
+        # the operator cannot watch.
+        options = rtsp_open_options("5000000")
+        self.assertEqual(options["rtsp_transport"], "tcp")
+        self.assertEqual(options["timeout"], "5000000")
 
     def test_the_live_path_is_never_prerolled(self) -> None:
         # go2rtc opens this url for the live view; replaying a buffered GOP

@@ -9,6 +9,10 @@ const DEFAULT_UDP_HOST = '127.0.0.1'
 const DEFAULT_UDP_PORT = 8888
 const DEFAULT_UDP_LISTEN_PORT = 8889
 const DEFAULT_CAMERA_BACKEND = 'go2rtc'
+// TCP unless the operator asks otherwise: UDP is faster where it is allowed
+// through and silently dropped where it is not.
+const DEFAULT_RTSP_TRANSPORT = 'tcp'
+const RTSP_TRANSPORTS = ['tcp', 'udp']
 const DEFAULT_CAMERA_TYPE = 'rtsp'
 const DEFAULT_PTZ_IP = ''
 // Empty means the backend keeps its deployment default (RECORDINGS_DIR).
@@ -26,6 +30,7 @@ const EMPTY_CAMERA_SOURCE = Object.freeze({
 const cameraSources = ref([{ ...EMPTY_CAMERA_SOURCE }])
 const activeCameraIndex = ref(0)
 const cameraBackend = ref(DEFAULT_CAMERA_BACKEND)
+const rtspTransport = ref(DEFAULT_RTSP_TRANSPORT)
 const ptzIp = ref(DEFAULT_PTZ_IP)
 const recordingsDir = ref(DEFAULT_RECORDINGS_DIR)
 // Operator overrides for the send packet's field bounds, keyed by field name:
@@ -164,6 +169,7 @@ function syncBackendConfig() {
         udp_listen_port: udpListenPort.value,
         camera_streams: cameraStreams,
         camera_backend: cameraBackend.value,
+        rtsp_transport: rtspTransport.value,
         ptz_ip: ptzIp.value.trim(),
         recordings_dir: recordingsDir.value.trim(),
         packet_slew: { ...packetSlew.value },
@@ -255,6 +261,9 @@ function applySettings(settings) {
     cameraSources.value = parseStoredCameraSources(settings)
     activeCameraIndex.value = clampCameraIndex(settings?.activeCameraIndex ?? 0)
     cameraBackend.value = settings?.cameraBackend ?? DEFAULT_CAMERA_BACKEND
+    rtspTransport.value = RTSP_TRANSPORTS.includes(settings?.rtspTransport)
+        ? settings.rtspTransport
+        : DEFAULT_RTSP_TRANSPORT
     ptzIp.value = typeof settings?.ptzIp === 'string' ? settings.ptzIp : DEFAULT_PTZ_IP
     recordingsDir.value = typeof settings?.recordingsDir === 'string'
         ? settings.recordingsDir
@@ -311,6 +320,7 @@ export function useSettings() {
         cameraFeeds,
         cameraUrl,
         cameraBackend: readonly(cameraBackend),
+        rtspTransport: readonly(rtspTransport),
         ptzIp: readonly(ptzIp),
         recordingsDir: readonly(recordingsDir),
         ptzControlsActiveCamera,

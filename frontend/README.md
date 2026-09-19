@@ -15,7 +15,7 @@ A Steam Deck-oriented Electron and Vue UI for viewing a camera stream and contro
 - Automatic backend WebSocket reconnect and current-state replay
 - Host ping latency to the configured UDP destination in the Home HUD
 - Live/stale robot battery percentage in the Home HUD, which tapping swaps for the Steam Deck's own battery and back
-- Persistent camera sources, RTSP credentials, camera backend, UDP command destination, telemetry listening port, velocity, keyboard, and PTZ camera settings
+- Persistent camera sources, RTSP credentials, camera backend, RTSP transport, UDP command destination, telemetry listening port, velocity, keyboard, and PTZ camera settings
 
 ## Quick Start
 
@@ -52,7 +52,7 @@ For a single container that launches both frontend and backend from Steam, see t
 `useBackendConnection.js` owns the singleton WebSocket and reconnect lifecycle. It sends typed messages:
 
 ```json
-{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"udp_listen_port":8889,"camera_streams":[{"id":"cam-0","url":"rtsp://camera/stream"}],"camera_backend":"go2rtc"}}
+{"type":"config","config":{"udp_host":"127.0.0.1","udp_port":8888,"udp_listen_port":8889,"camera_streams":[{"id":"cam-0","url":"rtsp://camera/stream"}],"camera_backend":"go2rtc","rtsp_transport":"tcp"}}
 ```
 
 ```json

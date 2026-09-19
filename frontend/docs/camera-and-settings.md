@@ -7,6 +7,7 @@ The Settings drawer stores camera source, UDP destination, velocity limits, and 
 - One or more camera sources, each with a stream type (RTSP or direct WebSocket), source IP, port, and optional subpath. The type selects how the backend reaches the camera; the renderer receives both kinds identically.
 - Optional RTSP username and password per source.
 - Camera backend: `go2rtc` (default) or `aiortc`.
+- RTSP transport: `tcp` (default) or `udp`, for how the live path carries RTP.
 - UDP command target host/port and telemetry listening port.
 - Maximum linear Y and angular theta velocity, `0.1..100`.
 - Built-in on-screen keyboard toggle.
@@ -33,6 +34,7 @@ The persisted contract remains:
   ],
   "activeCameraIndex": 0,
   "cameraBackend": "go2rtc",
+  "rtspTransport": "tcp",
   "packetLimits": {
     "pwm": { "min": -100, "max": 100 },
     "steering": { "min": -100, "max": 100 }
@@ -56,7 +58,10 @@ Empty UDP host and port `0` disable command transmission. `udpListenPort` remain
 
 ## Camera Path
 
-Every source and `cameraBackend` are sent to the backend as `camera_streams` (a list of `{ id, url }`, `id` = `cam-<sourceIndex>`) and `camera_backend`. With the default `go2rtc` backend, FastAPI starts one local go2rtc process on demand, registers one named stream per source, and proxies receive-only WebRTC signaling through `POST /offer?src=<id>`. `aiortc` remains available as an explicit alternative. Each `CameraFeed.vue` negotiates one peer with FastAPI for its stream and renders the media track in `<video>`; holding that peer open is what keeps the source warm.
+Every source, `cameraBackend`, and `rtspTransport` are sent to the backend as `camera_streams` (a list of `{ id, url }`, `id` = `cam-<sourceIndex>`), `camera_backend`, and `rtsp_transport`.
+
+`rtspTransport` selects how the live path carries RTP for an RTSP source: `tcp` (default) interleaves it inside the RTSP connection, `udp` gives it its own datagrams. UDP has lower latency where the network allows it; a VPN or a filtered network drops it and the camera then connects and stays silent, which reads as a broken camera rather than a blocked port. It is sent as `rtsp_transport` and applies to the aiortc backend, which is where this process dials RTSP itself; go2rtc dials in its own child process and chooses for itself. Recording is always TCP: a dropped RTP packet is permanent corruption of that GOP in a stream copy, and a recording has no latency requirement to trade for it. Changing it re-dials every source, since a transport is chosen when a connection is opened.
+ With the default `go2rtc` backend, FastAPI starts one local go2rtc process on demand, registers one named stream per source, and proxies receive-only WebRTC signaling through `POST /offer?src=<id>`. `aiortc` remains available as an explicit alternative. Each `CameraFeed.vue` negotiates one peer with FastAPI for its stream and renders the media track in `<video>`; holding that peer open is what keeps the source warm.
 
 Both transports reach the renderer this way. For WebSocket mode, Settings still stores `ws://<IP>:<port>`, but the renderer no longer touches the camera: the backend opens the socket, sends `PlayStream2`, ignores text status messages, and re-serves the binary payloads at `GET /camera/<id>/stream` for its own camera backend to consume. This costs some latency compared with the previous renderer-direct WebCodecs path, and buys one camera transport instead of two — the renderer has no camera code, and anything the backend does across "all sources" works for every source kind. Nothing is re-encoded on the relay hop.
 

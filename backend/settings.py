@@ -6,6 +6,7 @@ class Settings:
         udp_listen_port: int = 8889,
         camera_streams: tuple[tuple[str, str], ...] = (),
         camera_backend: str = "go2rtc",
+        rtsp_transport: str = "tcp",
         ptz_ip: str = "",
         packet_slew: dict[str, float] | None = None,
         recordings_dir: str = "",
@@ -19,6 +20,10 @@ class Settings:
         # and a ws/wss url the backend pulls in and re-serves over HTTP.
         self.camera_streams = camera_streams
         self.camera_backend = camera_backend
+        # How the live path carries RTP for an RTSP source: "tcp" interleaved
+        # in the RTSP connection, or "udp" in its own datagrams. Recording is
+        # always TCP and does not follow this.
+        self.rtsp_transport = rtsp_transport
         self.ptz_ip = ptz_ip
         # Where recordings are written. Empty means the deployment default,
         # which is what the container and the Steam launcher configure.
