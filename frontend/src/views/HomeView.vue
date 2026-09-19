@@ -121,6 +121,16 @@ const distanceLabel = computed(() => {
   return `${metres.toFixed(1)} m`
 })
 
+// Debug readout: the two encoder frames exactly as they arrive, before the
+// scale and the integration, so a distance that looks wrong can be traced back
+// to whether the counts themselves are moving.
+function rawCount(value) {
+  return typeof value === 'number' ? value.toFixed(1) : '--'
+}
+
+const encoderLeftLabel = computed(() => rawCount(telemetry.value?.position_left))
+const encoderRightLabel = computed(() => rawCount(telemetry.value?.position_right))
+
 const distanceStatusLabel = computed(() => (hasOdometry.value
   ? `Travelled ${distanceLabel.value}, heading ${headingDegrees.value.toFixed(0)} degrees`
   : 'Waiting for the robot\'s wheel positions'))
@@ -292,6 +302,13 @@ const statusLabel = computed(() => {
           <span class="distance-value" aria-hidden="true">{{ distanceLabel }}</span>
           <span class="visually-hidden" role="status" aria-live="off">{{ distanceStatusLabel }}</span>
         </div>
+      </div>
+
+      <div class="encoder-debug" title="Raw encoder frames, as received" aria-hidden="true">
+        <span>L</span>
+        <span class="encoder-debug-value">{{ encoderLeftLabel }}</span>
+        <span>R</span>
+        <span class="encoder-debug-value">{{ encoderRightLabel }}</span>
       </div>
     </div>
 
