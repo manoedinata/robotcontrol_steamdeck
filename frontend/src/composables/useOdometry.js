@@ -2,13 +2,14 @@ import { computed, readonly, ref, watch } from 'vue'
 import { useBackendConnection } from './useBackendConnection'
 import { useSettings } from './useSettings'
 
-// Differential-drive odometry over the robot's two wheel encoders.
+// Differential-drive odometry over the robot's two wheel speeds.
 //
-// Frames 1 and 2 of the telemetry packet are absolute encoder positions, so
-// every step works on the difference between one packet and the last:
+// Frames 3 and 4 of the telemetry packet are the wheel speeds in counts per
+// second, already worked out by the robot, so each packet's movement is that
+// speed over the time since the last one:
 //
-//   d_left       = (left  - prev_left)  * metres per count
-//   d_right      = (right - prev_right) * metres per count
+//   d_left       = speed_left  * dt * metres per count
+//   d_right      = speed_right * dt * metres per count
 //   delta_theta  = (d_right - d_left) / wheel separation
 //   delta_s      = (d_right + d_left) / 2
 //   x     += delta_s * cos(theta + delta_theta / 2)
@@ -20,9 +21,20 @@ import { useSettings } from './useSettings'
 // the one it ends with, and the midpoint is the closest a straight segment
 // gets to the curve it is standing in for.
 //
+// A speed has to be held over an interval to become a distance, and the only
+// interval available here is the gap between arrivals, measured on this side
+// of the network. That is the cost of integrating speed rather than
+// differencing the positions in frames 1 and 2: those are absolute, so a
+// packet lost between two others changes nothing, while a speed missed is
+// movement this can never account for. Packets that arrive further apart than
+// MAX_STEP_S are treated as a break rather than as the robot having held its
+// last speed across the gap, and the positions are still shown beside the
+// distance so the two can be checked against each other.
+//
 // This lives in the renderer because the wire carries counts and nothing else:
 // what a count is worth, and how far apart the wheels are, are the operator's
 // measurements of their own robot, not something the robot reports.
+const MAX_STEP_S = 0.5
 const x = ref(0)
 const y = ref(0)
 const theta = ref(0)
@@ -30,7 +42,9 @@ const theta = ref(0)
 // good rather than an odometer that only ever climbs.
 const travelled = ref(0)
 
-let previous = null
+// When the last packet arrived, on the monotonic clock. The integration is
+// against elapsed time now, not against the previous counts.
+let previousAt = null
 let lastLogAt = 0
 // The counts this run started from. Reactive, unlike `previous`, because the
 // debug readout shows counts measured against it: after a reset both wheels
@@ -47,39 +61,49 @@ function reset() {
     y.value = 0
     theta.value = 0
     travelled.value = 0
-    previous = null
+    previousAt = null
     origin.value = null
 }
 
 function integrate(packet) {
-    // The socket went down and the readings that follow cannot be assumed to
-    // continue the ones before them, so the next packet starts a new baseline
-    // instead of being differenced against a stale one.
+    // The socket went down, and nothing says the robot held its last speed
+    // while it was gone, so the next packet starts the clock again.
     if (!packet) {
-        previous = null
+        previousAt = null
         return
     }
 
-    const left = packet.position_left
-    const right = packet.position_right
-    if (typeof left !== 'number' || typeof right !== 'number') return
+    const speedLeft = packet.speed_left
+    const speedRight = packet.speed_right
+    if (typeof speedLeft !== 'number' || typeof speedRight !== 'number') return
 
-    // The first reading is a starting point, not a movement.
-    if (previous === null) {
-        previous = { left, right }
-        if (origin.value === null) origin.value = { left, right }
+    // Positions are not what the pose is built from any more, but they are
+    // what the debug strip counts from, so the run's origin still comes from
+    // the first reading that carries them.
+    if (origin.value === null
+        && typeof packet.position_left === 'number'
+        && typeof packet.position_right === 'number') {
+        origin.value = { left: packet.position_left, right: packet.position_right }
+    }
+
+    const arrivedAt = performance.now()
+    // The first packet is a starting instant, not an interval.
+    if (previousAt === null) {
+        previousAt = arrivedAt
         return
     }
 
-    const deltaLeft = left - previous.left
-    const deltaRight = right - previous.right
-    previous = { left, right }
+    const elapsed = (arrivedAt - previousAt) / 1000
+    previousAt = arrivedAt
+    // Too long a gap is a break in the feed, not a long slow step: holding the
+    // last speed across it would invent metres the robot may never have moved.
+    if (!(elapsed > 0) || elapsed > MAX_STEP_S) return
 
     // A scale changed mid-drive applies from here on and does not rewrite the
     // distance already travelled: the metres behind the robot were measured
     // under the old figure and are not re-measurable.
-    const dLeft = deltaLeft * distancePerCount.value
-    const dRight = deltaRight * distancePerCount.value
+    const dLeft = speedLeft * elapsed * distancePerCount.value
+    const dRight = speedRight * elapsed * distancePerCount.value
 
     // Without a wheel separation there is no way to turn a difference between
     // the wheels into an angle, so the robot is treated as driving straight

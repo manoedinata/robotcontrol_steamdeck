@@ -15,7 +15,7 @@ A Steam Deck-oriented Electron and Vue UI for viewing a camera stream and contro
 - Settings drawer and built-in gamepad-navigable keyboard
 - Automatic backend WebSocket reconnect and current-state replay
 - Host ping latency to the configured UDP destination in the Home HUD
-- Distance travelled in the Home HUD, from differential-drive odometry over the robot's two wheel encoders; the battery readout there shows the Steam Deck's own battery, since this robot reports no battery of its own
+- Distance travelled in the Home HUD, from differential-drive odometry over the robot's two reported wheel speeds; the battery readout there shows the Steam Deck's own battery, since this robot reports no battery of its own
 - Persistent camera sources, RTSP credentials, camera backend, RTSP transport, UDP command destination, telemetry listening port, velocity, keyboard, and PTZ camera settings
 
 ## Quick Start

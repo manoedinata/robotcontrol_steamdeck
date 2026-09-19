@@ -41,7 +41,7 @@ Robot telemetry uses the same WebSocket in the backend-to-renderer direction:
 {"type":"receive","packet":{"position_left":1234.5,"position_right":1230.1,"speed_left":48.0,"speed_right":47.8}}
 ```
 
-The frontend reads the fields it knows one at a time, so a field the robot does not send is null rather than a reason to drop the packet. It marks telemetry live on receipt and stale after two seconds without another valid packet. Frames 1 and 2 -- the left and right motor encoders -- are what Home uses. They are absolute counts, so `useOdometry` works on the difference between one packet and the last and integrates a differential-drive pose from it; the distance travelled comes out of that, and the pose is logged to the renderer console once a second while what else to do with it is decided.
+The frontend reads the fields it knows one at a time, so a field the robot does not send is null rather than a reason to drop the packet. It marks telemetry live on receipt and stale after two seconds without another valid packet. Frames 3 and 4 -- the wheel speeds, in counts per second -- are what the odometry runs on: `useOdometry` holds each reported speed over the time since the previous packet and integrates a differential-drive pose from the pair. Frames 1 and 2, the absolute encoder positions, are what the debug strip counts from, so the two can be checked against each other. The distance travelled comes out of the pose, which is logged to the renderer console once a second while what else to do with it is decided.
 
 On connect the backend also announces which send-packet fields the UI may bound:
 
