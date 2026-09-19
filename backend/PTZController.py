@@ -3,7 +3,9 @@
 Translates rotation requests (left/right/up/down) and zoom requests
 (zoom-in/zoom-out) into continuous PTZData XML PUT requests, and focus
 requests (focus-near/focus-far) into FocusData PUT requests, mirroring the
-proven flow from camera_anyar/stream_camera.py.
+proven flow from camera_anyar/stream_camera.py. The infrared illuminator is
+the odd one out: it is a latched aux control, switched on and off by name
+rather than driven while a button is held.
 """
 
 from __future__ import annotations
@@ -32,6 +34,10 @@ FOCUS_DIRECTIONS = ("focus-near", "focus-far")
 PTZ_USERNAME = "admin"
 PTZ_PASSWORD = "a1234567"
 
+# Aux control the infrared illuminator answers on. Hikvision numbers aux
+# outputs per channel; 1 is the IR light on the deployed camera.
+AUX_LIGHT_ID = 1
+
 PTZ_SPEED = 60
 ZOOM_SPEED = 60
 FOCUS_SPEED = 50
@@ -49,6 +55,22 @@ FOCUS_STOP_XML = (
     "<focus>0</focus>"
     "</FocusData>"
 )
+
+
+def aux_light_xml(on: bool) -> str:
+    """Build the PTZAux XML that latches the infrared illuminator on or off.
+
+    Unlike PTZData and FocusData this carries no namespace: the camera rejects
+    the aux body when one is declared.
+    """
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<PTZAux>"
+        f"<id>{AUX_LIGHT_ID}</id>"
+        "<type>LIGHT</type>"
+        f"<status>{'on' if on else 'off'}</status>"
+        "</PTZAux>"
+    )
 
 
 def direction_to_ptz_data(direction: str, speed: int = PTZ_SPEED) -> str:
@@ -141,6 +163,10 @@ class PTZController:
         self._focus_url = (
             f"http://{self.ip}/ISAPI/System/Video/inputs/channels/{self.channel}/focus"
         )
+        self._aux_url = (
+            f"http://{self.ip}/ISAPI/PTZCtrl/channels/{self.channel}"
+            f"/auxcontrols/{AUX_LIGHT_ID}"
+        )
         self._digest_opener = self._build_opener(digest=True)
         self._basic_opener = self._build_opener(digest=False)
         self._writer_lock = asyncio.Lock()
@@ -206,6 +232,16 @@ class PTZController:
         async with self._writer_lock:
             await self._put(self._focus_url, xml)
 
+    async def set_light(self, on: bool) -> None:
+        """Switch the infrared illuminator on or off.
+
+        There is no stop to pair with this: the camera holds the state until
+        it is told otherwise, so callers send one request per change.
+        """
+        xml = aux_light_xml(on)
+        async with self._writer_lock:
+            await self._put(self._aux_url, xml)
+
     async def stop(self) -> None:
         """Send the zero-speed PTZData that halts continuous motion."""
         async with self._writer_lock:
@@ -215,6 +251,13 @@ class PTZController:
         """Send the zero-speed FocusData that halts focus motion."""
         async with self._writer_lock:
             await self._put(self._focus_url, FOCUS_STOP_XML)
+
+
+def normalize_light(value: Any) -> bool:
+    """Validate an infrared-light request coming from the UI."""
+    if not isinstance(value, bool):
+        raise ValueError("ptz light must be true or false")
+    return value
 
 
 def normalize_direction(value: Any) -> str:

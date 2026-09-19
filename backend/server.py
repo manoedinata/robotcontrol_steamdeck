@@ -22,6 +22,7 @@ from PTZController import (
     PTZController,
     normalize_direction,
     normalize_focus,
+    normalize_light,
     normalize_zoom,
 )
 from CameraWebSocketSource import CameraWebSocketHub
@@ -79,6 +80,12 @@ class RuntimeState:
     # Tracks which focus command was last sent to the camera so the loop can
     # fire on the press/release edges only instead of re-sending each tick.
     ptz_focus_sent: str | None = None
+    # The infrared illuminator is latched, not held: this is the state the UI
+    # last asked for, and ptz_light_sent is what the camera was last told.
+    # None means "never told", so the loop states the truth once a controller
+    # exists instead of assuming the camera agrees.
+    ptz_light_request: bool = False
+    ptz_light_sent: bool | None = None
     ptz_request_seq: int = 0
 
 
@@ -433,6 +440,25 @@ async def broadcast_camera_restart(stream_ids: tuple[str, ...]) -> None:
     )
 
 
+async def broadcast_ptz_light(on: bool) -> None:
+    """Tell every UI the illuminator state, so a second screen agrees.
+
+    Like a recording, this outlives one UI's session: the camera holds the
+    light until something switches it off, so the backend states it rather
+    than letting a renderer assume its own toggle is the truth.
+    """
+    if not runtime.clients:
+        return
+
+    message = {"type": "ptz_light", "on": on}
+    await asyncio.gather(
+        *(
+            send_client_message(websocket, message)
+            for websocket in tuple(runtime.clients)
+        )
+    )
+
+
 async def broadcast_recording(state: dict[str, Any]) -> None:
     if not runtime.clients:
         return
@@ -606,6 +632,25 @@ async def udp_loop() -> None:
                             )
                             last_error_log = now
 
+                # The light gets its own attempt: it is the one command with
+                # no stop behind it, so a failure has to be retried rather
+                # than left for the next press, and it must not be reported
+                # as a failed move.
+                if light != runtime.ptz_light_sent:
+                    try:
+                        await controller.set_light(light)
+                        runtime.ptz_light_sent = light
+                    except Exception as error:
+                        now = loop.time()
+                        if now - last_light_error_log >= 1.0:
+                            LOGGER.warning(
+                                "PTZ light %s to %s failed: %s",
+                                "on" if light else "off",
+                                controller.ip,
+                                error,
+                            )
+                            last_light_error_log = now
+
             next_send += interval
             delay = next_send - loop.time()
             if delay > 0:
@@ -660,6 +705,9 @@ def sync_ptz_controller() -> None:
             username=PTZ_USERNAME,
             password=PTZ_PASSWORD,
         )
+        # A different camera knows nothing of the light state the last one was
+        # told, so the loop says it again on its next tick.
+        runtime.ptz_light_sent = None
         LOGGER.info("PTZ control enabled for %s", ptz_ip)
 
 
@@ -674,17 +722,23 @@ async def ptz_loop() -> None:
     Focus is edge-triggered: exactly one FocusData command is sent when a
     focus button is pressed and one FocusData stop when it is released, so
     the focus endpoint is not hammered at the loop rate.
+
+    The infrared light is latched: one PTZAux command is sent when the toggle
+    changes and nothing until it changes again, because the camera holds the
+    state on its own and there is no stop to pair with it.
     """
     loop = asyncio.get_running_loop()
     interval = utils.hz_to_s(PTZ_SEND_HZ)
     next_send = loop.time()
     last_error_log = 0.0
+    last_light_error_log = 0.0
 
     try:
         while True:
             direction = runtime.ptz_request
             zoom = runtime.ptz_zoom_request
             focus = runtime.ptz_focus_request
+            light = runtime.ptz_light_request
             controller = runtime.ptz
             if controller is not None:
                 try:
@@ -722,6 +776,25 @@ async def ptz_loop() -> None:
                             error,
                         )
                         last_error_log = now
+
+                # The light gets its own attempt: it is the one command with
+                # no stop behind it, so a failure has to be retried rather
+                # than left for the next press, and it must not be reported
+                # as a failed move.
+                if light != runtime.ptz_light_sent:
+                    try:
+                        await controller.set_light(light)
+                        runtime.ptz_light_sent = light
+                    except Exception as error:
+                        now = loop.time()
+                        if now - last_light_error_log >= 1.0:
+                            LOGGER.warning(
+                                "PTZ light %s to %s failed: %s",
+                                "on" if light else "off",
+                                controller.ip,
+                                error,
+                            )
+                            last_light_error_log = now
 
             next_send += interval
             delay = next_send - loop.time()
@@ -1137,8 +1210,13 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         websocket, {"type": "schema", "fields": send_field_limits()}
     )
     # A recording outlives a UI reconnect, so the backend states the truth
-    # rather than letting the renderer replay a stale intent.
+    # rather than letting the renderer replay a stale intent. The camera's
+    # infrared light is the same kind of latched state, so it is stated here
+    # too instead of being reset to off behind the operator's back.
     await send_client_message(websocket, recorder.state())
+    await send_client_message(
+        websocket, {"type": "ptz_light", "on": runtime.ptz_light_request}
+    )
     LOGGER.info(
         "UI connected; sending controls every %.2f ms to %s:%s and receiving "
         "telemetry on port %s",
@@ -1261,6 +1339,22 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         if runtime.ptz is not None
                         else "no PTZ camera configured; ignored",
                     )
+                elif message_type == "ptz_light":
+                    # Latched infrared illuminator, separate from the held-
+                    # button "ptz" message: it stays where the operator put it
+                    # instead of being re-sent or stopped every tick.
+                    light = normalize_light(incoming_data.get("on"))
+                    changed = light != runtime.ptz_light_request
+                    runtime.ptz_light_request = light
+                    if changed:
+                        LOGGER.info(
+                            "PTZ light %s (%s)",
+                            "on" if light else "off",
+                            f"controller at {runtime.ptz.ip}"
+                            if runtime.ptz is not None
+                            else "no PTZ camera configured; ignored",
+                        )
+                        await broadcast_ptz_light(light)
                 elif message_type == "record":
                     action = normalize_record_action(incoming_data.get("action"))
                     if action == "start":
@@ -1277,7 +1371,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.target_packet = {**runtime.target_packet, **packet}
                 else:
                     raise ValueError(
-                        "message type must be 'config', 'send', 'ptz', or 'record'"
+                        "message type must be 'config', 'send', 'ptz', "
+                        "'ptz_light', or 'record'"
                     )
             except (
                 TypeError,
@@ -1320,3 +1415,6 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             runtime.ptz_request = None
             runtime.ptz_zoom_request = None
             runtime.ptz_focus_request = None
+            # ptz_light_request is deliberately left alone: it is a latched
+            # camera setting, not a held button, and dropping it here would
+            # switch off the illuminator every time the UI reloads.

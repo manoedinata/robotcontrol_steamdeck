@@ -25,6 +25,11 @@ const recordingState = ref(null)
 // True while the socket is down and the last known recording state may have
 // moved on without us.
 const recordingStale = ref(false)
+// Whether the camera's infrared illuminator is lit, pushed on connect and on
+// every change. Like recording, the backend owns it: the light stays on in the
+// camera across a UI reload, so the renderer reflects it rather than asserting
+// its own idea of it.
+const ptzLight = ref(false)
 // Stream ids the backend has just re-dialed, each with a count of how often it
 // has said so. The backend owns camera transport, so it -- not the settings
 // form -- is what knows a live connection has been thrown away, and it says so
@@ -125,6 +130,14 @@ function acceptRecording(message) {
     recordingStale.value = false
 }
 
+function acceptPtzLight(message) {
+    if (typeof message?.on !== 'boolean') {
+        console.warn('[backend] Ignored invalid PTZ light message:', message)
+        return
+    }
+    ptzLight.value = message.on
+}
+
 function acceptCamera(message) {
     const streams = message?.streams
     if (!Array.isArray(streams) || streams.some((id) => typeof id !== 'string')) {
@@ -201,6 +214,8 @@ function connect() {
                 acceptRecording(message)
             } else if (message.type === 'camera') {
                 acceptCamera(message)
+            } else if (message.type === 'ptz_light') {
+                acceptPtzLight(message)
             }
         } catch (error) {
             console.warn('[backend] Ignored invalid WebSocket response:', error)
@@ -286,6 +301,14 @@ function updatePtz(direction, zoom, focus) {
     send({ type: 'ptz', ...request })
 }
 
+// Switch the camera's infrared illuminator on or off. Latched, so it is sent
+// once per press rather than while a button is held, and not replayed by
+// sendCurrentState(): the backend states the light back on connect, and the
+// camera has been holding it all along.
+function setPtzLight(on) {
+    send({ type: 'ptz_light', on: Boolean(on) })
+}
+
 // Start or stop recording every configured camera source. Not replayed by
 // sendCurrentState(): the backend is the source of truth for whether a
 // recording is running, and replaying a stale intent could stop a live one.
@@ -316,6 +339,8 @@ export function useBackendConnection() {
         updateConfig,
         updateControl,
         updatePtz,
+        ptzLight: readonly(ptzLight),
+        setPtzLight,
         setRecording,
     }
 }

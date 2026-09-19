@@ -415,6 +415,14 @@ body {
     background: var(--hud-accent);
 }
 
+// The illuminator is invisible to the operator on a daylight feed, so the
+// button itself has to be what says it is on.
+.light-trigger.lit {
+    color: #111719;
+    border-color: rgb(245 185 66 / 70%);
+    background: var(--hud-accent);
+}
+
 .record-trigger.recording:hover,
 .record-trigger.recording:focus-visible {
     color: #111719;

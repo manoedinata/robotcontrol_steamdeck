@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowDown, ArrowUp, Clapperboard, Crosshair, Disc, Focus, LogOut, Settings } from '@lucide/vue'
+import { ArrowDown, ArrowUp, Clapperboard, Crosshair, Disc, Focus, Lightbulb, LogOut, Settings } from '@lucide/vue'
 import { useGamepad } from './composables/useGamepad'
 import { useBackendConnection } from './composables/useBackendConnection'
 import { usePTZState } from './composables/usePTZState'
@@ -15,6 +15,8 @@ const {
   disconnect: disconnectBackend,
   recordingState,
   setRecording,
+  ptzLight,
+  setPtzLight,
 } = useBackendConnection()
 const { setFocus, setUiOwnsGamepad, enabled: ptzEnabled } = usePTZState()
 const { reversing, toggleDriveMode } = useDriveMode()
@@ -24,6 +26,17 @@ const { reversing, toggleDriveMode } = useDriveMode()
 const driveModeLabel = computed(() => (reversing.value
   ? 'Driving in reverse. Switch to forward.'
   : 'Driving forward. Switch to reverse.'))
+
+// The illuminator is latched, not held: one press switches it on, the next
+// switches it off. The label names the state and the change for the same
+// reason the drive one does.
+const lightLabel = computed(() => (ptzLight.value
+  ? 'Infrared light on. Switch it off.'
+  : 'Infrared light off. Switch it on.'))
+
+function toggleLight() {
+  setPtzLight(!ptzLight.value)
+}
 
 // Focus buttons are hold-to-act: pointerdown starts the focus movement and
 // pointerup/leave releases it, mirroring the backend deadman behavior so the
@@ -117,7 +130,8 @@ onBeforeUnmount(() => {
       <HomeView />
     </main>
 
-    <nav class="shell-actions shell-actions--left" aria-label="Camera focus and drive direction">
+    <nav class="shell-actions shell-actions--left"
+      aria-label="Camera focus, infrared light, and drive direction">
       <template v-if="ptzEnabled">
         <button class="floating-icon-button focus-trigger" type="button" title="Focus near"
           aria-label="Focus near" @pointerdown.prevent="focusPress('near')" @pointerup="focusRelease()"
@@ -128,6 +142,11 @@ onBeforeUnmount(() => {
           aria-label="Focus far" @pointerdown.prevent="focusPress('far')" @pointerup="focusRelease()"
           @pointerleave="focusRelease()" @pointercancel="focusRelease()" @contextmenu.prevent>
           <Crosshair :size="21" aria-hidden="true" />
+        </button>
+        <button class="floating-icon-button light-trigger" :class="{ lit: ptzLight }" type="button"
+          :title="lightLabel" :aria-label="lightLabel" :aria-pressed="ptzLight"
+          @click="toggleLight">
+          <Lightbulb :size="21" aria-hidden="true" />
         </button>
       </template>
       <button class="floating-icon-button drive-trigger" :class="{ reversing }" type="button"

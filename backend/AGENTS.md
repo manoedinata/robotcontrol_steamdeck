@@ -9,7 +9,7 @@ This directory is the sole owner of UDP and camera transport, for every source k
 - `server.py`: FastAPI lifecycle, typed controls/telemetry WebSocket, UDP sender/receiver, and WebRTC signaling endpoint.
 - `Recorder.py`: records every configured source at once, one stream-copying ffmpeg each, into Matroska. WebSocket sources are recorded through the relay with `?preroll=1`, so the file starts at the keyframe the hub still holds rather than at the camera's next one. The source list is frozen at start so config churn cannot split a recording; a source that has written video is retried all session, one that never did gives up. Never log or broadcast a camera URL from here.
 - `WebRTCStream.py`: selectable go2rtc/aiortc RTSP-to-WebRTC backends, multi-stream registration, and lifecycle cleanup. The aiortc backend keeps one refcounted connection per source, shared by every peer and by the relay; it is released when the last holder goes, so a recording keeps a camera open after the last viewer leaves.
-- `PTZController.py`: Hikvision ISAPI pan/tilt/zoom/focus continuous-move requests and value normalizers.
+- `PTZController.py`: Hikvision ISAPI pan/tilt/zoom/focus continuous-move requests, the latched PTZAux infrared light, and value normalizers.
 - `RecordingLibrary.py`: reads recordings back -- the session scan, the `session.json` manifest schema's reader half, path containment, ffprobe, and the playback and thumbnail ffmpeg commands. It imports from `Recorder.py` and never the other way round, and it never writes into the recordings folder except for an explicit delete.
 - `settings.py`: mutable runtime destination and camera configuration.
 - `utils.py`: schema-derived packet defaults, validation, timing, binary encoding, and decoding.

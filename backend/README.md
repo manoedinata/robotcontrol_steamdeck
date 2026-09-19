@@ -259,7 +259,7 @@ it, which matters more here than for the writer: this path is handed to
 
 ## PTZ Control
 
-When `ptz_ip` is configured, the backend drives a PTZ camera's Hikvision ISAPI continuous-move endpoint (rotation and zoom) plus the FocusData focus endpoint on behalf of all connected UIs. The camera credentials are hardcoded (`PTZ_USERNAME`/`PTZ_PASSWORD` in `PTZController.py`) and are tried as digest auth first, falling back to basic auth on a `401` response. Setting `ptz_ip` to an empty string disables PTZ and stops all camera HTTP traffic.
+When `ptz_ip` is configured, the backend drives a PTZ camera's Hikvision ISAPI continuous-move endpoint (rotation and zoom), the FocusData focus endpoint, and the PTZAux infrared light on behalf of all connected UIs. The camera credentials are hardcoded (`PTZ_USERNAME`/`PTZ_PASSWORD` in `PTZController.py`) and are tried as digest auth first, falling back to basic auth on a `401` response. Setting `ptz_ip` to an empty string disables PTZ and stops all camera HTTP traffic.
 
 The UI sends held PTZ requests over the controls WebSocket; `direction`, `zoom`, and `focus` are independent channels:
 
@@ -276,6 +276,18 @@ The UI sends held PTZ requests over the controls WebSocket; `direction`, `zoom`,
 A background loop sends exactly one rotation/zoom ISAPI command per tick (rotation takes priority over zoom, stop is sent when neither is active). Every rotation/zoom command is re-sent at 5 Hz — including stop, which is re-sent continuously while no request is active so the camera always halts even if the UI disconnects, crashes, or a stop packet is lost. Camera movements map to ISAPI pan/tilt values and zoom to the ISAPI zoom channel; both use fixed speeds.
 
 Focus is edge-triggered instead of deadman-repeated: one `FocusData` command goes to `PUT /ISAPI/System/Video/inputs/channels/<n>/focus` when a focus value first appears, and one zero-speed `FocusData` stop is sent when it clears (including when the last UI disconnects). Rotation and zoom stop packets on the `PTZData` channel are unaffected.
+
+### Infrared light
+
+The illuminator is a latched aux control rather than a held button, so it travels in its own message:
+
+```json
+{"type":"ptz_light","on":true}
+```
+
+`on` must be a boolean. The same loop sends one `PTZAux` body to `PUT /ISAPI/PTZCtrl/channels/<n>/auxcontrols/1` when the state changes and nothing until it changes again; there is no stop to pair with it, and a command that fails is retried on the next tick rather than waiting for another press. The camera holds the light on its own, so the request is *not* cleared when the last UI disconnects -- a UI reload would otherwise switch the light off behind the operator.
+
+Because the backend owns that state, it states it: `{"type":"ptz_light","on":...}` is sent to each UI on connect and broadcast to every UI whenever one of them changes it. Pointing `ptz_ip` at a different camera makes the loop state it again to the new one.
 
 ## Binary UDP Schema
 

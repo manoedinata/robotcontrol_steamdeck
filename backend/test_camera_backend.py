@@ -8,10 +8,14 @@ from aiortc import MediaStreamTrack
 from aiortc.mediastreams import MediaStreamError
 
 from PTZController import (
+    AUX_LIGHT_ID,
+    PTZController,
+    aux_light_xml,
     direction_to_ptz_data,
     focus_to_focus_data_xml,
     normalize_direction,
     normalize_focus,
+    normalize_light,
     normalize_zoom,
     zoom_to_ptz_data,
 )
@@ -19,6 +23,7 @@ from server import (
     SCHEMA_SLEW_RATES,
     advance_packet,
     encode_current_packet,
+    ptz_loop,
     restarted_camera_streams,
     runtime,
     send_field_limits,
@@ -403,6 +408,124 @@ class PTZFocusTests(unittest.TestCase):
 
     def test_normalize_focus_trims_and_lowercases(self) -> None:
         self.assertEqual(normalize_focus("  FOCUS-NEAR "), "focus-near")
+
+
+class PTZLightTests(unittest.TestCase):
+    """The infrared illuminator: latched aux control, not a held button."""
+
+    def test_light_requests_map_to_aux_xml(self) -> None:
+        self.assertIn(
+            f"<PTZAux><id>{AUX_LIGHT_ID}</id><type>LIGHT</type><status>on</status>",
+            aux_light_xml(True),
+        )
+        self.assertIn("<status>off</status>", aux_light_xml(False))
+
+    def test_light_xml_declares_no_namespace(self) -> None:
+        # The camera rejects the aux body when one is declared, unlike PTZData.
+        self.assertNotIn("xmlns", aux_light_xml(True))
+
+    def test_light_uses_the_aux_control_endpoint(self) -> None:
+        controller = PTZController(ip="10.0.0.9")
+        self.assertEqual(
+            controller._aux_url,
+            f"http://10.0.0.9/ISAPI/PTZCtrl/channels/1/auxcontrols/{AUX_LIGHT_ID}",
+        )
+
+    def test_normalize_light_rejects_non_booleans(self) -> None:
+        for value in ("on", "true", 1, 0, None, ""):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                normalize_light(value)
+
+    def test_normalize_light_accepts_booleans(self) -> None:
+        self.assertIs(normalize_light(True), True)
+        self.assertIs(normalize_light(False), False)
+
+
+class _FakePTZ:
+    """Records what the deadman loop asks of a camera, without a camera."""
+
+    ip = "10.0.0.9"
+
+    def __init__(self, failed_lights: int = 0) -> None:
+        self.lights: list[bool] = []
+        self._failed_lights = failed_lights
+
+    async def move(self, direction: str) -> None:
+        pass
+
+    async def zoom(self, zoom: str) -> None:
+        pass
+
+    async def focus(self, focus: str) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def stop_focus(self) -> None:
+        pass
+
+    async def set_light(self, on: bool) -> None:
+        self.lights.append(on)
+        if self._failed_lights > 0:
+            self._failed_lights -= 1
+            raise RuntimeError("camera refused the aux control")
+
+
+class PTZLightLoopTests(unittest.IsolatedAsyncioTestCase):
+    """The light is latched, so the loop speaks only when it changes."""
+
+    def setUp(self) -> None:
+        self._saved = (
+            runtime.ptz,
+            runtime.ptz_light_request,
+            runtime.ptz_light_sent,
+        )
+        runtime.ptz_light_request = False
+        runtime.ptz_light_sent = None
+
+    def tearDown(self) -> None:
+        (
+            runtime.ptz,
+            runtime.ptz_light_request,
+            runtime.ptz_light_sent,
+        ) = self._saved
+
+    async def test_the_light_is_sent_on_change_and_not_every_tick(self) -> None:
+        controller = _FakePTZ()
+        runtime.ptz = controller
+        loop_task = asyncio.create_task(ptz_loop())
+        try:
+            # One command states the light the UI is showing, so a camera that
+            # was left lit by a previous session is put back in step.
+            await asyncio.sleep(0.05)
+            self.assertEqual(controller.lights, [False])
+
+            runtime.ptz_light_request = True
+            await asyncio.sleep(0.3)
+            self.assertEqual(controller.lights, [False, True])
+
+            # Several ticks pass with nothing new asked for: the aux endpoint
+            # hears nothing, unlike the rotation deadman beside it.
+            await asyncio.sleep(0.5)
+            self.assertEqual(controller.lights, [False, True])
+        finally:
+            await _cancel_task(loop_task)
+
+    async def test_a_failed_light_command_is_retried(self) -> None:
+        # There is no stop behind this one, so a lost command would otherwise
+        # leave the camera dark until the operator pressed the button twice.
+        controller = _FakePTZ(failed_lights=1)
+        runtime.ptz = controller
+        runtime.ptz_light_sent = False
+        runtime.ptz_light_request = True
+        loop_task = asyncio.create_task(ptz_loop())
+        try:
+            await asyncio.sleep(0.5)
+            self.assertEqual(controller.lights, [True, True])
+            self.assertIs(runtime.ptz_light_sent, True)
+        finally:
+            await _cancel_task(loop_task)
 
 
 

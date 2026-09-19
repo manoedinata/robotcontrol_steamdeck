@@ -8,7 +8,7 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 
 - `main.js`: BrowserWindow, application lifecycle, settings load/save IPC, and Exit IPC.
 - `electron-components/preload.js`: narrow `quitApp`, `readDeckBattery`, `loadSettings`, and `saveSettings` bridge.
-- `src/App.vue`: persistent command shell (Record/Recordings/Exit/Settings stack on the right, PTZ focus near/far buttons and the drive-direction toggle on the left), backend connection lifecycle, and Settings/Recordings page state.
+- `src/App.vue`: persistent command shell (Record/Recordings/Exit/Settings stack on the right, PTZ focus near/far buttons, the infrared light toggle and the drive-direction toggle on the left), backend connection lifecycle, and Settings/Recordings page state.
 - `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition. The battery readout shows one of two sources and is tapped to change which.
 - `src/composables/useDeckBattery.js`: the Deck's own battery, polled from the main process; the renderer has no other host-hardware reader.
 - `src/views/SettingsView.vue`: camera sources, UDP destination, velocity limits, and keyboard settings.
@@ -47,6 +47,7 @@ WebSocket messages are separated by `type`:
 - `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_streams", "camera_backend", "rtsp_transport", "ptz_ip", "recordings_dir" } }` — `camera_streams` is `[{ "id", "url" }]`, one entry per configured source. A url is `rtsp://`, `ws://`, or `wss://`; the backend owns all of them.
 - `{ "type": "send", "packet": { ...schemaFields } }`
 - `{ "type": "ptz", "direction", "zoom", "focus" }` — held PTZ requests; any field null when nothing is held.
+- `{ "type": "ptz_light", "on": true | false }` — the camera's infrared light. Latched, not held: sent once per press and never replayed on reconnect, because the backend owns the state and pushes `{ "type": "ptz_light", ... }` on connect and whenever any UI changes it.
 - Backend telemetry uses `{ "type": "receive", "packet": { "battery_level": 0..100 } }`.
 - On connect the backend announces the settable send fields as `{ "type": "schema", "fields": [{ "name", "role", "type", "min", "max", "default" }] }` (padding excluded). Settings renders one min/max row per entry; do not parse `packets-schema.json` in the renderer.
 - Backend host reachability uses `{ "type": "ping", "ping_ms": number | null }`; the value measures ICMP latency to the configured UDP destination, not command-datagram RTT.
@@ -65,7 +66,7 @@ Current control mapping remains:
 - Theta is negated before publishing when `vy` is negative, so steering stays driver-relative while reversing. In reverse mode that is every non-zero push.
 - Gamepad dead zone is `0.12`; pointer/touch has no dead zone.
 - Each axis is scaled by the `packetLimits` entry of the send field carrying its role (`yVelocity`, `thetaVelocity`): the positive half of the stick reaches `max`, the negative half `min`, and the result is clamped into that range. Limits default to the schema bounds and may only narrow them.
-- PTZ (D-pad rotate, LB/RB zoom, on-screen focus buttons) is gated by `useSettings().ptzControlsActiveCamera`: requests are sent only while `ptzIp`'s host equals the active camera stream's host. `usePTZState` publishes a stop and drops local state when that flips false; `App.vue` hides the focus buttons.
+- PTZ (D-pad rotate, LB/RB zoom, on-screen focus buttons) is gated by `useSettings().ptzControlsActiveCamera`: requests are sent only while `ptzIp`'s host equals the active camera stream's host. `usePTZState` publishes a stop and drops local state when that flips false; `App.vue` hides the focus and light buttons. The light itself is not dropped with them: it is a camera setting the operator left on, not a button they are holding.
 
 ### Settings
 
