@@ -70,7 +70,9 @@ Inside the image, `/usr/local/bin/docker-entrypoint.sh`:
 1. Starts `uvicorn` in `/app/backend` on `127.0.0.1:8000`
 2. Polls `/health` until the backend is ready
 3. Starts Electron (`/app/frontend/main.js`) with the production renderer bundle
-4. Shuts down both processes together when Electron exits
+4. Kills both processes, and anything they started, when Electron exits
+
+Step 4 is `SIGKILL`, not `SIGTERM`. A graceful stop makes uvicorn wait for open connections to close, and the renderer's control WebSocket and the camera peers are precisely the ones that do not close by themselves, so the app sat on `Waiting for connections to close` while the operator looked at a dead screen. As the container's init the entrypoint kills everything in its PID namespace, which takes ffmpeg and go2rtc with it rather than leaving them orphaned.
 
 The image also bundles pinned, checksum-verified go2rtc binaries for `amd64` and `arm64`. FastAPI starts go2rtc on demand for the default `go2rtc` camera backend, using localhost API port `1984` and WebRTC listener port `8555`, and registers one stream per configured source. The renderer still uses only FastAPI `POST /offer?src=<id>`. Select `aiortc` explicitly in Settings when that backend is required; there is no automatic fallback. For local development, `GO2RTC_BINARY` overrides the executable path.
 

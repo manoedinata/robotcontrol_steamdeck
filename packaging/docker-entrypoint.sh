@@ -6,19 +6,46 @@ HEALTH_URL="${BACKEND_URL}/health"
 BACKEND_PID=""
 ELECTRON_PID=""
 
+# Exiting is not a negotiation. A polite SIGTERM puts uvicorn into a graceful
+# shutdown that waits for open connections to close -- and the renderer's
+# control WebSocket and the camera peers are exactly the connections that do
+# not close on their own -- so the app appeared to hang on the way out, holding
+# the screen for the whole graceful timeout. Nothing here needs to be asked
+# twice: the operator has already left.
+force_kill() {
+	local pid="${1:-}"
+	[[ -n "${pid}" ]] || return 0
+	kill -0 "${pid}" 2>/dev/null || return 0
+	kill -KILL "${pid}" 2>/dev/null || true
+}
+
+# Deepest first: killing a parent hands its children to init, where they are no
+# longer reachable by parentage.
+kill_descendants() {
+	local parent="$1" child
+	for child in $(pgrep -P "${parent}" 2>/dev/null || true); do
+		kill_descendants "${child}"
+		kill -KILL "${child}" 2>/dev/null || true
+	done
+}
+
 shutdown_services() {
 	local exit_code=$?
+	# Do not run this again for the signal that arrives while it is running.
+	trap - SIGINT SIGTERM EXIT
 	echo "[entrypoint] Shutting down (exit code ${exit_code})..." >&2
 
-	if [[ -n "${ELECTRON_PID:-}" ]] && kill -0 "${ELECTRON_PID}" 2>/dev/null; then
-		kill -TERM "${ELECTRON_PID}" 2>/dev/null || true
-		wait "${ELECTRON_PID}" 2>/dev/null || true
+	# ffmpeg and go2rtc are the backend's children, not this script's, so the
+	# tree goes before the two processes at the top of it.
+	if [[ $$ -eq 1 ]]; then
+		# Container init: every process in the PID namespace is ours.
+		kill -KILL -1 2>/dev/null || true
+	else
+		# Run outside a container, only what this script started.
+		kill_descendants "$$"
 	fi
-
-	if [[ -n "${BACKEND_PID:-}" ]] && kill -0 "${BACKEND_PID}" 2>/dev/null; then
-		kill -TERM "${BACKEND_PID}" 2>/dev/null || true
-		wait "${BACKEND_PID}" 2>/dev/null || true
-	fi
+	force_kill "${ELECTRON_PID:-}"
+	force_kill "${BACKEND_PID:-}"
 
 	exit "${exit_code}"
 }

@@ -16,7 +16,7 @@ This repository contains a Steam Deck robot monitor: a FastAPI backend for camer
 - Use host networking so the backend stays reachable at `127.0.0.1:8000` from the renderer.
 - The runtime image sets `PYTHONPATH=/app/backend` so backend modules resolve regardless of cwd.
 - `APP_SETTINGS_DIR` controls where Electron saves settings; the launcher bind-mounts a host directory there.
-- The entrypoint starts uvicorn, waits for `GET /health`, then starts Electron, and tears both down together.
+- The entrypoint starts uvicorn, waits for `GET /health`, then starts Electron, and tears both down together. Shutdown is a kill, not a request: uvicorn's graceful shutdown waits on the WebSocket and camera connections that never close on their own, which held the screen on the way out.
 - Docker bundles pinned, checksum-verified go2rtc binaries for `amd64` and `arm64`; `GO2RTC_BINARY` is the local-development override.
 
 ## Documentation
