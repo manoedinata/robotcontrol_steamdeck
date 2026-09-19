@@ -10,6 +10,12 @@ const shoulderButtons = ref({ lb: false, rb: false })
 // 14 = left, 15 = right. Used for camera rotation, so it must stay separate
 // from the navigation `direction` events that the same buttons also emit.
 const dpadButtons = ref({ up: false, down: false, left: false, right: false })
+// Live face button state, polled each frame. Standard mapping: 0 = Cross/A,
+// 1 = Circle/B, 2 = Square/X, 3 = Triangle/Y. Cross and Circle also emit the
+// `activate`/`cancel` navigation events below; these are for the Home
+// bindings, which need to know how long a button is held, not that it was
+// pressed.
+const faceButtons = ref({ cross: false, circle: false, square: false, triangle: false })
 const handlers = new Set()
 
 const DIRECTION_REPEAT_DELAY = 360
@@ -49,6 +55,7 @@ function pollGamepad(timestamp) {
         axes.value = [0, 0, 0, 0]
         shoulderButtons.value = { lb: false, rb: false }
         dpadButtons.value = { up: false, down: false, left: false, right: false }
+        faceButtons.value = { cross: false, circle: false, square: false, triangle: false }
         previousButtons = []
         heldDirection = null
         animationFrame = requestAnimationFrame(pollGamepad)
@@ -68,6 +75,13 @@ function pollGamepad(timestamp) {
         down: Boolean(gamepad.buttons[13]?.pressed),
         left: Boolean(gamepad.buttons[14]?.pressed),
         right: Boolean(gamepad.buttons[15]?.pressed),
+    }
+
+    faceButtons.value = {
+        cross: Boolean(gamepad.buttons[0]?.pressed),
+        circle: Boolean(gamepad.buttons[1]?.pressed),
+        square: Boolean(gamepad.buttons[2]?.pressed),
+        triangle: Boolean(gamepad.buttons[3]?.pressed),
     }
 
     const direction = currentDirection(gamepad)
@@ -102,6 +116,7 @@ function stopPolling() {
     axes.value = [0, 0, 0, 0]
     shoulderButtons.value = { lb: false, rb: false }
     dpadButtons.value = { up: false, down: false, left: false, right: false }
+    faceButtons.value = { cross: false, circle: false, square: false, triangle: false }
     previousButtons = []
     heldDirection = null
 }
@@ -136,6 +151,7 @@ export function useGamepad() {
         gamepadName: readonly(gamepadName),
         shoulderButtons: readonly(shoulderButtons),
         dpadButtons: readonly(dpadButtons),
+        faceButtons: readonly(faceButtons),
         acquire,
         registerHandler,
     }

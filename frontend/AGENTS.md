@@ -67,7 +67,8 @@ Current control mapping remains:
 - Theta is negated before publishing when `vy` is negative, so steering stays driver-relative while reversing. In reverse mode that is every non-zero push.
 - Gamepad dead zone is `0.12`; pointer/touch has no dead zone.
 - Each axis is scaled by the `packetLimits` entry of the send field carrying its role (`yVelocity`, `thetaVelocity`): the positive half of the stick reaches `max`, the negative half `min`, and the result is clamped into that range. Limits default to the schema bounds and may only narrow them.
-- PTZ (D-pad rotate, LB/RB zoom, on-screen focus buttons) is gated by `useSettings().ptzControlsActiveCamera`: requests are sent only while `ptzIp`'s host equals the active camera stream's host. `usePTZState` publishes a stop and drops local state when that flips false; `App.vue` hides the focus and light buttons. The light itself is not dropped with them: it is a camera setting the operator left on, not a button they are holding.
+- Face buttons on Home: A switches the drive direction, X focuses the camera (tap nearer, hold further), Y switches the infrared light, B switches the camera source. A and B still reach overlays as `activate`/`cancel`, so each Home binding yields while one is open; X and Y are read from `useGamepad().faceButtons`, which is live state rather than an event, because the tap-versus-hold split needs to know how long a button is down.
+- PTZ (D-pad rotate, LB/RB zoom, X or the on-screen buttons to focus) is gated by `useSettings().ptzControlsActiveCamera`: requests are sent only while `ptzIp`'s host equals the active camera stream's host. `usePTZState` publishes a stop and drops local state when that flips false; `App.vue` hides the focus and light buttons. The light itself is not dropped with them: it is a camera setting the operator left on, not a button they are holding.
 
 ### Settings
 

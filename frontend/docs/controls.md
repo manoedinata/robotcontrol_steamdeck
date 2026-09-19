@@ -5,15 +5,17 @@
 | Input      | Action                                                                                                                     |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
 | D-pad      | On Home: pan/tilt the PTZ camera only (see Camera Controls); it moves no focus there. Within Settings or Recordings: move focus, and move within the built-in keyboard. On a slider, left/right set it instead of moving focus |
-| A          | Activate the focused control (on Home only the Settings/Exit/Recordings button that already has focus) or press a keyboard key |
+| A          | On Home: switch the drive direction between forward and reverse. Within Settings, Recordings, or the built-in keyboard: activate the focused control or press a key |
 | B          | Switch to the next camera source on Home; close Settings, Recordings, or the recording player; cancel the built-in keyboard |
+| X          | On Home: focus the camera. A tap steps it nearer, holding it sweeps further (see Camera Controls). Inert elsewhere |
+| Y          | On Home: switch the camera's infrared light on or off. Inert elsewhere, and while PTZ does not control the camera on screen |
 | Left stick | Navigate the built-in keyboard only                                                                                        |
 
-B only switches cameras when more than one source is configured and no modal dialog is open, so Settings and the built-in keyboard keep their cancel behavior.
+B only switches cameras when more than one source is configured and no modal dialog is open, so Settings and the built-in keyboard keep their cancel behavior. A is the same arrangement the other way round: Home has no focused control worth firing from the pad -- the shell buttons are under the operator's thumb on the touchscreen -- while the drive direction is wanted mid-drive with both hands on the pad, so Home claims A and every overlay keeps it as activate.
 
 The camera and robot controller remain mounted while Settings is open. Focus moves spatially, remains visible while the drawer scrolls, and returns to the originating control when the keyboard closes. Saving restores focus to the Save button. Held directional input repeats after an initial delay.
 
-On the Home view, both sticks retain robot-control behavior and the D-pad stays with the camera; interface navigation consumes neither. The Settings, Recordings, and Exit buttons are tapped on the touchscreen, and focus returns to the button that opened a page when it closes, so A reopens it. The battery readout in the top right is tapped too: it shows the robot's battery or the Deck's own, one at a time, and each tap swaps which. It carries no gamepad binding, since the D-pad on Home belongs to the camera.
+On the Home view, both sticks retain robot-control behavior and the D-pad stays with the camera; interface navigation consumes neither. The Settings, Recordings, and Exit buttons are tapped on the touchscreen; focus still returns to the button that opened a page when it closes, but it is the touchscreen that fires it, since A drives the direction toggle here. The battery readout in the top right is tapped too: it shows the robot's battery or the Deck's own, one at a time, and each tap swaps which. It carries no gamepad binding, since the D-pad on Home belongs to the camera.
 
 The recordings page navigates the same way Settings does, at a higher handler priority; the two are never open at once. A on a session expands it, and A on a file plays it. While the player is up it takes the D-pad entirely -- focus cannot walk back onto the list behind it -- and B closes the player before it closes the page. The player's start-from slider is the one control where left/right set a value rather than moving focus, in twentieths of the clip.
 
@@ -29,7 +31,7 @@ The recordings page navigates the same way Settings does, at a higher handler pr
 
 The Gamepad API reads left-stick Y from `axes[1]` and right-stick X from `axes[2]`. Each value is normalized to `-1..+1` and scaled by its configured limit. Hardware input uses a `0.12` dead zone; pointer and touch input do not. Sideways translation is intentionally absent for the differential-drive robot.
 
-The left stick travels up only. Which way the robot goes is a mode, not a side of centre: the drive-direction button in the left-hand shell stack (below the PTZ focus and light buttons) switches between **forward**, where the stick's travel is sent as positive Y velocity, and **reverse**, where the same travel is sent negated. The button shows an up arrow in forward and a filled-in down arrow in reverse, and the linear readout goes negative in reverse, so the mode is legible from two places. The readout does not name the mode in words: its width is what holds the stick still, and a label that changed length would move the stick it sits under. It is deliberately not persisted: every start is forward.
+The left stick travels up only. Which way the robot goes is a mode, not a side of centre: the drive-direction button in the left-hand shell stack (below the PTZ focus and light buttons), or A on the pad, switches between **forward**, where the stick's travel is sent as positive Y velocity, and **reverse**, where the same travel is sent negated. The button shows an up arrow in forward and a filled-in down arrow in reverse, and the linear readout goes negative in reverse, so the mode is legible from two places. The readout does not name the mode in words: its width is what holds the stick still, and a label that changed length would move the stick it sits under. It is deliberately not persisted: every start is forward.
 
 Pushing the stick down does nothing in either mode. The pointer puck cannot be dragged past centre and the lower half of the ring is dimmed to say so; the hardware stick's lower half is clamped away, so holding it down is exactly as if it were centred. Reverse motion needs a `yVelocity` minimum below zero -- a limit narrowed to `0` in Settings leaves reverse with nothing to send.
 
@@ -45,6 +47,9 @@ When Y velocity is negative, `ControllerPanel.vue` negates theta before sending 
 | D-pad left           | Pan camera left                                             |
 | RB (hold)            | Zoom in                                                     |
 | LB (hold)            | Zoom out                                                    |
+| X (tap)              | Focus one step nearer: a single command, stopped again 250 ms later |
+| X (hold)             | Focus further away for as long as it is held, from 300 ms onwards |
+| Y (tap)              | Switch the camera's infrared light on or off |
 | Focus buttons (hold) | On-screen buttons on the left edge of the Home view (mirroring the Settings/Exit stack on the right): focus near / far (single command on press, stop on release) |
 | Infrared light (tap) | On-screen button below the focus pair: switches the camera's IR illuminator on and off. Latched -- it stays where it is put, and the button is lit while the light is |
 | Speed slider (drag)  | Docked under the camera address in the top bar: pan/tilt speed, 1x to 6x. Applies as it is dragged, including while a direction is held, and is remembered across restarts |
@@ -56,5 +61,7 @@ PTZ requires a PTZ IP address in Settings; the camera credentials are hardcoded 
 Pan and tilt run at the speed step set by the slider docked under the camera address in the top bar: the backend multiplies its base speed of 15 by it, giving 15, 30, 45, 60, 75, and 90. Six steps, not eight, because ISAPI caps pan/tilt speed at 100 and a seventh multiple would be clamped into reading the same as the sixth. The step travels as `speed_multiplier` on every `ptz` message, whether or not a button is held, so dragging the slider changes how fast the camera is already moving rather than how fast it moves next time. Zoom and focus are unaffected; they keep their own fixed speeds.
 
 The slider is touch-only, like the other Home controls: the D-pad on Home belongs to the camera, so it never walks onto it. It is shown only while the PTZ address matches the camera on screen, and it is the one control outside Settings that writes to `settings.json` -- on release, not while dragging.
+
+Focus has two directions and one button on the pad, told apart by how long X is held. Under 300 ms is a tap, which sends one near command and stops it 250 ms later -- a step, not a sweep, because a subject that has drifted out of focus is usually a nudge away. Held past 300 ms it focuses away instead, continuously, until it is released. The on-screen pair keeps a button per direction for when the operator wants to sweep nearer, which the pad deliberately does not offer.
 
 The infrared light is further out still: nothing about it is held, so it travels as its own `{"type":"ptz_light","on":true}` message and reaches the camera's `PTZAux` aux control. The renderer does not track it -- the camera keeps the light burning across a UI reload, so the backend states the truth on connect and broadcasts every change, and the button reflects that rather than its own last press. Switching to a camera the PTZ IP does not match hides the button without switching the light off: it is a setting the operator left on, not an input they were holding.

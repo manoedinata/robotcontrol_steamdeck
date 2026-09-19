@@ -9,7 +9,7 @@ import HomeView from './views/HomeView.vue'
 import SettingsShell from './components/SettingsShell.vue'
 import RecordingsShell from './components/RecordingsShell.vue'
 
-const { registerHandler } = useGamepad()
+const { faceButtons, registerHandler } = useGamepad()
 const {
   connect: connectBackend,
   disconnect: disconnectBackend,
@@ -38,6 +38,16 @@ function toggleLight() {
   setPtzLight(!ptzLight.value)
 }
 
+// Triangle/Y switches the illuminator. It is read from the live button state
+// rather than the navigation events, which carry only Cross and Circle, and it
+// is gated on PTZ being eligible for the same reason the button is hidden
+// then: there is no camera here to light.
+watch(() => faceButtons.value.triangle, (pressed, wasPressed) => {
+  if (!pressed || wasPressed || !ptzEnabled.value) return
+  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
+  toggleLight()
+})
+
 // Focus buttons are hold-to-act: pointerdown starts the focus movement and
 // pointerup/leave releases it, mirroring the backend deadman behavior so the
 // camera stops focusing the moment the button is let go.
@@ -58,7 +68,6 @@ function toggleRecording() {
   setRecording(!isRecording.value)
 }
 
-const actionBar = ref(null)
 const settingsOpen = ref(false)
 const settingsButton = ref(null)
 const recordingsOpen = ref(false)
@@ -100,16 +109,15 @@ const uiOwnsGamepad = computed(() => settingsOpen.value || recordingsOpen.value)
 watch(uiOwnsGamepad, (owns) => setUiOwnsGamepad(owns), { immediate: true })
 
 // On Home the D-Pad belongs to the camera alone, so directions are never
-// consumed here: the Settings/Exit stack is reached by touch and A only fires
-// the shell button that already holds focus.
+// consumed here, and Cross/A is the drive-direction toggle: the shell buttons
+// it used to fire are within thumb's reach on the touchscreen, while the drive
+// direction is wanted mid-drive with both hands on the pad. Overlays keep A as
+// activate, so this only claims it while none is open.
 function handleGamepadNavigation(action) {
   if (action !== 'activate') return false
   if (uiOwnsGamepad.value || document.querySelector('[role="dialog"][aria-modal="true"]')) return false
 
-  const items = [...(actionBar.value?.querySelectorAll('[data-shell-action]') ?? [])]
-  if (!items.includes(document.activeElement)) return false
-
-  document.activeElement.click()
+  toggleDriveMode()
   return true
 }
 
@@ -156,22 +164,22 @@ onBeforeUnmount(() => {
       </button>
     </nav>
 
-    <nav ref="actionBar" class="shell-actions" aria-label="Application actions">
+    <nav class="shell-actions" aria-label="Application actions">
       <button class="floating-icon-button record-trigger" :class="{ recording: isRecording }"
         type="button" :title="recordLabel" :aria-label="recordLabel" :aria-pressed="isRecording"
-        data-shell-action @click="toggleRecording">
+        @click="toggleRecording">
         <Disc :size="21" aria-hidden="true" />
       </button>
       <button ref="recordingsButton" class="floating-icon-button recordings-trigger" type="button"
-        title="Recordings" aria-label="Open recordings" data-shell-action @click="openRecordings">
+        title="Recordings" aria-label="Open recordings" @click="openRecordings">
         <Clapperboard :size="21" aria-hidden="true" />
       </button>
       <button class="floating-icon-button exit-trigger" type="button" title="Exit application"
-        aria-label="Exit application" data-shell-action @click="quitApp">
+        aria-label="Exit application" @click="quitApp">
         <LogOut :size="21" aria-hidden="true" />
       </button>
       <button ref="settingsButton" class="floating-icon-button settings-trigger" type="button" title="Settings"
-        aria-label="Open settings" data-shell-action @click="openSettings">
+        aria-label="Open settings" @click="openSettings">
         <Settings :size="22" aria-hidden="true" />
       </button>
     </nav>

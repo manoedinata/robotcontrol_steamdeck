@@ -16,9 +16,16 @@ import { useDriveMode } from '../composables/useDriveMode'
 // through the joystick components directly.
 const { limitForRole } = useSettings()
 const { updatePacket, resetPacket } = useControlState()
-const { reset: resetPtz, setDirection, setZoom } = usePTZState()
+const { reset: resetPtz, setDirection, setFocus, setZoom } = usePTZState()
 const { reversing } = useDriveMode()
-const { acquire: acquireGamepad, axes: gamepadAxes, gamepadName, shoulderButtons, dpadButtons } = useGamepad()
+const {
+  acquire: acquireGamepad,
+  axes: gamepadAxes,
+  gamepadName,
+  shoulderButtons,
+  dpadButtons,
+  faceButtons,
+} = useGamepad()
 
 const leftStickY = ref(0)
 const rightStickX = ref(0)
@@ -45,6 +52,54 @@ const ptzZoom = computed(() => {
   if (buttons?.rb) return 'in'
   if (buttons?.lb) return 'out'
   return null
+})
+
+// Square/X carries both focus directions, told apart by how long it is held:
+// a tap steps the focus nearer, holding it sweeps further away. Near is the
+// tap because it is the smaller correction of the two -- a subject that has
+// drifted out of focus is usually a nudge away, not a sweep.
+const FOCUS_HOLD_MS = 300
+const FOCUS_TAP_MS = 250
+let focusHoldTimer = null
+let focusTapTimer = null
+
+function clearFocusTimers() {
+  if (focusHoldTimer !== null) clearTimeout(focusHoldTimer)
+  if (focusTapTimer !== null) clearTimeout(focusTapTimer)
+  focusHoldTimer = null
+  focusTapTimer = null
+}
+
+watch(() => faceButtons.value.square, (pressed) => {
+  if (pressed) {
+    // A press during a tap's own step ends that step: the operator is asking
+    // for something new, not for more of the last thing.
+    if (focusTapTimer !== null) {
+      clearTimeout(focusTapTimer)
+      focusTapTimer = null
+      setFocus(null)
+    }
+    focusHoldTimer = setTimeout(() => {
+      focusHoldTimer = null
+      setFocus('far')
+    }, FOCUS_HOLD_MS)
+    return
+  }
+
+  if (focusHoldTimer === null) {
+    // The button was held long enough to sweep; releasing stops it.
+    setFocus(null)
+    return
+  }
+
+  // Released before the threshold, so it was a tap: one step nearer.
+  clearTimeout(focusHoldTimer)
+  focusHoldTimer = null
+  setFocus('near')
+  focusTapTimer = setTimeout(() => {
+    focusTapTimer = null
+    setFocus(null)
+  }, FOCUS_TAP_MS)
 })
 
 // Each axis is scaled by the operator's limit for the packet field that
@@ -124,6 +179,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   cancelAnimationFrame(animationFrame)
   releaseGamepad?.()
+  clearFocusTimers()
   resetPacket()
   resetPtz()
 })
