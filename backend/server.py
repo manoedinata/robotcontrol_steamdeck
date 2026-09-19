@@ -23,6 +23,7 @@ from PTZController import (
     normalize_direction,
     normalize_focus,
     normalize_light,
+    normalize_speed_multiplier,
     normalize_zoom,
 )
 from CameraWebSocketSource import CameraWebSocketHub
@@ -86,6 +87,9 @@ class RuntimeState:
     # exists instead of assuming the camera agrees.
     ptz_light_request: bool = False
     ptz_light_sent: bool | None = None
+    # Operator's pan/tilt speed step, from the Home slider. Rotation is sent at
+    # this many times PTZ_SPEED; zoom and focus keep their own fixed speeds.
+    ptz_speed_multiplier: int = 1
     ptz_request_seq: int = 0
 
 
@@ -720,11 +724,12 @@ async def ptz_loop() -> None:
             zoom = runtime.ptz_zoom_request
             focus = runtime.ptz_focus_request
             light = runtime.ptz_light_request
+            speed_multiplier = runtime.ptz_speed_multiplier
             controller = runtime.ptz
             if controller is not None:
                 try:
                     if direction is not None:
-                        await controller.move(direction)
+                        await controller.move(direction, speed_multiplier)
                     elif zoom is not None:
                         await controller.zoom(zoom)
                     else:
@@ -1296,15 +1301,24 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     direction = incoming_data.get("direction")
                     zoom = incoming_data.get("zoom")
                     focus = incoming_data.get("focus")
+                    # Absent means "leave the speed where it is": an older UI,
+                    # or a message sent before the slider has been touched.
+                    speed_multiplier = incoming_data.get("speed_multiplier")
+                    if speed_multiplier is not None:
+                        speed_multiplier = normalize_speed_multiplier(speed_multiplier)
                     if direction is not None:
                         direction = normalize_direction(direction)
                     if zoom is not None:
                         zoom = normalize_zoom(zoom)
                     if focus is not None:
                         focus = normalize_focus(focus)
+                    # Nothing is applied until every field has passed, so a
+                    # bad one cannot leave half a request in force.
                     runtime.ptz_request = direction
                     runtime.ptz_zoom_request = zoom
                     runtime.ptz_focus_request = focus
+                    if speed_multiplier is not None:
+                        runtime.ptz_speed_multiplier = speed_multiplier
                     runtime.ptz_request_seq += 1
                     # The UI only sends on a change of held buttons, so this is
                     # one line per press and release, not per loop tick. It
@@ -1312,10 +1326,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     # camera is configured to ask" -- ptz_loop is silent about
                     # the latter, having nothing to drive.
                     LOGGER.info(
-                        "PTZ request: direction=%s zoom=%s focus=%s (%s)",
+                        "PTZ request: direction=%s zoom=%s focus=%s speed=%sx (%s)",
                         direction,
                         zoom,
                         focus,
+                        runtime.ptz_speed_multiplier,
                         f"controller at {runtime.ptz.ip}"
                         if runtime.ptz is not None
                         else "no PTZ camera configured; ignored",

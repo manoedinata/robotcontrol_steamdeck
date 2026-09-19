@@ -285,17 +285,23 @@ function updateControl(packet) {
 const PTZ_ZOOM_WIRE_VALUES = { in: 'zoom-in', out: 'zoom-out' }
 const PTZ_FOCUS_WIRE_VALUES = { near: 'focus-near', far: 'focus-far' }
 
-function updatePtz(direction, zoom, focus) {
+function updatePtz(direction, zoom, focus, speedMultiplier) {
     const request = {
         direction: direction ?? null,
         zoom: zoom ? PTZ_ZOOM_WIRE_VALUES[zoom] ?? zoom : null,
         focus: focus ? PTZ_FOCUS_WIRE_VALUES[focus] ?? focus : null,
+        // The operator's pan/tilt speed step, which the backend multiplies its
+        // base speed by. It rides along with the held buttons so a slider moved
+        // mid-hold reaches the camera without waiting for a release.
+        speed_multiplier: speedMultiplier,
     }
-    const previous = latestPtzRequest ?? { direction: null, zoom: null, focus: null }
+    const previous = latestPtzRequest
+        ?? { direction: null, zoom: null, focus: null, speed_multiplier: null }
     if (
         previous.direction === request.direction
         && previous.zoom === request.zoom
         && previous.focus === request.focus
+        && previous.speed_multiplier === request.speed_multiplier
     ) return
     latestPtzRequest = request
     send({ type: 'ptz', ...request })

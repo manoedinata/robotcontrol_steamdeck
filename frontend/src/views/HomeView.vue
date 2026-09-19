@@ -8,7 +8,18 @@ import { useSettings } from '../composables/useSettings'
 import { useBackendConnection } from '../composables/useBackendConnection'
 import { useDeckBattery } from '../composables/useDeckBattery'
 
-const { cameraUrl, cameraSources, activeCameraIndex, cameraFeeds, switchCamera } = useSettings()
+const {
+  cameraUrl,
+  cameraSources,
+  activeCameraIndex,
+  cameraFeeds,
+  switchCamera,
+  ptzControlsActiveCamera,
+  ptzSpeedMultiplier,
+  ptzSpeedMultiplierMax,
+  setPtzSpeedMultiplier,
+  savePtzSpeedMultiplier,
+} = useSettings()
 const { gamepadName, registerHandler } = useGamepad()
 const { telemetry, telemetryState, pingMs, pingState, recordingState, recordingStale } = useBackendConnection()
 const { deckBatteryLevel, deckBatteryCharging, deckBatteryState } = useDeckBattery()
@@ -90,6 +101,20 @@ const deviceAddress = computed(() => {
   }
 })
 
+// Pan/tilt speed, as a multiple of the camera's slowest step. Dragging applies
+// it live -- the operator is watching the camera, not the slider -- and letting
+// go is what writes it to disk.
+const speedLabel = computed(() => `Pan and tilt speed ${ptzSpeedMultiplier.value}x`
+  + ` of ${ptzSpeedMultiplierMax}x`)
+
+function onSpeedInput(event) {
+  setPtzSpeedMultiplier(event.target.value)
+}
+
+function onSpeedChange(event) {
+  savePtzSpeedMultiplier(event.target.value)
+}
+
 const pingLabel = computed(() => pingMs.value === null ? '--' : `${Math.round(pingMs.value)} ms`)
 const pingStatusLabel = computed(() => ({
   live: `UDP ping ${pingLabel.value}`,
@@ -156,29 +181,40 @@ const statusLabel = computed(() => {
       </span>
     </header>
 
-    <div class="telemetry-bar" aria-label="Device telemetry">
-      <div class="camera-telemetry" :title="statusLabel">
-        <div class="connection-telemetry">
-          <Camera :size="20" aria-hidden="true" />
-          <span class="telemetry-ip">{{ deviceAddress }}</span>
-          <span v-if="cameraSources.length > 1" class="telemetry-value">{{ cameraLabel }}</span>
-          <span class="visually-hidden">{{ cameraLabel }} {{ statusLabel }}</span>
-          <LoaderCircle v-if="cameraState === 'loading'" class="connection-spinner" :size="14" aria-hidden="true" />
-          <span v-else class="connection-dot" :class="cameraState" aria-hidden="true"></span>
+    <div class="telemetry-stack">
+      <div class="telemetry-bar" aria-label="Device telemetry">
+        <div class="camera-telemetry" :title="statusLabel">
+          <div class="connection-telemetry">
+            <Camera :size="20" aria-hidden="true" />
+            <span class="telemetry-ip">{{ deviceAddress }}</span>
+            <span v-if="cameraSources.length > 1" class="telemetry-value">{{ cameraLabel }}</span>
+            <span class="visually-hidden">{{ cameraLabel }} {{ statusLabel }}</span>
+            <LoaderCircle v-if="cameraState === 'loading'" class="connection-spinner" :size="14" aria-hidden="true" />
+            <span v-else class="connection-dot" :class="cameraState" aria-hidden="true"></span>
+          </div>
+        </div>
+
+        <div class="telemetry-divider" aria-hidden="true"></div>
+
+        <div class="udp-telemetry" :title="pingStatusLabel">
+          <div class="connection-telemetry">
+            <Server :size="20" aria-hidden="true" />
+            <span class="telemetry-ip">Ping</span>
+            <span class="telemetry-value ping-value">{{ pingLabel }}</span>
+            <LoaderCircle v-if="pingState === 'waiting'" class="connection-spinner" :size="14" aria-hidden="true" />
+            <span v-else class="connection-dot" :class="{ connected: pingState === 'live' }" aria-hidden="true"></span>
+            <span class="visually-hidden">{{ pingStatusLabel }}</span>
+          </div>
         </div>
       </div>
 
-      <div class="telemetry-divider" aria-hidden="true"></div>
-
-      <div class="udp-telemetry" :title="pingStatusLabel">
-        <div class="connection-telemetry">
-          <Server :size="20" aria-hidden="true" />
-          <span class="telemetry-ip">Ping</span>
-          <span class="telemetry-value ping-value">{{ pingLabel }}</span>
-          <LoaderCircle v-if="pingState === 'waiting'" class="connection-spinner" :size="14" aria-hidden="true" />
-          <span v-else class="connection-dot" :class="{ connected: pingState === 'live' }" aria-hidden="true"></span>
-          <span class="visually-hidden">{{ pingStatusLabel }}</span>
-        </div>
+      <div v-if="ptzControlsActiveCamera" class="ptz-speed-bar" :title="speedLabel">
+        <span class="ptz-speed-label" aria-hidden="true">Speed</span>
+        <input class="ptz-speed-slider" type="range" min="1" :max="ptzSpeedMultiplierMax"
+          step="1" :value="ptzSpeedMultiplier" :aria-label="speedLabel"
+          :aria-valuetext="`${ptzSpeedMultiplier}x`" @input="onSpeedInput"
+          @change="onSpeedChange">
+        <span class="ptz-speed-value" aria-hidden="true">{{ ptzSpeedMultiplier }}x</span>
       </div>
     </div>
 

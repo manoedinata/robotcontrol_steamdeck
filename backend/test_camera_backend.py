@@ -9,6 +9,8 @@ from aiortc.mediastreams import MediaStreamError
 
 from PTZController import (
     AUX_LIGHT_ID,
+    PTZ_SPEED,
+    PTZ_SPEED_MULTIPLIER_MAX,
     PTZController,
     aux_light_xml,
     direction_to_ptz_data,
@@ -16,6 +18,7 @@ from PTZController import (
     normalize_direction,
     normalize_focus,
     normalize_light,
+    normalize_speed_multiplier,
     normalize_zoom,
     zoom_to_ptz_data,
 )
@@ -313,11 +316,13 @@ class PTZConfigTests(unittest.TestCase):
 
 class PTZDirectionTests(unittest.TestCase):
     def test_cardinal_directions_map_to_pan_tilt(self) -> None:
+        # What is under test is which axis moves and which way, not how fast:
+        # the speed is the operator's, one step of it by default.
         expected = {
-            "left": "<pan>-60</pan><tilt>0</tilt>",
-            "right": "<pan>60</pan><tilt>0</tilt>",
-            "up": "<pan>0</pan><tilt>60</tilt>",
-            "down": "<pan>0</pan><tilt>-60</tilt>",
+            "left": f"<pan>-{PTZ_SPEED}</pan><tilt>0</tilt>",
+            "right": f"<pan>{PTZ_SPEED}</pan><tilt>0</tilt>",
+            "up": f"<pan>0</pan><tilt>{PTZ_SPEED}</tilt>",
+            "down": f"<pan>0</pan><tilt>-{PTZ_SPEED}</tilt>",
         }
         for direction, fragment in expected.items():
             with self.subTest(direction=direction):
@@ -339,6 +344,34 @@ class PTZDirectionTests(unittest.TestCase):
 
     def test_normalize_direction_trims_and_lowercases(self) -> None:
         self.assertEqual(normalize_direction("  LEFT "), "left")
+
+
+class PTZSpeedTests(unittest.TestCase):
+    """The operator's speed step, which scales pan and tilt only."""
+
+    def test_one_step_is_the_base_speed(self) -> None:
+        self.assertEqual(PTZ_SPEED, 15)
+        self.assertIn(
+            f"<pan>{PTZ_SPEED}</pan>", direction_to_ptz_data("right", PTZ_SPEED)
+        )
+
+    def test_the_top_step_stays_inside_the_isapi_range(self) -> None:
+        # The slider stops at the last step that is a whole multiple of the
+        # base: one more would be clamped and read as the same speed twice.
+        top = PTZ_SPEED * PTZ_SPEED_MULTIPLIER_MAX
+        self.assertLessEqual(top, 100)
+        self.assertGreater(PTZ_SPEED * (PTZ_SPEED_MULTIPLIER_MAX + 1), 100)
+        self.assertIn(f"<tilt>{top}</tilt>", direction_to_ptz_data("up", top))
+
+    def test_normalize_rejects_values_off_the_slider(self) -> None:
+        for value in (0, -1, PTZ_SPEED_MULTIPLIER_MAX + 1, 1.5, "2", True, None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                normalize_speed_multiplier(value)
+
+    def test_normalize_accepts_every_step(self) -> None:
+        for value in range(1, PTZ_SPEED_MULTIPLIER_MAX + 1):
+            with self.subTest(value=value):
+                self.assertEqual(normalize_speed_multiplier(value), value)
 
 
 class PTZZoomTests(unittest.TestCase):
@@ -448,11 +481,12 @@ class _FakePTZ:
     ip = "10.0.0.9"
 
     def __init__(self, failed_lights: int = 0) -> None:
+        self.moves: list[tuple[str, int]] = []
         self.lights: list[bool] = []
         self._failed_lights = failed_lights
 
-    async def move(self, direction: str) -> None:
-        pass
+    async def move(self, direction: str, multiplier: int = 1) -> None:
+        self.moves.append((direction, multiplier))
 
     async def zoom(self, zoom: str) -> None:
         pass
@@ -520,6 +554,48 @@ class UDPSendLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             address, (runtime.config.udp_ip, runtime.config.udp_port)
         )
+
+
+class PTZSpeedLoopTests(unittest.IsolatedAsyncioTestCase):
+    """The speed step the UI last sent is what the deadman keeps re-sending."""
+
+    def setUp(self) -> None:
+        self._saved = (
+            runtime.ptz,
+            runtime.ptz_request,
+            runtime.ptz_speed_multiplier,
+            runtime.ptz_light_request,
+            runtime.ptz_light_sent,
+        )
+        runtime.ptz_light_request = False
+        runtime.ptz_light_sent = False
+
+    def tearDown(self) -> None:
+        (
+            runtime.ptz,
+            runtime.ptz_request,
+            runtime.ptz_speed_multiplier,
+            runtime.ptz_light_request,
+            runtime.ptz_light_sent,
+        ) = self._saved
+
+    async def test_the_held_direction_carries_the_speed_step(self) -> None:
+        controller = _FakePTZ()
+        runtime.ptz = controller
+        runtime.ptz_request = "left"
+        runtime.ptz_speed_multiplier = 3
+        loop_task = asyncio.create_task(ptz_loop())
+        try:
+            await asyncio.sleep(0.05)
+            # A slider moved mid-hold reaches the camera on the next tick,
+            # without waiting for the button to be released and pressed again.
+            runtime.ptz_speed_multiplier = 6
+            await asyncio.sleep(0.3)
+        finally:
+            await _cancel_task(loop_task)
+
+        self.assertEqual(controller.moves[0], ("left", 3))
+        self.assertEqual(controller.moves[-1], ("left", 6))
 
 
 class PTZLightLoopTests(unittest.IsolatedAsyncioTestCase):

@@ -15,6 +15,11 @@ const DEFAULT_RTSP_TRANSPORT = 'tcp'
 const RTSP_TRANSPORTS = ['tcp', 'udp']
 const DEFAULT_CAMERA_TYPE = 'rtsp'
 const DEFAULT_PTZ_IP = ''
+// Pan/tilt speed steps offered on the Home slider. The backend multiplies its
+// base speed by this; the top step is the last whole multiple that fits inside
+// the ISAPI range, so the slider never has two positions that mean the same.
+const PTZ_SPEED_MULTIPLIER_MAX = 6
+const DEFAULT_PTZ_SPEED_MULTIPLIER = 1
 // Empty means the backend keeps its deployment default (RECORDINGS_DIR).
 const DEFAULT_RECORDINGS_DIR = ''
 const EMPTY_CAMERA_SOURCE = Object.freeze({
@@ -32,7 +37,15 @@ const activeCameraIndex = ref(0)
 const cameraBackend = ref(DEFAULT_CAMERA_BACKEND)
 const rtspTransport = ref(DEFAULT_RTSP_TRANSPORT)
 const ptzIp = ref(DEFAULT_PTZ_IP)
+const ptzSpeedMultiplier = ref(DEFAULT_PTZ_SPEED_MULTIPLIER)
 const recordingsDir = ref(DEFAULT_RECORDINGS_DIR)
+// The settings as last read from or written to disk. The Home slider persists
+// itself without going through the Settings form, and the file is rewritten
+// whole, so a partial save is merged over this rather than replacing it.
+let storedSettings = {}
+// False until a read has actually landed. The file is rewritten whole, so a
+// slider drag must not save over settings this session never managed to read.
+let settingsRead = false
 // Operator overrides for the send packet's field bounds, keyed by field name:
 // `{ pwm: { min, max } }`. A field with no entry keeps the schema's own bounds.
 const packetLimits = ref({})
@@ -252,6 +265,12 @@ function parseLegacyRoleLimits(settings) {
     return legacy
 }
 
+function parsePtzSpeedMultiplier(value) {
+    const step = Math.round(Number(value))
+    if (!Number.isFinite(step)) return DEFAULT_PTZ_SPEED_MULTIPLIER
+    return Math.min(Math.max(step, 1), PTZ_SPEED_MULTIPLIER_MAX)
+}
+
 function clampCameraIndex(index) {
     const count = cameraSources.value.length
     if (!count) return 0
@@ -259,6 +278,8 @@ function clampCameraIndex(index) {
 }
 
 function applySettings(settings) {
+    storedSettings = settings && typeof settings === 'object' ? { ...settings } : {}
+    settingsRead = true
     cameraSources.value = parseStoredCameraSources(settings)
     activeCameraIndex.value = clampCameraIndex(settings?.activeCameraIndex ?? 0)
     cameraBackend.value = settings?.cameraBackend ?? DEFAULT_CAMERA_BACKEND
@@ -266,6 +287,9 @@ function applySettings(settings) {
         ? settings.rtspTransport
         : DEFAULT_RTSP_TRANSPORT
     ptzIp.value = typeof settings?.ptzIp === 'string' ? settings.ptzIp : DEFAULT_PTZ_IP
+    ptzSpeedMultiplier.value = parsePtzSpeedMultiplier(
+        settings?.ptzSpeedMultiplier ?? DEFAULT_PTZ_SPEED_MULTIPLIER,
+    )
     recordingsDir.value = typeof settings?.recordingsDir === 'string'
         ? settings.recordingsDir
         : DEFAULT_RECORDINGS_DIR
@@ -302,6 +326,19 @@ async function loadSettings() {
     }
 }
 
+// The Home slider, which is live: the value is applied as it is dragged and
+// written to disk when the operator lets go, so a drag is one file write.
+function setPtzSpeedMultiplier(value) {
+    ptzSpeedMultiplier.value = parsePtzSpeedMultiplier(value)
+}
+
+async function savePtzSpeedMultiplier(value) {
+    setPtzSpeedMultiplier(value)
+    if (!settingsRead) return
+    if (storedSettings.ptzSpeedMultiplier === ptzSpeedMultiplier.value) return
+    await saveSettings({ ...storedSettings, ptzSpeedMultiplier: ptzSpeedMultiplier.value })
+}
+
 async function saveSettings(nextSettings) {
     const saved = await window.electronAPI?.saveSettings(nextSettings)
     applySettings(saved ?? nextSettings)
@@ -323,6 +360,10 @@ export function useSettings() {
         cameraBackend: readonly(cameraBackend),
         rtspTransport: readonly(rtspTransport),
         ptzIp: readonly(ptzIp),
+        ptzSpeedMultiplier: readonly(ptzSpeedMultiplier),
+        ptzSpeedMultiplierMax: PTZ_SPEED_MULTIPLIER_MAX,
+        setPtzSpeedMultiplier,
+        savePtzSpeedMultiplier,
         recordingsDir: readonly(recordingsDir),
         ptzControlsActiveCamera,
         packetFieldLimits,

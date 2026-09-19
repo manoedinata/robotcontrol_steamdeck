@@ -272,8 +272,11 @@ The UI sends held PTZ requests over the controls WebSocket; `direction`, `zoom`,
 - `direction`: `"left"`, `"right"`, `"up"`, `"down"`, or `null`.
 - `zoom`: `"zoom-in"`, `"zoom-out"`, or `null`.
 - `focus`: `"focus-near"`, `"focus-far"`, or `null`.
+- `speed_multiplier`: `1`-`6`, the operator's pan/tilt speed step. Absent leaves the backend on the step it already has.
 
-A background loop sends exactly one rotation/zoom ISAPI command per tick (rotation takes priority over zoom, stop is sent when neither is active). Every rotation/zoom command is re-sent at 5 Hz — including stop, which is re-sent continuously while no request is active so the camera always halts even if the UI disconnects, crashes, or a stop packet is lost. Camera movements map to ISAPI pan/tilt values and zoom to the ISAPI zoom channel; both use fixed speeds.
+A background loop sends exactly one rotation/zoom ISAPI command per tick (rotation takes priority over zoom, stop is sent when neither is active). Every rotation/zoom command is re-sent at 5 Hz — including stop, which is re-sent continuously while no request is active so the camera always halts even if the UI disconnects, crashes, or a stop packet is lost. Camera movements map to ISAPI pan/tilt values and zoom to the ISAPI zoom channel.
+
+Pan and tilt run at `PTZ_SPEED` (15) times the operator's step, so the six steps are 15, 30, 45, 60, 75, and 90. The step is the last whole multiple that fits: ISAPI clamps pan/tilt speed at 100, so a seventh would be clamped and read as the same speed as the sixth. The step arrives with the held request and is kept until a later message changes it, which is what lets the Home slider change how fast the camera is already moving. Zoom and focus keep their own fixed speeds.
 
 Focus is edge-triggered instead of deadman-repeated: one `FocusData` command goes to `PUT /ISAPI/System/Video/inputs/channels/<n>/focus` when a focus value first appears, and one zero-speed `FocusData` stop is sent when it clears (including when the last UI disconnects). Rotation and zoom stop packets on the `PTZData` channel are unaffected.
 

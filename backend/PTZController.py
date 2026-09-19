@@ -38,7 +38,12 @@ PTZ_PASSWORD = "a1234567"
 # outputs per channel; 1 is the IR light on the deployed camera.
 AUX_LIGHT_ID = 1
 
-PTZ_SPEED = 60
+# Pan and tilt are driven at a multiple of this, chosen by the operator on the
+# Home slider: one step is slow enough to frame a subject, and the top step is
+# as fast as ISAPI goes, since pan/tilt speed is capped at 100.
+PTZ_SPEED = 15
+PTZ_SPEED_MULTIPLIER_MAX = 6
+
 ZOOM_SPEED = 60
 FOCUS_SPEED = 50
 
@@ -214,9 +219,13 @@ class PTZController:
         if last_error is not None:
             raise last_error
 
-    async def move(self, direction: str) -> None:
-        """Start (or keep) rotating in a cardinal direction."""
-        xml = direction_to_ptz_data(direction)
+    async def move(self, direction: str, multiplier: int = 1) -> None:
+        """Start (or keep) rotating in a cardinal direction.
+
+        `multiplier` is the operator's speed step, not a speed: the camera is
+        told PTZ_SPEED times that.
+        """
+        xml = direction_to_ptz_data(direction, PTZ_SPEED * multiplier)
         async with self._writer_lock:
             await self._put(self._url, xml)
 
@@ -251,6 +260,18 @@ class PTZController:
         """Send the zero-speed FocusData that halts focus motion."""
         async with self._writer_lock:
             await self._put(self._focus_url, FOCUS_STOP_XML)
+
+
+def normalize_speed_multiplier(value: Any) -> int:
+    """Validate the pan/tilt speed step coming from the UI."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("ptz speed multiplier must be an integer")
+    if not 1 <= value <= PTZ_SPEED_MULTIPLIER_MAX:
+        raise ValueError(
+            "ptz speed multiplier must be between 1 and "
+            f"{PTZ_SPEED_MULTIPLIER_MAX}, got {value}"
+        )
+    return value
 
 
 def normalize_light(value: Any) -> bool:

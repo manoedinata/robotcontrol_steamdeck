@@ -23,7 +23,7 @@ const focus = ref(null)
 // presses must not reach the PTZ endpoint.
 const uiOwnsGamepad = ref(false)
 const { updatePtz } = useBackendConnection()
-const { ptzControlsActiveCamera } = useSettings()
+const { ptzControlsActiveCamera, ptzSpeedMultiplier } = useSettings()
 
 // PTZ requests are only sent while the configured PTZ IP is the camera on
 // screen and no overlay is using the gamepad; otherwise a held button would
@@ -31,12 +31,18 @@ const { ptzControlsActiveCamera } = useSettings()
 const ptzAllowed = computed(() => ptzControlsActiveCamera.value && !uiOwnsGamepad.value)
 
 function publish() {
+    // The speed step travels even when nothing is held: it is what the next
+    // press will move at, and the backend keeps it until told otherwise.
     if (ptzAllowed.value) {
-        updatePtz(direction.value, zoom.value, focus.value)
+        updatePtz(direction.value, zoom.value, focus.value, ptzSpeedMultiplier.value)
     } else {
-        updatePtz(null, null, null)
+        updatePtz(null, null, null, ptzSpeedMultiplier.value)
     }
 }
+
+// Dragging the Home slider while a direction is held must change how fast the
+// camera is already moving, not how fast it moves next time.
+watch(ptzSpeedMultiplier, publish)
 
 // Switching cameras or opening Settings can make PTZ ineligible mid-hold (and
 // hides the focus buttons, so their release is lost). Drop the local state and

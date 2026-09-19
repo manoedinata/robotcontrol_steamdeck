@@ -14,6 +14,7 @@ const {
   cameraBackend,
   rtspTransport,
   ptzIp,
+  ptzSpeedMultiplier,
   recordingsDir,
   packetFieldLimits,
   packetLimits,
@@ -324,6 +325,9 @@ async function persistSettings({ focusSave = false } = {}) {
       cameraBackend: backend.value,
       rtspTransport: transport.value,
       ptzIp: ptzAddress.value.trim(),
+      // Set from the Home slider, not from this form, but the file is written
+      // whole: leaving it out would reset the camera's speed on every save.
+      ptzSpeedMultiplier: ptzSpeedMultiplier.value,
       recordingsDir: recordingsPath.value.trim(),
       // Merged over the stored map so limits for fields the backend has not
       // announced in this session are kept rather than dropped.

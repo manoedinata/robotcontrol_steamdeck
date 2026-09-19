@@ -89,7 +89,7 @@ body {
 }
 
 .hud-brand,
-.telemetry-bar,
+.telemetry-stack,
 .battery-telemetry,
 .recording-status,
 .control-mode,
@@ -136,21 +136,77 @@ body {
     font-size: 0.68rem;
 }
 
-.telemetry-bar {
+.telemetry-stack {
     top: 20px;
     left: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    transform: translateX(-50%);
+}
+
+.telemetry-bar {
     min-height: 40px;
     display: flex;
     align-items: center;
     gap: 12px;
     padding: 7px 12px;
-    transform: translateX(-50%);
     color: #edf1f3;
     border: 1px solid var(--hud-border);
     border-radius: 6px;
     background: var(--hud-surface);
     box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
     backdrop-filter: blur(12px);
+}
+
+// The pan/tilt speed belongs to the camera named directly above it, so it is
+// docked to that bar rather than floating as a panel of its own: one border
+// between them, and the pair keeps a single outline against the video.
+.ptz-speed-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: -1px;
+    padding: 5px 12px;
+    color: #edf1f3;
+    border: 1px solid var(--hud-border);
+    border-radius: 0 0 6px 6px;
+    background: var(--hud-surface);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+    backdrop-filter: blur(12px);
+    font-size: 0.72rem;
+    font-weight: 650;
+}
+
+.ptz-speed-label {
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.72;
+}
+
+.ptz-speed-value {
+    // Every step is two characters wide, so the slider beside it cannot be
+    // resized by the value changing under the operator's thumb.
+    min-width: 2ch;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.ptz-speed-slider {
+    flex: 1 1 auto;
+    // Wide enough to hit at a glance on the touchscreen without the bar
+    // outgrowing the telemetry it hangs from.
+    min-width: 132px;
+    height: 22px;
+    margin: 0;
+    background: transparent;
+    accent-color: var(--hud-accent);
+    cursor: pointer;
+}
+
+.ptz-speed-slider:focus-visible {
+    outline: 3px solid rgb(245 185 66 / 26%);
+    outline-offset: 2px;
 }
 
 .battery-telemetry {

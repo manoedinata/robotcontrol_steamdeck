@@ -44,6 +44,7 @@ The persisted contract remains:
   "udpListenPort": 8889,
   "useOnScreenKeyboard": true,
   "ptzIp": "",
+  "ptzSpeedMultiplier": 1,
   "recordingsDir": ""
 }
 ```
@@ -145,6 +146,8 @@ Playback and stream history are not part of the app.
 ## PTZ Control
 
 `ptzIp` stores the IP of a PTZ-capable camera (Hikvision ISAPI compatible). The Settings drawer's "Camera rotation (PTZ)" section has one field for it. It is sent to FastAPI inside the `config` message as `ptz_ip`; the camera credentials are hardcoded in the backend (`PTZ_USERNAME`/`PTZ_PASSWORD` in `PTZController.py`) rather than being configurable from the UI. The backend then drives the camera's ISAPI continuous-move, focus, and infrared-light endpoints on behalf of all connected UIs, trying digest auth first and falling back to basic on a `401`. The address is optional: an empty value disables PTZ and keeps the backend from issuing camera HTTP requests.
+
+`ptzSpeedMultiplier` is how fast pan and tilt run, as a step from 1 to 6 that the backend multiplies its base speed (15) by. Unlike every other setting here it is set from the Home view, not from the Settings drawer: the slider docked under the camera address applies each step as it is dragged and writes the file when the operator lets go. It is merged over the settings last read rather than replacing them, and the Settings form carries it through its own save, because `settings.json` is rewritten whole.
 
 The renderer also only *sends* PTZ requests while `ptzIp`'s host matches the host of the camera currently on screen (`useSettings().ptzControlsActiveCamera`) — otherwise a held button would move a camera the operator is not watching. When they do not match, the on-screen focus and infrared-light buttons are hidden and D-pad/shoulder PTZ input is inert; `usePTZState` pushes a stop and clears its local state on the transition. The light is left as it is: it is latched in the camera, and switching feeds is not a reason to darken it.
 

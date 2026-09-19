@@ -8,6 +8,7 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 
 - `main.js`: BrowserWindow, application lifecycle, settings load/save IPC, and Exit IPC.
 - `electron-components/preload.js`: narrow `quitApp`, `readDeckBattery`, `loadSettings`, and `saveSettings` bridge.
+- `src/views/HomeView.vue`: the camera-first HUD -- telemetry bar, the pan/tilt speed slider docked beneath it, recording and battery readouts, and the controller panel.
 - `src/App.vue`: persistent command shell (Record/Recordings/Exit/Settings stack on the right, PTZ focus near/far buttons, the infrared light toggle and the drive-direction toggle on the left), backend connection lifecycle, and Settings/Recordings page state.
 - `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition. The battery readout shows one of two sources and is tapped to change which.
 - `src/composables/useDeckBattery.js`: the Deck's own battery, polled from the main process; the renderer has no other host-hardware reader.
@@ -46,7 +47,7 @@ WebSocket messages are separated by `type`:
 - `{ "type": "camera", "streams": ["cam-0"] }` — backend-pushed: these sources were just re-dialed because a url, a credential, `camera_backend` or `rtsp_transport` changed. The named feeds reconnect; the renderer must not reconnect a feed when settings are saved, which would race the config it just sent.
 - `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_streams", "camera_backend", "rtsp_transport", "ptz_ip", "recordings_dir" } }` — `camera_streams` is `[{ "id", "url" }]`, one entry per configured source. A url is `rtsp://`, `ws://`, or `wss://`; the backend owns all of them.
 - `{ "type": "send", "packet": { ...schemaFields } }`
-- `{ "type": "ptz", "direction", "zoom", "focus" }` — held PTZ requests; any field null when nothing is held.
+- `{ "type": "ptz", "direction", "zoom", "focus", "speed_multiplier" }` — held PTZ requests; any of the first three null when nothing is held. `speed_multiplier` is the pan/tilt speed step (1-6) and rides along on every one of these, held or not, so the slider reaches a camera that is already moving.
 - `{ "type": "ptz_light", "on": true | false }` — the camera's infrared light. Latched, not held: sent once per press and never replayed on reconnect, because the backend owns the state and pushes `{ "type": "ptz_light", ... }` on connect and whenever any UI changes it.
 - Backend telemetry uses `{ "type": "receive", "packet": { "battery_level": 0..100 } }`.
 - On connect the backend announces the settable send fields as `{ "type": "schema", "fields": [{ "name", "role", "type", "min", "max", "default" }] }` (padding excluded). Settings renders one min/max row per entry; do not parse `packets-schema.json` in the renderer.
@@ -89,11 +90,12 @@ Preserve this persisted contract:
   "udpPort": 5000,
   "udpListenPort": 8889,
   "useOnScreenKeyboard": true,
-  "ptzIp": ""
+  "ptzIp": "",
+  "ptzSpeedMultiplier": 1
 }
 ```
 
-`ptzIp` is the renderer source of truth for PTZ and is sent to the backend as `ptz_ip`. The PTZ camera credentials are not a setting: they are hardcoded in the backend (`PTZ_USERNAME`/`PTZ_PASSWORD` in `PTZController.py`).
+`ptzIp` is the renderer source of truth for PTZ and is sent to the backend as `ptz_ip`. `ptzSpeedMultiplier` (1-6) is the only setting written from outside the Settings form -- the Home slider saves it on release, merged over the settings last read, since the file is rewritten whole. Any form that saves the file must carry it through for the same reason. The PTZ camera credentials are not a setting: they are hardcoded in the backend (`PTZ_USERNAME`/`PTZ_PASSWORD` in `PTZController.py`).
 
 Legacy top-level `cameraType`/`cameraUrl`/`cameraUsername`/`cameraPassword` files must keep loading as a single source and be rewritten into `cameraSources` on save.
 
