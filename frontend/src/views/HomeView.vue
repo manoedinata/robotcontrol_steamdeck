@@ -21,15 +21,7 @@ const {
   setPtzSpeedMultiplier,
   savePtzSpeedMultiplier,
 } = useSettings()
-const {
-  travelled: distanceMetres,
-  headingDegrees,
-  x: poseX,
-  y: poseY,
-  countsLeft,
-  countsRight,
-  reset: resetOdometry,
-} = useOdometry()
+const { travelled: distanceMetres, headingDegrees, reset: resetOdometry } = useOdometry()
 const { gamepadName, registerHandler } = useGamepad()
 const { telemetry, telemetryState, pingMs, pingState, recordingState, recordingStale } = useBackendConnection()
 const { deckBatteryLevel, deckBatteryCharging, deckBatteryState } = useDeckBattery()
@@ -113,11 +105,12 @@ const deviceAddress = computed(() => {
   }
 })
 
-// How far the robot has driven, integrated from the two wheel encoders by
-// `useOdometry`. It is signed: reversing winds it back, so it reads travel made
-// good rather than an odometer that only ever climbs.
-const hasOdometry = computed(() => telemetry.value?.position_left !== undefined
-  && telemetry.value?.position_left !== null)
+// How far the robot has driven, integrated from the two reported wheel speeds
+// by `useOdometry`. It is signed: reversing winds it back, so it reads travel
+// made good rather than an odometer that only ever climbs. The speeds are what
+// it is built from, so they are also what says whether there is anything to
+// show yet.
+const hasOdometry = computed(() => typeof telemetry.value?.speed_left === 'number')
 
 // Metres up to a kilometre, then kilometres: a drive is read at a glance, and
 // a four-digit metre count is neither quick to read nor worth its width here.
@@ -131,36 +124,10 @@ const distanceLabel = computed(() => {
   return `${metres.toFixed(1)} m`
 })
 
-// Debug readout: the two encoder frames, counted from where this run started,
-// before the scale and the integration. Measured from the run's start rather
-// than shown absolute so the reset zeroes them too, which is what makes them
-// comparable with the distance beside them -- the mean of the two, times the
-// metres per count, is what that distance should read. The absolute counts the
-// robot sent are in the strip's tooltip, for when those are the question.
-function countLabel(value) {
-  return typeof value === 'number' ? value.toFixed(1) : '--'
-}
-
-const encoderLeftLabel = computed(() => countLabel(countsLeft.value))
-const encoderRightLabel = computed(() => countLabel(countsRight.value))
-
-const encoderDebugTitle = computed(() => 'Pose, and the encoder counts since the'
-  + ' distance was last reset. The robot reports '
-  + `${countLabel(telemetry.value?.position_left)} left, `
-  + `${countLabel(telemetry.value?.position_right)} right.`)
-
-// Pose, beside the counts it was integrated from: metres east and north of
-// wherever the odometry was last zeroed, and the heading it has turned through.
-const poseXLabel = computed(() => (hasOdometry.value ? poseX.value.toFixed(2) : '--'))
-const poseYLabel = computed(() => (hasOdometry.value ? poseY.value.toFixed(2) : '--'))
-const poseThetaLabel = computed(() => (hasOdometry.value
-  ? `${headingDegrees.value.toFixed(1)}°`
-  : '--'))
-
-// Holding the distance zeroes it, along with the pose and the baseline the
-// encoder counts are differenced against. A hold rather than a tap: this sits
-// beside a live camera feed on a touchscreen the operator is holding, and a
-// stray thumb must not throw away a drive's worth of odometry.
+// Holding the distance zeroes it, along with the pose it comes from. A hold
+// rather than a tap: this sits beside a live camera feed on a touchscreen the
+// operator is holding, and a stray thumb must not throw away a drive's worth
+// of odometry.
 const RESET_HOLD_MS = 700
 const resetHolding = ref(false)
 const resetJustDone = ref(false)
@@ -381,20 +348,6 @@ const statusLabel = computed(() => {
           <span class="distance-value" aria-hidden="true">{{ distanceLabel }}</span>
           <span class="visually-hidden" role="status" aria-live="polite">{{ distanceStatusLabel }}</span>
         </button>
-      </div>
-
-      <div class="encoder-debug" :title="encoderDebugTitle" aria-hidden="true">
-        <span>x</span>
-        <span class="encoder-debug-value pose">{{ poseXLabel }}</span>
-        <span>y</span>
-        <span class="encoder-debug-value pose">{{ poseYLabel }}</span>
-        <span>θ</span>
-        <span class="encoder-debug-value pose heading">{{ poseThetaLabel }}</span>
-        <span class="encoder-debug-divider"></span>
-        <span>&Delta;L</span>
-        <span class="encoder-debug-value">{{ encoderLeftLabel }}</span>
-        <span>&Delta;R</span>
-        <span class="encoder-debug-value">{{ encoderRightLabel }}</span>
       </div>
     </div>
 

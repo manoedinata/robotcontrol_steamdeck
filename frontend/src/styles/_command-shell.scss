@@ -166,48 +166,6 @@ body {
 // The pan/tilt speed belongs to the camera named directly above it, so it is
 // docked to that bar rather than floating as a panel of its own: one border
 // between them, and the pair keeps a single outline against the video.
-// Raw encoder counts, while the odometry above them is being trusted. Quiet
-// and monospaced: it is here to be checked against the distance, not read at a
-// glance, and it goes when it has served its purpose.
-.encoder-debug {
-    align-self: flex-end;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: -1px;
-    padding: 3px 10px;
-    color: rgb(237 241 243 / 62%);
-    border: 1px solid var(--hud-border);
-    border-radius: 0 0 6px 6px;
-    background: var(--hud-surface);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.68rem;
-}
-
-.encoder-debug-value {
-    // Every value reserves its width, so a digit arriving on one of them
-    // cannot shift the others along the strip.
-    min-width: 8ch;
-    color: #edf1f3;
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-}
-
-.encoder-debug-value.pose {
-    min-width: 6ch;
-}
-
-.encoder-debug-value.heading {
-    min-width: 7ch;
-}
-
-.encoder-debug-divider {
-    width: 1px;
-    height: 11px;
-    margin: 0 2px;
-    background: var(--hud-border);
-}
-
 // The row under the telemetry bar: the camera's speed on the left, under the
 // camera it belongs to, and the distance driven to the right of it.
 .telemetry-underbar {

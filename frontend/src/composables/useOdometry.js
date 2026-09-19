@@ -46,12 +46,6 @@ const travelled = ref(0)
 // against elapsed time now, not against the previous counts.
 let previousAt = null
 let lastLogAt = 0
-// The counts this run started from. Reactive, unlike `previous`, because the
-// debug readout shows counts measured against it: after a reset both wheels
-// read from zero again, so the strip stays comparable with the distance beside
-// it. The robot's own absolute counts are never touched -- only what is
-// subtracted from them here.
-const origin = ref(null)
 
 const { telemetry } = useBackendConnection()
 const { distancePerCount, wheelSeparation } = useSettings()
@@ -62,7 +56,6 @@ function reset() {
     theta.value = 0
     travelled.value = 0
     previousAt = null
-    origin.value = null
 }
 
 function integrate(packet) {
@@ -76,15 +69,6 @@ function integrate(packet) {
     const speedLeft = packet.speed_left
     const speedRight = packet.speed_right
     if (typeof speedLeft !== 'number' || typeof speedRight !== 'number') return
-
-    // Positions are not what the pose is built from any more, but they are
-    // what the debug strip counts from, so the run's origin still comes from
-    // the first reading that carries them.
-    if (origin.value === null
-        && typeof packet.position_left === 'number'
-        && typeof packet.position_right === 'number') {
-        origin.value = { left: packet.position_left, right: packet.position_right }
-    }
 
     const arrivedAt = performance.now()
     // The first packet is a starting instant, not an interval.
@@ -141,24 +125,8 @@ const headingDegrees = computed(() => {
     return (wrapped < 0 ? wrapped + 360 : wrapped) - 180
 })
 
-// Counts since the run started, which is what the reset zeroes. Null until a
-// first reading has arrived to measure against.
-const countsLeft = computed(() => {
-    const left = telemetry.value?.position_left
-    if (typeof left !== 'number' || origin.value === null) return null
-    return left - origin.value.left
-})
-
-const countsRight = computed(() => {
-    const right = telemetry.value?.position_right
-    if (typeof right !== 'number' || origin.value === null) return null
-    return right - origin.value.right
-})
-
 export function useOdometry() {
     return {
-        countsLeft,
-        countsRight,
         x: readonly(x),
         y: readonly(y),
         theta: readonly(theta),
