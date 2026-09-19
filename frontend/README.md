@@ -15,7 +15,7 @@ A Steam Deck-oriented Electron and Vue UI for viewing a camera stream and contro
 - Settings drawer and built-in gamepad-navigable keyboard
 - Automatic backend WebSocket reconnect and current-state replay
 - Host ping latency to the configured UDP destination in the Home HUD
-- Live/stale robot battery percentage in the Home HUD, which tapping swaps for the Steam Deck's own battery and back
+- Distance travelled in the Home HUD, from the robot's wheel positions; the battery readout there shows the Steam Deck's own battery, since this robot reports no battery of its own
 - Persistent camera sources, RTSP credentials, camera backend, RTSP transport, UDP command destination, telemetry listening port, velocity, keyboard, and PTZ camera settings
 
 ## Quick Start
@@ -62,7 +62,7 @@ For a single container that launches both frontend and backend from Steam, see t
 
 `useControlState.js` owns the generic reactive packet object and coalesces changes to one publication per animation frame. Every configured source has its own always-connected `CameraFeed.vue`; the Home view mounts them all and only shows the active one, so switching sources never reconnects. An RTSP feed negotiates receive-only WebRTC through FastAPI `/offer?src=<id>` and never contacts go2rtc or the camera directly; a WebSocket feed connects straight to the camera.
 
-The backend broadcasts received telemetry as `{"type":"receive","packet":{"battery_level":75,"counter":4242,"encoder":18320}}`. The renderer validates the percentage and the encoder count, and marks the values stale after two seconds without another packet.
+The backend broadcasts received telemetry as `{"type":"receive","packet":{"position_left":1234.5,"position_right":1230.1,"speed_left":48.0,"speed_right":47.8}}`. The renderer validates each field it knows, and marks the values stale after two seconds without another packet.
 
 The backend broadcasts `{"type":"camera","streams":["cam-0"]}` when it has
 re-dialed a source, because its url, its credentials, `camera_backend` or

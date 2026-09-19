@@ -1,5 +1,4 @@
 import json
-import random
 import socket
 import struct
 import time
@@ -22,12 +21,14 @@ UDP_IP = "0.0.0.0"
 UDP_PORT = 8888
 DEFAULT_TELEMETRY_HOST = "10.157.228.140"
 DEFAULT_TELEMETRY_PORT = 8889
-DEFAULT_BATTERY_LEVEL = 75
 DEFAULT_TELEMETRY_INTERVAL = 1.0
 # Encoder counts per unit of commanded drive, per second. The robot's real
 # figure comes from its gearing; this only has to make the count move at a rate
 # the HUD can be read against.
 DEFAULT_ENCODER_COUNTS_PER_UNIT = 10.0
+# How much of a steering command goes to the difference between the wheels.
+# Enough to tell the two positions apart while turning, which is the point.
+STEERING_SHARE = 0.5
 LIST_PREVIEW = 6
 
 
@@ -142,18 +143,12 @@ def summarize(decoded: dict[str, Any]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Receive robot commands and send dummy battery telemetry"
+        description="Receive robot commands and send dummy wheel telemetry"
     )
     parser.add_argument("--listen-host", default=UDP_IP)
     parser.add_argument("--listen-port", type=int, default=UDP_PORT)
     parser.add_argument("--telemetry-host", default=DEFAULT_TELEMETRY_HOST)
     parser.add_argument("--telemetry-port", type=int, default=DEFAULT_TELEMETRY_PORT)
-    parser.add_argument("--battery-level", type=int, default=DEFAULT_BATTERY_LEVEL)
-    parser.add_argument(
-        "--battery-random",
-        action="store_true",
-        help="report a fresh random battery level instead of --battery-level",
-    )
     parser.add_argument(
         "--encoder-counts-per-unit",
         type=float,
@@ -197,52 +192,53 @@ def main() -> None:
         f"{args.telemetry_host}:{args.telemetry_port}"
     )
 
-    # The encoder is driven by what is being commanded rather than by the
+    # The wheels are driven by what is being commanded rather than by the
     # clock: a robot that is not being driven does not travel, and a distance
     # readout that climbs while the sticks are centred would test nothing.
+    # Steering splits the two sides apart, so a turn is visible as the left and
+    # right positions drifting from each other.
     drive_field = field_by_role(send_layout, "yVelocity")
-    encoder_field = (
-        None if telemetry_layout is None else field_by_role(telemetry_layout, "motorEncoder")
-    )
-    encoder_wrap = int(encoder_field.get("max", 0)) + 1 if encoder_field else 0
+    steering_field = field_by_role(send_layout, "thetaVelocity")
 
     last_arrival: float | None = None
     next_telemetry = time.monotonic()
-    counter = 0
-    encoder = 0.0
+    position_left = 0.0
+    position_right = 0.0
     commanded_drive = 0.0
-    encoder_advanced_at = time.monotonic()
+    commanded_steering = 0.0
+    wheels_advanced_at = time.monotonic()
     try:
         while True:
             now = time.monotonic()
             if telemetry_layout is not None and now >= next_telemetry:
-                battery_level = (
-                    random.randint(0, 100) if args.battery_random else args.battery_level
-                )
-                counter += 1
-                if encoder_wrap:
-                    elapsed = now - encoder_advanced_at
-                    encoder += (
-                        abs(commanded_drive) * args.encoder_counts_per_unit * elapsed
-                    )
-                    # uint32 rolls over on the wire, so roll over here too
-                    # rather than sitting clamped at the top for ever.
-                    encoder %= encoder_wrap
-                encoder_advanced_at = now
+                elapsed = now - wheels_advanced_at
+                wheels_advanced_at = now
+                # Positions are signed: reversing winds them back, which is
+                # what the robot's own encoders do.
+                speed_left = (
+                    commanded_drive - commanded_steering * STEERING_SHARE
+                ) * args.encoder_counts_per_unit
+                speed_right = (
+                    commanded_drive + commanded_steering * STEERING_SHARE
+                ) * args.encoder_counts_per_unit
+                position_left += speed_left * elapsed
+                position_right += speed_right * elapsed
                 try:
                     telemetry_sock.sendto(
                         telemetry_layout.encode(
                             {
-                                "battery_level": battery_level,
-                                "counter": counter,
-                                "encoder": int(encoder),
+                                "position_left": position_left,
+                                "position_right": position_right,
+                                "speed_left": speed_left,
+                                "speed_right": speed_right,
                             }
                         ),
                         (args.telemetry_host, args.telemetry_port),
                     )
                     print(
-                        f"Sent receive packet: battery_level={battery_level}%, "
-                        f"counter={counter}, encoder={int(encoder)}"
+                        f"Sent receive packet: position left={position_left:.1f} "
+                        f"right={position_right:.1f}, speed left={speed_left:.1f} "
+                        f"right={speed_right:.1f}"
                     )
                 except (OSError, struct.error) as error:
                     print(f"Telemetry send failed: {error}")
@@ -264,6 +260,9 @@ def main() -> None:
             if drive_field is not None:
                 value = decoded.get(drive_field["name"])
                 commanded_drive = value if isinstance(value, (int, float)) else 0.0
+            if steering_field is not None:
+                value = decoded.get(steering_field["name"])
+                commanded_steering = value if isinstance(value, (int, float)) else 0.0
             print(f"{address} | {timing} | {len(data)} B | {summarize(decoded)}")
             for note in notes:
                 print(f"  ! {note}")

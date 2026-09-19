@@ -262,16 +262,25 @@ class ShippedSchemaTests(unittest.TestCase):
             with self.subTest(packet_type=packet_type):
                 self.assertCountEqual(names, set(names))
 
-    def test_telemetry_carries_the_counter_and_the_encoder_apart(self) -> None:
-        struct_ = utils.packet_struct(SHIPPED_SCHEMA, "receive")
-        header = utils.packet_header(SHIPPED_SCHEMA, "receive")
-        payload = header + struct_.pack(*([77] + [0] * 15 + [4242] + [0] * 41 + [99]))
+    def test_telemetry_is_the_robot_four_bare_floats(self) -> None:
+        # The layout the robot actually sends, as read off the wire in
+        # test_udp_navis.py: no header, four little-endian float32.
+        payload = struct.pack("<4f", 1234.5, -1234.5, 12.25, -12.25)
+        self.assertEqual(len(payload), 16)
 
         decoded = utils.decode_binary_packet(payload, SHIPPED_SCHEMA, "receive")
 
-        self.assertEqual(decoded["battery_level"], 77)
-        self.assertEqual(decoded["counter"], 4242)
-        self.assertEqual(decoded["encoder"], 99)
+        self.assertEqual(decoded["position_left"], 1234.5)
+        self.assertEqual(decoded["position_right"], -1234.5)
+        self.assertEqual(decoded["speed_left"], 12.25)
+        self.assertEqual(decoded["speed_right"], -12.25)
+
+    def test_telemetry_of_the_wrong_length_is_rejected(self) -> None:
+        # Nothing but the length tells a telemetry datagram from anything else
+        # now, since the packet carries no header to match on.
+        for payload in (struct.pack("<3f", 1.0, 2.0, 3.0), struct.pack("<5f", *range(5))):
+            with self.subTest(size=len(payload)), self.assertRaises(ValueError):
+                utils.decode_binary_packet(payload, SHIPPED_SCHEMA, "receive")
 
 
 if __name__ == "__main__":

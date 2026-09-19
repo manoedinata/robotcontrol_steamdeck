@@ -102,14 +102,21 @@ const deviceAddress = computed(() => {
   }
 })
 
-// How far the robot has driven: the motor encoder's running count times the
-// metres-per-count the operator measured for their gearing. The robot reports
-// a count and nothing else, so the conversion is the renderer's and the wire
-// stays what packets-schema.json says it is.
-const encoderCount = computed(() => telemetry.value?.encoder ?? null)
-const distanceMetres = computed(() => (encoderCount.value === null
+// How far the robot has driven. Frames 1 and 2 of the telemetry packet are the
+// left and right wheel positions; their mean is the robot's own travel, since
+// either wheel on its own reads long or short through every turn. The count is
+// turned into a distance by the metres-per-count the operator measured for
+// their gearing, so the conversion is the renderer's and the wire stays what
+// packets-schema.json says it is.
+const travelledCounts = computed(() => {
+  const sides = [telemetry.value?.position_left, telemetry.value?.position_right]
+    .filter((value) => typeof value === 'number')
+  if (!sides.length) return null
+  return sides.reduce((total, value) => total + value, 0) / sides.length
+})
+const distanceMetres = computed(() => (travelledCounts.value === null
   ? null
-  : encoderCount.value * distancePerCount.value))
+  : travelledCounts.value * distancePerCount.value))
 
 // Metres up to a kilometre, then kilometres: a drive is read at a glance, and
 // a four-digit metre count is neither quick to read nor worth its width here.
@@ -122,8 +129,9 @@ const distanceLabel = computed(() => {
 })
 
 const distanceStatusLabel = computed(() => (distanceMetres.value === null
-  ? 'Waiting for the robot\'s encoder count'
-  : `Travelled ${distanceLabel.value}, from ${encoderCount.value} encoder counts`))
+  ? 'Waiting for the robot\'s wheel positions'
+  : `Travelled ${distanceLabel.value}, from ${travelledCounts.value.toFixed(1)}`
+    + ' encoder counts averaged across both wheels'))
 
 // Pan/tilt speed, as a multiple of the camera's slowest step. Dragging applies
 // it live -- the operator is watching the camera, not the slider -- and letting
@@ -197,15 +205,20 @@ function toggleBatterySource() {
 
 const batteryLevel = computed(() => (showingDeckBattery.value
   ? deckBatteryLevel.value ?? undefined
-  : telemetry.value?.battery_level))
+  : telemetry.value?.battery_level ?? undefined))
 const batteryLabel = computed(() => batteryLevel.value === undefined
   ? '--'
   : `${batteryLevel.value}%`)
 // The two sources report health differently -- the robot's telemetry can go
 // stale, the Deck's read can be unavailable -- so each keeps its own wording.
-const batteryState = computed(() => (showingDeckBattery.value
-  ? deckBatteryState.value
-  : telemetryState.value))
+// The robot's telemetry packet carries wheel positions and speeds and no
+// battery at all, so a live feed still has nothing to say about its charge.
+// That is "not reported", not "stale": more packets will not help.
+const batteryState = computed(() => {
+  if (showingDeckBattery.value) return deckBatteryState.value
+  if (telemetryState.value === 'live' && batteryLevel.value === undefined) return 'unavailable'
+  return telemetryState.value
+})
 const batteryIcon = computed(() => (showingDeckBattery.value && deckBatteryCharging.value
   ? BatteryCharging
   : Battery))
@@ -218,9 +231,10 @@ const batteryStatusLabel = computed(() => (showingDeckBattery.value
   }[deckBatteryState.value]
   : {
     live: `Robot battery ${batteryLabel.value}`,
+    unavailable: 'Robot battery not reported',
     stale: `Robot battery ${batteryLabel.value}, telemetry stale`,
     waiting: 'Waiting for robot telemetry',
-  }[telemetryState.value]))
+  }[batteryState.value]))
 const batteryToggleLabel = computed(() => `${batteryStatusLabel.value}. `
   + `Show the ${showingDeckBattery.value ? 'robot' : 'Deck'} battery instead.`)
 

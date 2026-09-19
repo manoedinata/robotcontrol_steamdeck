@@ -38,10 +38,10 @@ Control packets may contain a subset of schema fields. FastAPI validates those f
 Robot telemetry uses the same WebSocket in the backend-to-renderer direction:
 
 ```json
-{"type":"receive","packet":{"battery_level":75}}
+{"type":"receive","packet":{"position_left":1234.5,"position_right":1230.1,"speed_left":48.0,"speed_right":47.8}}
 ```
 
-The frontend accepts integer battery values in `0..100`, marks telemetry live on receipt, and marks it stale after two seconds without another valid packet.
+The frontend reads the fields it knows one at a time, so a field the robot does not send is null rather than a reason to drop the packet. It marks telemetry live on receipt and stale after two seconds without another valid packet. Frames 1 and 2 -- the wheel positions -- are what Home uses; their mean times the `distancePerCount` setting is the distance travelled, and they are logged to the renderer console once a second while what else to do with them is decided.
 
 On connect the backend also announces which send-packet fields the UI may bound:
 
@@ -75,7 +75,7 @@ The shipped packet is 11 bytes:
 | `3`    | 4    | little-endian `float32` | `vy`         |
 | `7`    | 4    | little-endian `float32` | `vtheta`     |
 
-`packet_types.receive` defines the independent receive layout. The shipped telemetry datagram is 68 bytes: ASCII `its`, a `uint8 battery_level` percentage, padding, a `uint32 counter`, more padding, and a `uint32 encoder` carrying the motor encoder's running count. FastAPI listens on the persisted `udpListenPort` setting (`8889` by default), binds all interfaces, and rebinds when the setting changes. Header and total length must match exactly.
+`packet_types.receive` defines the independent receive layout. The shipped telemetry datagram is 16 bytes and carries no header: four little-endian `float32` frames, being the left and right wheel positions followed by the left and right wheel speeds. FastAPI listens on the persisted `udpListenPort` setting (`8889` by default), binds all interfaces, and rebinds when the setting changes. Header and total length must match exactly.
 
 To add a command value, add it to the frontend packet state and to the ordered schema fields. No WebSocket dispatcher or encoder changes should be necessary.
 
@@ -157,14 +157,15 @@ Receive packets use the independent `packet_types.receive` schema entry. The bac
 {
   "type": "receive",
   "packet": {
-    "battery_level": 75,
-    "counter": 4242,
-    "encoder": 18320
+    "position_left": 1234.5,
+    "position_right": 1230.1,
+    "speed_left": 48.0,
+    "speed_right": 47.8
   }
 }
 ```
 
-Padding fields are decoded and broadcast too, as lists; the renderer reads the fields it knows and ignores the rest.
+Every declared field is decoded and broadcast, padding included where a layout has any; the renderer reads the fields it knows and ignores the rest.
 
 To add a new receive packet or field, update each layer in this order.
 

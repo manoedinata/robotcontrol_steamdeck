@@ -35,11 +35,11 @@ Invalid messages receive `{"type":"error","message":"..."}` without closing the 
 Valid robot telemetry is broadcast to all connected UIs:
 
 ```json
-{"type":"receive","packet":{"battery_level":75,"counter":4242,"encoder":18320,"padding_1":[0,...],"padding_2":[0,...]}}
+{"type":"receive","packet":{"position_left":1234.5,"position_right":1230.1,"speed_left":48.0,"speed_right":47.8}}
 ```
 
-Every decoded field is broadcast, padding included, because the decoder returns
-the layout as the schema declares it.
+Every decoded field is broadcast, because the decoder returns the layout as the
+schema declares it.
 
 Applying a config that changes how a camera is dialed -- a url, its credentials,
 `camera_backend` or `rtsp_transport` -- names the sources whose live connection
@@ -307,18 +307,18 @@ The shipped command is exactly 11 bytes:
 | `3`    | 4    | little-endian `float32` | `vy`     |
 | `7`    | 4    | little-endian `float32` | `vtheta` |
 
-The telemetry receiver binds `0.0.0.0:8889` by default. Its packet is exactly 68 bytes, laid out by `packet_types.receive`:
+The telemetry receiver binds `0.0.0.0:8889` by default. Its packet is exactly 16 bytes, laid out by `packet_types.receive`: four little-endian `float32` frames, with no header.
 
 | Offset | Size | Type | Field |
 | ------ | ---- | ---- | ----- |
-| `0` | 3 | ASCII | `its` header |
-| `3` | 1 | `uint8` | `battery_level`, a percentage constrained to `0..100` |
-| `4` | 15 | `uint8[15]` | `padding_1` |
-| `19` | 4 | little-endian `uint32` | `counter`, the robot's telemetry sequence |
-| `23` | 41 | `uint8[41]` | `padding_2` |
-| `64` | 4 | little-endian `uint32` | `encoder`, the motor encoder's running count |
+| `0` | 4 | little-endian `float32` | `position_left`, the left wheel's encoder position |
+| `4` | 4 | little-endian `float32` | `position_right`, the right wheel's encoder position |
+| `8` | 4 | little-endian `float32` | `speed_left` |
+| `12` | 4 | little-endian `float32` | `speed_right` |
 
-Packets with a wrong header, wrong length, or out-of-range value are discarded. Field names must stay unique within a packet: the decoder keys by name, so a repeated one would silently replace the earlier field and its value would never reach the UI.
+Positions are signed and wind back when the robot reverses. The packet carries no battery level; the robot does not report one, and the HUD says so rather than showing a stale percentage.
+
+With no header to match on, the length is the only thing separating a telemetry datagram from anything else that reaches the port, so a packet of any other size is discarded. Non-finite values are discarded too. Field names must stay unique within a packet: the decoder keys by name, so a repeated one would silently replace the earlier field and its value would never reach the UI.
 
 Adding a Vue input requires adding its initial value to `useControlState.js`, binding the component through `updatePacket()`, and adding the corresponding ordered field to `packets-schema.json`. The WebSocket dispatcher and UDP encoder require no field-specific handler or offset.
 

@@ -159,23 +159,52 @@ function acceptSchema(message) {
     packetFields.value = fields
 }
 
+// Telemetry is whatever `packet_types.receive` currently declares, so fields
+// are read one at a time and a field the robot does not send is null rather
+// than a reason to drop the packet. The robot's own battery is one of those:
+// the telemetry datagram carries wheel positions and speeds, and no battery at
+// all, so the HUD says it is not reported rather than inventing a percentage.
+function numberOrNull(value) {
+    return Number.isFinite(value) ? value : null
+}
+
+let lastTelemetryLogAt = 0
+
 function acceptReceive(message) {
-    const batteryLevel = message?.packet?.battery_level
-    if (!Number.isInteger(batteryLevel) || batteryLevel < 0 || batteryLevel > 100) {
+    const packet = message?.packet
+    if (!packet || typeof packet !== 'object') {
         console.warn('[backend] Ignored invalid telemetry message:', message)
         return
     }
 
-    // The motor encoder's running count. A robot that reports no encoder is
-    // still reporting telemetry, so a missing or unusable count is carried as
-    // null rather than throwing the battery out with it.
-    const encoder = message?.packet?.encoder
-    const encoderCount = Number.isInteger(encoder) && encoder >= 0 ? encoder : null
-    if (encoderCount === null && encoder !== undefined) {
-        console.warn('[backend] Ignored invalid encoder count:', encoder)
+    const positionLeft = numberOrNull(packet.position_left)
+    const positionRight = numberOrNull(packet.position_right)
+    const batteryLevel = Number.isInteger(packet.battery_level)
+        && packet.battery_level >= 0 && packet.battery_level <= 100
+        ? packet.battery_level
+        : null
+
+    if (positionLeft === null && positionRight === null && batteryLevel === null) {
+        console.warn('[backend] Ignored telemetry with nothing readable in it:', message)
+        return
     }
 
-    telemetry.value = { battery_level: batteryLevel, encoder: encoderCount }
+    telemetry.value = {
+        battery_level: batteryLevel,
+        position_left: positionLeft,
+        position_right: positionRight,
+        speed_left: numberOrNull(packet.speed_left),
+        speed_right: numberOrNull(packet.speed_right),
+    }
+
+    // Frames 1 and 2 are logged while what to do with them is still being
+    // decided. Once a second, because telemetry arrives far faster than a
+    // console is readable.
+    const now = Date.now()
+    if (now - lastTelemetryLogAt >= 1000) {
+        lastTelemetryLogAt = now
+        console.log('[telemetry] position left=%s right=%s', positionLeft, positionRight)
+    }
     telemetryState.value = 'live'
     if (telemetryTimer !== null) clearTimeout(telemetryTimer)
     telemetryTimer = setTimeout(() => {

@@ -36,49 +36,35 @@
         },
         "receive": {
             "byte_order": "little",
-            "header": "its",
+            "header": "",
             "fields": [
                 {
-                    "name": "battery_level",
-                    "type": "uint8",
-                    "role": "batteryLevel",
-                    "unit": "percent",
-                    "min": 0,
-                    "max": 100
+                    "name": "position_left",
+                    "type": "float32",
+                    "role": "positionLeft",
+                    "unit": "count",
+                    "default": 0
                 },
                 {
-                    "name": "padding_1",
-                    "type": "uint8",
-                    "role": "padding",
-                    "count": 15,
-                    "default": 0,
-                    "min": 0,
-                    "max": 255
+                    "name": "position_right",
+                    "type": "float32",
+                    "role": "positionRight",
+                    "unit": "count",
+                    "default": 0
                 },
                 {
-                    "name": "counter",
-                    "type": "uint32",
-                    "role": "telemetryCounter",
-                    "default": 0,
-                    "min": 0,
-                    "max": 4294967295
+                    "name": "speed_left",
+                    "type": "float32",
+                    "role": "speedLeft",
+                    "unit": "count_per_second",
+                    "default": 0
                 },
                 {
-                    "name": "padding_2",
-                    "type": "uint8",
-                    "role": "padding",
-                    "count": 41,
-                    "default": 0,
-                    "min": 0,
-                    "max": 255
-                },
-                {
-                    "name": "encoder",
-                    "type": "uint32",
-                    "role": "motorEncoder",
-                    "default": 0,
-                    "min": 0,
-                    "max": 4294967295
+                    "name": "speed_right",
+                    "type": "float32",
+                    "role": "speedRight",
+                    "unit": "count_per_second",
+                    "default": 0
                 }
             ]
         }

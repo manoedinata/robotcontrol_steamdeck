@@ -35,6 +35,9 @@ import utils
 LOGGER = logging.getLogger(__name__)
 UDP_SEND_HZ = 50
 PTZ_SEND_HZ = 5.0
+# Telemetry is logged at this interval rather than per packet, so the log
+# stays readable while the robot is reporting at its own rate.
+TELEMETRY_LOG_INTERVAL_S = 1.0
 PING_INTERVAL_S = 2.0
 RECORDING_STATE_INTERVAL_S = 2.0
 PING_TIMEOUT_S = 1.0
@@ -800,6 +803,7 @@ async def udp_receive_loop() -> None:
     sock: socket.socket | None = None
     bound_port: int | None = None
     last_error_log = 0.0
+    last_telemetry_log = 0.0
 
     try:
         while True:
@@ -864,6 +868,22 @@ async def udp_receive_loop() -> None:
                     )
                     last_error_log = now
                 continue
+
+            # Frames 1 and 2 are the wheel positions, which is all that is
+            # used of this packet so far. Logged once a second, not once a
+            # packet: telemetry arrives far faster than a log is readable, and
+            # this is here to be read while the robot is driven.
+            now = loop.time()
+            if now - last_telemetry_log >= TELEMETRY_LOG_INTERVAL_S:
+                LOGGER.info(
+                    "Robot telemetry: position left=%.3f right=%.3f "
+                    "(speed left=%.3f right=%.3f)",
+                    packet.get("position_left", 0.0),
+                    packet.get("position_right", 0.0),
+                    packet.get("speed_left", 0.0),
+                    packet.get("speed_right", 0.0),
+                )
+                last_telemetry_log = now
 
             await broadcast_telemetry(packet)
     finally:
