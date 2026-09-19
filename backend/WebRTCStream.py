@@ -21,6 +21,7 @@ from aiortc import (
 from aiortc.contrib.media import MediaPlayer, MediaRelay
 
 import utils
+from Recorder import scrub_credentials
 from CameraWebSocketSource import (
     CameraWebSocketHub,
     SourceReader,
@@ -377,7 +378,10 @@ class _AiortcStream:
             player = await self._dial(stream_id, camera_url, input_format)
             if player.video is None:
                 _stop_player(player)
-                raise RuntimeError("camera source does not provide a video track")
+                raise RuntimeError(
+                    f"camera source {stream_id!r} does not provide a video "
+                    f"track: {scrub_credentials(camera_url)}"
+                )
 
             shared = _SharedPlayer(
                 stream_id, camera_url, player, decoded=input_format is not None
@@ -741,6 +745,11 @@ class WebRTCStream:
             await stream.packet_source(stream_id, camera_url)()
 
         return reader
+
+    @property
+    def stream_ids(self) -> tuple[str, ...]:
+        """The ids a ``?src=`` may name, for reporting one that misses."""
+        return tuple(stream_id for stream_id, _ in self._streams)
 
     async def create_answer(
         self, offer: RTCSessionDescription, stream_id: str | None = None

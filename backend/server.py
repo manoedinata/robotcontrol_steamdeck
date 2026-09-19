@@ -25,7 +25,7 @@ from PTZController import (
     normalize_zoom,
 )
 from CameraWebSocketSource import CameraWebSocketHub
-from Recorder import Recorder, normalize_record_action
+from Recorder import Recorder, normalize_record_action, scrub_credentials
 import RecordingLibrary
 from WebRTCStream import WebRTCStream
 import utils
@@ -178,8 +178,13 @@ def validate_camera_streams(value: Any) -> tuple[tuple[str, str], ...]:
             or parsed.scheme not in CAMERA_STREAM_SCHEMES
             or not parsed.hostname
         ):
+            # Name the source and show what arrived: with several sources
+            # configured, "one of them is wrong" leaves the operator opening
+            # each in turn. The url is scrubbed because it may carry the
+            # camera password.
             raise ValueError(
-                "camera stream url must be a valid RTSP or WebSocket URL"
+                f"camera stream {stream_id!r} url must be a valid RTSP or "
+                f"WebSocket URL, got {scrub_credentials(url)!r}"
             )
         seen_ids.add(stream_id)
         streams.append((stream_id, url))
@@ -1042,9 +1047,22 @@ async def video_offer(request: Request) -> JSONResponse:
             {"sdp": answer.sdp, "type": answer.type},
         )
     except (ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+        # A rejected offer is otherwise a bare 400 in the access log: say what
+        # was asked for and what is configured, which is the whole diagnosis
+        # when the renderer and the settings disagree about the source ids.
+        LOGGER.warning(
+            "WebRTC offer rejected for src=%r (configured: %s): %s",
+            request.query_params.get("src"),
+            ", ".join(video_stream.stream_ids) or "none",
+            error,
+        )
         return JSONResponse({"error": str(error)}, status_code=400)
     except Exception as error:
-        LOGGER.warning("WebRTC offer failed: %s", error)
+        LOGGER.warning(
+            "WebRTC offer failed for src=%r: %s",
+            request.query_params.get("src"),
+            error,
+        )
         return JSONResponse(
             {"error": "Unable to open the camera stream"}, status_code=503
         )
@@ -1073,6 +1091,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     try:
         while True:
+            # Bound before the parse so the handler below can name the message
+            # type even when the text was not JSON at all.
+            incoming_data: Any = None
             try:
                 incoming_data = json.loads(await websocket.receive_text())
                 if not isinstance(incoming_data, dict):
@@ -1139,6 +1160,20 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     runtime.ptz_zoom_request = zoom
                     runtime.ptz_focus_request = focus
                     runtime.ptz_request_seq += 1
+                    # The UI only sends on a change of held buttons, so this is
+                    # one line per press and release, not per loop tick. It
+                    # separates "the UI never asked" from "the UI asked and no
+                    # camera is configured to ask" -- ptz_loop is silent about
+                    # the latter, having nothing to drive.
+                    LOGGER.info(
+                        "PTZ request: direction=%s zoom=%s focus=%s (%s)",
+                        direction,
+                        zoom,
+                        focus,
+                        f"controller at {runtime.ptz.ip}"
+                        if runtime.ptz is not None
+                        else "no PTZ camera configured; ignored",
+                    )
                 elif message_type == "record":
                     action = normalize_record_action(incoming_data.get("action"))
                     if action == "start":
@@ -1164,6 +1199,19 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 RuntimeError,
                 json.JSONDecodeError,
             ) as error:
+                # The UI hears about this over the socket, where it reaches the
+                # renderer console and nothing else. A rejected config is the
+                # one that matters here: validation is all-or-nothing, so a
+                # single bad field silently leaves the backend on its previous
+                # settings -- including no camera streams at all.
+                rejected_type = (
+                    incoming_data.get("type")
+                    if isinstance(incoming_data, dict)
+                    else None
+                )
+                LOGGER.warning(
+                    "Rejected %r message from the UI: %s", rejected_type, error
+                )
                 if not await send_client_message(
                     websocket, {"type": "error", "message": str(error)}
                 ):
