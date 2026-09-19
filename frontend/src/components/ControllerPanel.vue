@@ -136,7 +136,7 @@ onBeforeUnmount(() => {
         <Joystick v-model="leftStickY" axis="vertical" :max="0" label="Left joystick, drive"
           @drag-start="draggedStick = 'left'" @drag-end="draggedStick = null" />
         <p class="joystick-readout">
-          <span>{{ reversing ? 'Linear (reverse)' : 'Linear' }}</span>
+          <span>Linear</span>
           <strong>{{ formatVelocity(yVelocity) }}</strong>
         </p>
       </div>

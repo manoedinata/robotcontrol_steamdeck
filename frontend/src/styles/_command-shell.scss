@@ -513,7 +513,12 @@ body {
 }
 
 .joystick-readout {
-    min-width: 140px;
+    // Exactly the stick's width, whatever the breakpoint made that, and never
+    // its own content's. The column is centred inside a row pinned to the
+    // screen edges, so a readout that grew a character used to widen the
+    // column and slide the stick sideways by half of it while driving.
+    width: 100%;
+    min-width: 0;
     justify-content: center;
     gap: 6px;
     padding: 5px 8px;
@@ -530,8 +535,12 @@ body {
 }
 
 .joystick-readout strong {
-    min-width: 30px;
+    // Six characters of the monospace face this already uses, which holds
+    // every value a configured limit reaches (-100.0 included), so the label
+    // beside it does not shuffle as digits come and go either.
+    min-width: 6ch;
     color: #ffffff;
+    font-variant-numeric: tabular-nums;
     text-align: right;
 }
 
