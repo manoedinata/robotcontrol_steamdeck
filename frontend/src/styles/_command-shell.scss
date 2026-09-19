@@ -163,11 +163,18 @@ body {
 // docked to that bar rather than floating as a panel of its own: one border
 // between them, and the pair keeps a single outline against the video.
 .ptz-speed-bar {
+    // Sized in the view to end at the telemetry divider: the speed is the
+    // camera's, so it stops where the camera half of the bar does rather than
+    // running on under the ping.
+    align-self: flex-start;
+    // Until that measurement lands -- and if it never does -- the bar matches
+    // the telemetry above it rather than collapsing onto the slider.
+    width: 100%;
     display: flex;
     align-items: center;
     gap: 10px;
     margin-top: -1px;
-    padding: 5px 12px;
+    padding: 5px 10px;
     color: #edf1f3;
     border: 1px solid var(--hud-border);
     border-radius: 0 0 6px 6px;
@@ -176,12 +183,6 @@ body {
     backdrop-filter: blur(12px);
     font-size: 0.72rem;
     font-weight: 650;
-}
-
-.ptz-speed-label {
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    opacity: 0.72;
 }
 
 .ptz-speed-value {
@@ -193,10 +194,10 @@ body {
 }
 
 .ptz-speed-slider {
+    // The bar's width is the camera telemetry's, so the track takes whatever
+    // that leaves rather than setting a width of its own and pushing past it.
     flex: 1 1 auto;
-    // Wide enough to hit at a glance on the touchscreen without the bar
-    // outgrowing the telemetry it hangs from.
-    min-width: 132px;
+    min-width: 0;
     height: 22px;
     margin: 0;
     background: transparent;

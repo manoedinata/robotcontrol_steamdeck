@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { Battery, BatteryCharging, Camera, Gamepad2, LoaderCircle, Server } from '@lucide/vue'
 import CameraFeed from '../components/CameraFeed.vue'
 import ControllerPanel from '../components/ControllerPanel.vue'
@@ -115,6 +115,45 @@ function onSpeedChange(event) {
   savePtzSpeedMultiplier(event.target.value)
 }
 
+// The slider belongs to the camera, not to the ping beside it, so it ends
+// where that half of the bar does. Where the divider sits depends on the
+// address and on whether the camera count is shown, so it is measured rather
+// than guessed at.
+const telemetryBar = ref(null)
+const telemetryDivider = ref(null)
+const speedBarWidth = ref(null)
+let barObserver = null
+
+function measureSpeedBar() {
+  const bar = telemetryBar.value
+  const divider = telemetryDivider.value
+  if (!bar || !divider) return
+  // Up to and including the divider line itself, so the two right edges meet.
+  const width = divider.getBoundingClientRect().right - bar.getBoundingClientRect().left
+  speedBarWidth.value = width > 0 ? `${Math.round(width)}px` : null
+}
+
+onMounted(() => {
+  measureSpeedBar()
+  barObserver = new ResizeObserver(measureSpeedBar)
+  barObserver.observe(telemetryBar.value)
+})
+
+onBeforeUnmount(() => {
+  barObserver?.disconnect()
+  barObserver = null
+})
+
+// The bar is the same width whether or not the slider is under it, so showing
+// the slider does not itself resize what it is measured against; this covers
+// the first paint after it appears.
+watch(ptzControlsActiveCamera, async (controls) => {
+  if (controls) {
+    await nextTick()
+    measureSpeedBar()
+  }
+})
+
 const pingLabel = computed(() => pingMs.value === null ? '--' : `${Math.round(pingMs.value)} ms`)
 const pingStatusLabel = computed(() => ({
   live: `UDP ping ${pingLabel.value}`,
@@ -182,7 +221,7 @@ const statusLabel = computed(() => {
     </header>
 
     <div class="telemetry-stack">
-      <div class="telemetry-bar" aria-label="Device telemetry">
+      <div ref="telemetryBar" class="telemetry-bar" aria-label="Device telemetry">
         <div class="camera-telemetry" :title="statusLabel">
           <div class="connection-telemetry">
             <Camera :size="20" aria-hidden="true" />
@@ -194,7 +233,7 @@ const statusLabel = computed(() => {
           </div>
         </div>
 
-        <div class="telemetry-divider" aria-hidden="true"></div>
+        <div ref="telemetryDivider" class="telemetry-divider" aria-hidden="true"></div>
 
         <div class="udp-telemetry" :title="pingStatusLabel">
           <div class="connection-telemetry">
@@ -208,8 +247,8 @@ const statusLabel = computed(() => {
         </div>
       </div>
 
-      <div v-if="ptzControlsActiveCamera" class="ptz-speed-bar" :title="speedLabel">
-        <span class="ptz-speed-label" aria-hidden="true">Speed</span>
+      <div v-if="ptzControlsActiveCamera" class="ptz-speed-bar" :title="speedLabel"
+        :style="speedBarWidth ? { width: speedBarWidth } : null">
         <input class="ptz-speed-slider" type="range" min="1" :max="ptzSpeedMultiplierMax"
           step="1" :value="ptzSpeedMultiplier" :aria-label="speedLabel"
           :aria-valuetext="`${ptzSpeedMultiplier}x`" @input="onSpeedInput"
