@@ -185,11 +185,27 @@ body {
 }
 
 .encoder-debug-value {
-    // Both sides reserve the same width, so a digit arriving on one of them
-    // cannot shift the other.
+    // Every value reserves its width, so a digit arriving on one of them
+    // cannot shift the others along the strip.
     min-width: 8ch;
     color: #edf1f3;
+    font-variant-numeric: tabular-nums;
     text-align: right;
+}
+
+.encoder-debug-value.pose {
+    min-width: 6ch;
+}
+
+.encoder-debug-value.heading {
+    min-width: 7ch;
+}
+
+.encoder-debug-divider {
+    width: 1px;
+    height: 11px;
+    margin: 0 2px;
+    background: var(--hud-border);
 }
 
 // The row under the telemetry bar: the camera's speed on the left, under the
@@ -202,7 +218,9 @@ body {
 
 .distance-bar {
     // Takes what the speed bar leaves, so the pair spans the telemetry above
-    // it: the icon sits under the divider and the reading under the ping.
+    // it: the icon sits under the divider and the reading under the ping. With
+    // no slider beside it, the view gives it the same left margin the slider
+    // would have occupied rather than letting it stretch the whole width.
     flex: 1 1 auto;
     min-width: 0;
     display: flex;
@@ -217,8 +235,44 @@ body {
     background: var(--hud-surface);
     box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
     backdrop-filter: blur(12px);
+    font: inherit;
     font-size: 0.72rem;
     font-weight: 650;
+    // It is a button now -- held, it zeroes the odometry -- so it takes the
+    // touch behavior of the other hold controls rather than selecting its text.
+    touch-action: none;
+    user-select: none;
+    cursor: pointer;
+}
+
+// Held: the accent climbs the bar over the hold, so the operator can see the
+// reset coming and let go before it lands.
+.distance-bar.holding {
+    border-color: rgb(245 185 66 / 60%);
+    background:
+        linear-gradient(to right, var(--hud-accent) 0%, var(--hud-accent) 100%) no-repeat
+        left center / 0 100%,
+        var(--hud-surface);
+    animation: distance-hold 700ms linear forwards;
+}
+
+@keyframes distance-hold {
+    to {
+        background-size: 100% 100%;
+    }
+}
+
+.distance-bar.reset {
+    color: #111719;
+    border-color: rgb(245 185 66 / 70%);
+    background: var(--hud-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .distance-bar.holding {
+        animation: none;
+        background: var(--hud-surface);
+    }
 }
 
 .distance-value {

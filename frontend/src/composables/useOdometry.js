@@ -32,6 +32,12 @@ const travelled = ref(0)
 
 let previous = null
 let lastLogAt = 0
+// The counts this run started from. Reactive, unlike `previous`, because the
+// debug readout shows counts measured against it: after a reset both wheels
+// read from zero again, so the strip stays comparable with the distance beside
+// it. The robot's own absolute counts are never touched -- only what is
+// subtracted from them here.
+const origin = ref(null)
 
 const { telemetry } = useBackendConnection()
 const { distancePerCount, wheelSeparation } = useSettings()
@@ -42,6 +48,7 @@ function reset() {
     theta.value = 0
     travelled.value = 0
     previous = null
+    origin.value = null
 }
 
 function integrate(packet) {
@@ -60,6 +67,7 @@ function integrate(packet) {
     // The first reading is a starting point, not a movement.
     if (previous === null) {
         previous = { left, right }
+        if (origin.value === null) origin.value = { left, right }
         return
     }
 
@@ -109,8 +117,24 @@ const headingDegrees = computed(() => {
     return (wrapped < 0 ? wrapped + 360 : wrapped) - 180
 })
 
+// Counts since the run started, which is what the reset zeroes. Null until a
+// first reading has arrived to measure against.
+const countsLeft = computed(() => {
+    const left = telemetry.value?.position_left
+    if (typeof left !== 'number' || origin.value === null) return null
+    return left - origin.value.left
+})
+
+const countsRight = computed(() => {
+    const right = telemetry.value?.position_right
+    if (typeof right !== 'number' || origin.value === null) return null
+    return right - origin.value.right
+})
+
 export function useOdometry() {
     return {
+        countsLeft,
+        countsRight,
         x: readonly(x),
         y: readonly(y),
         theta: readonly(theta),

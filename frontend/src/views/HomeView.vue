@@ -21,7 +21,15 @@ const {
   setPtzSpeedMultiplier,
   savePtzSpeedMultiplier,
 } = useSettings()
-const { travelled: distanceMetres, headingDegrees } = useOdometry()
+const {
+  travelled: distanceMetres,
+  headingDegrees,
+  x: poseX,
+  y: poseY,
+  countsLeft,
+  countsRight,
+  reset: resetOdometry,
+} = useOdometry()
 const { gamepadName, registerHandler } = useGamepad()
 const { telemetry, telemetryState, pingMs, pingState, recordingState, recordingStale } = useBackendConnection()
 const { deckBatteryLevel, deckBatteryCharging, deckBatteryState } = useDeckBattery()
@@ -67,6 +75,8 @@ onMounted(() => {
 })
 onUnmounted(() => {
   if (elapsedTimer !== null) clearInterval(elapsedTimer)
+  if (resetHoldTimer !== null) clearTimeout(resetHoldTimer)
+  if (resetFlashTimer !== null) clearTimeout(resetFlashTimer)
 })
 
 let unregisterGamepadHandler
@@ -121,19 +131,84 @@ const distanceLabel = computed(() => {
   return `${metres.toFixed(1)} m`
 })
 
-// Debug readout: the two encoder frames exactly as they arrive, before the
-// scale and the integration, so a distance that looks wrong can be traced back
-// to whether the counts themselves are moving.
-function rawCount(value) {
+// Debug readout: the two encoder frames, counted from where this run started,
+// before the scale and the integration. Measured from the run's start rather
+// than shown absolute so the reset zeroes them too, which is what makes them
+// comparable with the distance beside them -- the mean of the two, times the
+// metres per count, is what that distance should read. The absolute counts the
+// robot sent are in the strip's tooltip, for when those are the question.
+function countLabel(value) {
   return typeof value === 'number' ? value.toFixed(1) : '--'
 }
 
-const encoderLeftLabel = computed(() => rawCount(telemetry.value?.position_left))
-const encoderRightLabel = computed(() => rawCount(telemetry.value?.position_right))
+const encoderLeftLabel = computed(() => countLabel(countsLeft.value))
+const encoderRightLabel = computed(() => countLabel(countsRight.value))
 
-const distanceStatusLabel = computed(() => (hasOdometry.value
-  ? `Travelled ${distanceLabel.value}, heading ${headingDegrees.value.toFixed(0)} degrees`
-  : 'Waiting for the robot\'s wheel positions'))
+const encoderDebugTitle = computed(() => 'Pose, and the encoder counts since the'
+  + ' distance was last reset. The robot reports '
+  + `${countLabel(telemetry.value?.position_left)} left, `
+  + `${countLabel(telemetry.value?.position_right)} right.`)
+
+// Pose, beside the counts it was integrated from: metres east and north of
+// wherever the odometry was last zeroed, and the heading it has turned through.
+const poseXLabel = computed(() => (hasOdometry.value ? poseX.value.toFixed(2) : '--'))
+const poseYLabel = computed(() => (hasOdometry.value ? poseY.value.toFixed(2) : '--'))
+const poseThetaLabel = computed(() => (hasOdometry.value
+  ? `${headingDegrees.value.toFixed(1)}°`
+  : '--'))
+
+// Holding the distance zeroes it, along with the pose and the baseline the
+// encoder counts are differenced against. A hold rather than a tap: this sits
+// beside a live camera feed on a touchscreen the operator is holding, and a
+// stray thumb must not throw away a drive's worth of odometry.
+const RESET_HOLD_MS = 700
+const resetHolding = ref(false)
+const resetJustDone = ref(false)
+let resetHoldTimer = null
+let resetFlashTimer = null
+
+function endResetHold() {
+  if (resetHoldTimer !== null) {
+    clearTimeout(resetHoldTimer)
+    resetHoldTimer = null
+  }
+  resetHolding.value = false
+}
+
+function beginResetHold() {
+  endResetHold()
+  resetHolding.value = true
+  resetHoldTimer = setTimeout(() => {
+    resetHoldTimer = null
+    resetHolding.value = false
+    resetOdometry()
+    // Say it happened: zeroes alone read the same as a robot that has not
+    // moved yet, and the operator needs to know the hold was long enough.
+    resetJustDone.value = true
+    if (resetFlashTimer !== null) clearTimeout(resetFlashTimer)
+    resetFlashTimer = setTimeout(() => {
+      resetFlashTimer = null
+      resetJustDone.value = false
+    }, 1200)
+  }, RESET_HOLD_MS)
+}
+
+// With no slider beside it the distance would stretch the full width of the
+// telemetry above it. It keeps to the same right-hand column it occupies when
+// the slider is there, so the two layouts read alike.
+const distanceBarStyle = computed(() => {
+  if (ptzControlsActiveCamera.value) return null
+  return speedBarWidth.value
+    ? { marginLeft: `calc(${speedBarWidth.value} + 6px)` }
+    : { marginLeft: '50%' }
+})
+
+const distanceStatusLabel = computed(() => {
+  if (resetJustDone.value) return 'Distance and pose reset'
+  if (!hasOdometry.value) return 'Waiting for the robot\'s wheel positions. Hold to reset.'
+  return `Travelled ${distanceLabel.value}, heading ${headingDegrees.value.toFixed(0)} degrees.`
+    + ' Hold to reset the distance and pose.'
+})
 
 // Pan/tilt speed, as a multiple of the camera's slowest step. Dragging applies
 // it live -- the operator is watching the camera, not the slider -- and letting
@@ -297,17 +372,28 @@ const statusLabel = computed(() => {
           <span class="ptz-speed-value" aria-hidden="true">{{ ptzSpeedMultiplier }}x</span>
         </div>
 
-        <div class="distance-bar" :title="distanceStatusLabel">
+        <button class="distance-bar" :class="{ holding: resetHolding, reset: resetJustDone }"
+          type="button" :style="distanceBarStyle" :title="distanceStatusLabel"
+          :aria-label="distanceStatusLabel" @pointerdown.prevent="beginResetHold"
+          @pointerup="endResetHold" @pointerleave="endResetHold" @pointercancel="endResetHold"
+          @contextmenu.prevent>
           <Route :size="16" aria-hidden="true" />
           <span class="distance-value" aria-hidden="true">{{ distanceLabel }}</span>
-          <span class="visually-hidden" role="status" aria-live="off">{{ distanceStatusLabel }}</span>
-        </div>
+          <span class="visually-hidden" role="status" aria-live="polite">{{ distanceStatusLabel }}</span>
+        </button>
       </div>
 
-      <div class="encoder-debug" title="Raw encoder frames, as received" aria-hidden="true">
-        <span>L</span>
+      <div class="encoder-debug" :title="encoderDebugTitle" aria-hidden="true">
+        <span>x</span>
+        <span class="encoder-debug-value pose">{{ poseXLabel }}</span>
+        <span>y</span>
+        <span class="encoder-debug-value pose">{{ poseYLabel }}</span>
+        <span>θ</span>
+        <span class="encoder-debug-value pose heading">{{ poseThetaLabel }}</span>
+        <span class="encoder-debug-divider"></span>
+        <span>&Delta;L</span>
         <span class="encoder-debug-value">{{ encoderLeftLabel }}</span>
-        <span>R</span>
+        <span>&Delta;R</span>
         <span class="encoder-debug-value">{{ encoderRightLabel }}</span>
       </div>
     </div>
