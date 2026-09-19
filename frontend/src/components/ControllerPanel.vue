@@ -5,16 +5,19 @@ import { useGamepad } from '../composables/useGamepad'
 import { useSettings } from '../composables/useSettings'
 import { useControlState } from '../composables/useControlState'
 import { usePTZState } from '../composables/usePTZState'
+import { useDriveMode } from '../composables/useDriveMode'
 
 // Differential-drive controller. The left stick vertical axis drives Y
-// velocity (up is positive), the right stick horizontal axis drives theta
-// velocity (right is positive). Outputs are normalized and capped to the
-// configurable per-axis limits from Settings. Hardware gamepad input is polled
-// each frame and applies a dead zone; pointer/touch input goes through the
-// joystick components directly.
+// velocity and travels up only: which way the robot goes is the drive mode,
+// not the side of centre the stick is on. The right stick horizontal axis
+// drives theta velocity (right is positive). Outputs are normalized and
+// capped to the configurable per-axis limits from Settings. Hardware gamepad
+// input is polled each frame and applies a dead zone; pointer/touch input goes
+// through the joystick components directly.
 const { limitForRole } = useSettings()
 const { updatePacket, resetPacket } = useControlState()
 const { reset: resetPtz, setDirection, setZoom } = usePTZState()
+const { reversing } = useDriveMode()
 const { acquire: acquireGamepad, axes: gamepadAxes, gamepadName, shoulderButtons, dpadButtons } = useGamepad()
 
 const leftStickY = ref(0)
@@ -53,7 +56,13 @@ function scaleAxis(axis, { min, max }) {
   return Math.min(max, Math.max(min, scaled))
 }
 
-const yVelocity = computed(() => scaleAxis(-leftStickY.value, limitForRole('yVelocity')))
+// The stick's own travel, 0 at centre and 1 at full push, before the mode
+// decides its sign. Screen coordinates put up at -1, hence the negation.
+const driveTravel = computed(() => -leftStickY.value)
+const yVelocity = computed(() => scaleAxis(
+  reversing.value ? -driveTravel.value : driveTravel.value,
+  limitForRole('yVelocity'),
+))
 const thetaVelocity = computed(() => scaleAxis(rightStickX.value, limitForRole('thetaVelocity')))
 
 function formatVelocity(value) {
@@ -88,7 +97,9 @@ watch(ptzZoom, (next) => setZoom(next), { immediate: true })
 function updateGamepad() {
   if (gamepadName.value) {
     if (draggedStick.value !== 'left') {
-      leftStickY.value = applyDeadZone(gamepadAxes.value[1] ?? 0)
+      // The hardware stick has a lower half the drive axis does not: pushing
+      // it down is no more a reverse request than leaving it centred is.
+      leftStickY.value = Math.min(0, applyDeadZone(gamepadAxes.value[1] ?? 0))
     }
     if (draggedStick.value !== 'right') {
       rightStickX.value = applyDeadZone(gamepadAxes.value[2] ?? 0)
@@ -122,10 +133,10 @@ onBeforeUnmount(() => {
   <section class="joystick-section">
     <div class="joysticks-grid">
       <div class="joystick-column">
-        <Joystick v-model="leftStickY" axis="vertical" label="Left joystick" @drag-start="draggedStick = 'left'"
-          @drag-end="draggedStick = null" />
+        <Joystick v-model="leftStickY" axis="vertical" :max="0" label="Left joystick, drive"
+          @drag-start="draggedStick = 'left'" @drag-end="draggedStick = null" />
         <p class="joystick-readout">
-          <span>Linear</span>
+          <span>{{ reversing ? 'Linear (reverse)' : 'Linear' }}</span>
           <strong>{{ formatVelocity(yVelocity) }}</strong>
         </p>
       </div>

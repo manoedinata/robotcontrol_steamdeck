@@ -8,7 +8,7 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 
 - `main.js`: BrowserWindow, application lifecycle, settings load/save IPC, and Exit IPC.
 - `electron-components/preload.js`: narrow `quitApp`, `readDeckBattery`, `loadSettings`, and `saveSettings` bridge.
-- `src/App.vue`: persistent command shell (Record/Recordings/Exit/Settings stack on the right, PTZ focus near/far buttons on the left), backend connection lifecycle, and Settings/Recordings page state.
+- `src/App.vue`: persistent command shell (Record/Recordings/Exit/Settings stack on the right, PTZ focus near/far buttons and the drive-direction toggle on the left), backend connection lifecycle, and Settings/Recordings page state.
 - `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition. The battery readout shows one of two sources and is tapped to change which.
 - `src/composables/useDeckBattery.js`: the Deck's own battery, polled from the main process; the renderer has no other host-hardware reader.
 - `src/views/SettingsView.vue`: camera sources, UDP destination, velocity limits, and keyboard settings.
@@ -22,6 +22,7 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 - `src/components/ControllerPanel.vue`: Y/theta input mapping and generic packet updates.
 - `src/composables/useBackendConnection.js`: singleton typed WebSocket transport, telemetry freshness, reconnect, replay, and backend WebRTC signaling URL.
 - `src/composables/useControlState.js`: generic reactive command packet and frame-coalesced publication.
+- `src/composables/useDriveMode.js`: forward or reverse for the drive axis, shared between the shell's toggle and the controller; in-memory and always forward at start.
 - `src/composables/useSettings.js`: shared persisted settings and backend config synchronization.
 - `../packets-schema.json`: backend-owned binary UDP command layout.
 
@@ -58,9 +59,9 @@ To add a command input, initialize its field in `useControlState.js`, bind the c
 
 Current control mapping remains:
 
-- Left stick vertical axis controls `vy`; up is positive.
+- Left stick vertical axis controls `vy` and travels up only, in both pointer and hardware input. Direction is `useDriveMode()`: forward publishes the travel positive, reverse publishes it negated. The mode lives in the renderer, is not persisted, and never reaches the wire as a field of its own -- the backend only ever sees the signed velocity.
 - Right stick horizontal axis controls `vtheta`; right is positive.
-- Theta is negated before publishing when `vy` is negative, so steering stays driver-relative while reversing.
+- Theta is negated before publishing when `vy` is negative, so steering stays driver-relative while reversing. In reverse mode that is every non-zero push.
 - Gamepad dead zone is `0.12`; pointer/touch has no dead zone.
 - Each axis is scaled by the `packetLimits` entry of the send field carrying its role (`yVelocity`, `thetaVelocity`): the positive half of the stick reaches `max`, the negative half `min`, and the result is clamped into that range. Limits default to the schema bounds and may only narrow them.
 - PTZ (D-pad rotate, LB/RB zoom, on-screen focus buttons) is gated by `useSettings().ptzControlsActiveCamera`: requests are sent only while `ptzIp`'s host equals the active camera stream's host. `usePTZState` publishes a stop and drops local state when that flips false; `App.vue` hides the focus buttons.

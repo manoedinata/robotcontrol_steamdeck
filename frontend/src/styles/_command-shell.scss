@@ -407,6 +407,14 @@ body {
     background: #b63232;
 }
 
+// Reverse is a state worth seeing from across the screen: the same stick push
+// now sends the robot the other way.
+.drive-trigger.reversing {
+    color: #111719;
+    border-color: rgb(245 185 66 / 70%);
+    background: var(--hud-accent);
+}
+
 .record-trigger.recording:hover,
 .record-trigger.recording:focus-visible {
     color: #111719;
@@ -461,6 +469,39 @@ body {
 
 .axis {
     background: rgb(255 255 255 / 20%);
+}
+
+// The half of the travel a bounded stick cannot reach. Dimmed rather than
+// hidden: the ring stays a ring, and the shape still says which way it goes.
+.joystick-ring--blocked-bottom::after,
+.joystick-ring--blocked-top::after,
+.joystick-ring--blocked-left::after,
+.joystick-ring--blocked-right::after {
+    content: '';
+    position: absolute;
+    z-index: 0;
+    background: rgb(0 0 0 / 34%);
+    pointer-events: none;
+}
+
+.joystick-ring--blocked-bottom::after {
+    inset: 50% 0 0;
+    border-radius: 0 0 50% 50% / 0 0 100% 100%;
+}
+
+.joystick-ring--blocked-top::after {
+    inset: 0 0 50%;
+    border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+}
+
+.joystick-ring--blocked-left::after {
+    inset: 0 50% 0 0;
+    border-radius: 50% 0 0 50% / 100% 0 0 100%;
+}
+
+.joystick-ring--blocked-right::after {
+    inset: 0 0 0 50%;
+    border-radius: 0 50% 50% 0 / 0 100% 100% 0;
 }
 
 .joystick-puck {

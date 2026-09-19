@@ -1,9 +1,10 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Clapperboard, Crosshair, Disc, Focus, LogOut, Settings } from '@lucide/vue'
+import { ArrowDown, ArrowUp, Clapperboard, Crosshair, Disc, Focus, LogOut, Settings } from '@lucide/vue'
 import { useGamepad } from './composables/useGamepad'
 import { useBackendConnection } from './composables/useBackendConnection'
 import { usePTZState } from './composables/usePTZState'
+import { useDriveMode } from './composables/useDriveMode'
 import HomeView from './views/HomeView.vue'
 import SettingsShell from './components/SettingsShell.vue'
 import RecordingsShell from './components/RecordingsShell.vue'
@@ -16,6 +17,13 @@ const {
   setRecording,
 } = useBackendConnection()
 const { setFocus, setUiOwnsGamepad, enabled: ptzEnabled } = usePTZState()
+const { reversing, toggleDriveMode } = useDriveMode()
+
+// The label says what is true now and what pressing it does, because the icon
+// alone cannot: an arrow reads equally as the current state or the change.
+const driveModeLabel = computed(() => (reversing.value
+  ? 'Driving in reverse. Switch to forward.'
+  : 'Driving forward. Switch to reverse.'))
 
 // Focus buttons are hold-to-act: pointerdown starts the focus movement and
 // pointerup/leave releases it, mirroring the backend deadman behavior so the
@@ -109,16 +117,23 @@ onBeforeUnmount(() => {
       <HomeView />
     </main>
 
-    <nav v-if="ptzEnabled" class="shell-actions shell-actions--left" aria-label="Camera focus controls">
-      <button class="floating-icon-button focus-trigger" type="button" title="Focus near"
-        aria-label="Focus near" @pointerdown.prevent="focusPress('near')" @pointerup="focusRelease()"
-        @pointerleave="focusRelease()" @pointercancel="focusRelease()" @contextmenu.prevent>
-        <Focus :size="21" aria-hidden="true" />
-      </button>
-      <button class="floating-icon-button focus-trigger" type="button" title="Focus far"
-        aria-label="Focus far" @pointerdown.prevent="focusPress('far')" @pointerup="focusRelease()"
-        @pointerleave="focusRelease()" @pointercancel="focusRelease()" @contextmenu.prevent>
-        <Crosshair :size="21" aria-hidden="true" />
+    <nav class="shell-actions shell-actions--left" aria-label="Camera focus and drive direction">
+      <template v-if="ptzEnabled">
+        <button class="floating-icon-button focus-trigger" type="button" title="Focus near"
+          aria-label="Focus near" @pointerdown.prevent="focusPress('near')" @pointerup="focusRelease()"
+          @pointerleave="focusRelease()" @pointercancel="focusRelease()" @contextmenu.prevent>
+          <Focus :size="21" aria-hidden="true" />
+        </button>
+        <button class="floating-icon-button focus-trigger" type="button" title="Focus far"
+          aria-label="Focus far" @pointerdown.prevent="focusPress('far')" @pointerup="focusRelease()"
+          @pointerleave="focusRelease()" @pointercancel="focusRelease()" @contextmenu.prevent>
+          <Crosshair :size="21" aria-hidden="true" />
+        </button>
+      </template>
+      <button class="floating-icon-button drive-trigger" :class="{ reversing }" type="button"
+        :title="driveModeLabel" :aria-label="driveModeLabel" :aria-pressed="reversing"
+        @click="toggleDriveMode">
+        <component :is="reversing ? ArrowDown : ArrowUp" :size="21" aria-hidden="true" />
       </button>
     </nav>
 

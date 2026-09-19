@@ -19,16 +19,21 @@ The recordings page navigates the same way Settings does, at a higher handler pr
 
 ## Robot Controls
 
-| Input             | Robot value             |
-| ----------------- | ----------------------- |
-| Left stick up     | Positive Y velocity     |
-| Left stick down   | Negative Y velocity     |
-| Right stick left  | Negative theta velocity |
-| Right stick right | Positive theta velocity |
+| Input                       | Robot value                                     |
+| --------------------------- | ----------------------------------------------- |
+| Left stick up, forward mode | Positive Y velocity                             |
+| Left stick up, reverse mode | Negative Y velocity                             |
+| Left stick down             | Nothing; the drive axis has no lower half       |
+| Right stick left            | Negative theta velocity                         |
+| Right stick right           | Positive theta velocity                         |
 
 The Gamepad API reads left-stick Y from `axes[1]` and right-stick X from `axes[2]`. Each value is normalized to `-1..+1` and scaled by its configured limit. Hardware input uses a `0.12` dead zone; pointer and touch input do not. Sideways translation is intentionally absent for the differential-drive robot.
 
-When Y velocity is negative, `ControllerPanel.vue` negates theta before sending it, so steering stays relative to the driver's view while reversing. The displayed theta value is the pre-negation input; the backend sends whatever the renderer publishes without further transformation.
+The left stick travels up only. Which way the robot goes is a mode, not a side of centre: the drive-direction button in the left-hand shell stack (below the PTZ focus buttons) switches between **forward**, where the stick's travel is sent as positive Y velocity, and **reverse**, where the same travel is sent negated. The button shows an up arrow in forward and a filled-in down arrow in reverse, and the linear readout reads "Linear (reverse)" so the mode is legible from two places. It is deliberately not persisted: every start is forward.
+
+Pushing the stick down does nothing in either mode. The pointer puck cannot be dragged past centre and the lower half of the ring is dimmed to say so; the hardware stick's lower half is clamped away, so holding it down is exactly as if it were centred. Reverse motion needs a `yVelocity` minimum below zero -- a limit narrowed to `0` in Settings leaves reverse with nothing to send.
+
+When Y velocity is negative, `ControllerPanel.vue` negates theta before sending it, so steering stays relative to the driver's view while reversing. In reverse mode that applies to every stick push, since they all publish a negative Y. The displayed theta value is the pre-negation input; the backend sends whatever the renderer publishes without further transformation.
 
 ## Camera Controls (PTZ)
 
