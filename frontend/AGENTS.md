@@ -12,6 +12,7 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 - `src/App.vue`: persistent command shell (Record/Recordings/Exit/Settings stack on the right, PTZ focus near/far buttons, the infrared light toggle and the drive-direction toggle on the left), backend connection lifecycle, and Settings/Recordings page state.
 - `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition. The battery readout shows one of two sources and is tapped to change which.
 - `src/composables/useDeckBattery.js`: the Deck's own battery, polled from the main process; the renderer has no other host-hardware reader.
+- `src/composables/useOdometry.js`: differential-drive odometry over the two wheel encoders -- pose (`x`, `y`, `theta`) and the signed distance travelled. It lives here, not in the backend, because the wire carries counts and the conversion needs the operator's own measurements of their robot.
 - `src/views/SettingsView.vue`: camera sources, UDP destination, velocity limits, and keyboard settings.
 - `src/views/SettingsView.vue` reads `GET /storage/targets` for the recording destination picker. The operator selects a card, never a path; the stored value is the folder the backend reported for it.
 - `src/views/RecordingsView.vue`: the recordings library -- a scrollable list of past sessions, each expandable into its files, with playback, save, and delete. Reads `GET /recordings`; opening one session reads `GET /recordings/<session>`.
@@ -49,7 +50,7 @@ WebSocket messages are separated by `type`:
 - `{ "type": "send", "packet": { ...schemaFields } }`
 - `{ "type": "ptz", "direction", "zoom", "focus", "speed_multiplier" }` — held PTZ requests; any of the first three null when nothing is held. `speed_multiplier` is the pan/tilt speed step (1-6) and rides along on every one of these, held or not, so the slider reaches a camera that is already moving.
 - `{ "type": "ptz_light", "on": true | false }` — the camera's infrared light. Latched, not held: sent once per press and never replayed on reconnect, because the backend owns the state and pushes `{ "type": "ptz_light", ... }` on connect and whenever any UI changes it.
-- Backend telemetry uses `{ "type": "receive", "packet": { "position_left", "position_right", "speed_left", "speed_right" } }` -- every field of `packet_types.receive`. Frames 1 and 2 are the wheel positions, and Home shows their mean times the `distancePerCount` setting as the distance travelled; both are logged to the console once a second while what else to do with them is decided. Fields are read one at a time, so one the robot does not send is null rather than a reason to drop the packet -- including `battery_level`, which this robot does not report at all.
+- Backend telemetry uses `{ "type": "receive", "packet": { "position_left", "position_right", "speed_left", "speed_right" } }` -- every field of `packet_types.receive`. Frames 1 and 2 are the left and right motor encoders, which `useOdometry` differences packet to packet and integrates into a pose; Home shows the signed distance travelled, and the pose is logged to the console once a second while what else to do with it is decided. Fields are read one at a time, so one the robot does not send is null rather than a reason to drop the packet -- including `battery_level`, which this robot does not report at all.
 - On connect the backend announces the settable send fields as `{ "type": "schema", "fields": [{ "name", "role", "type", "min", "max", "default" }] }` (padding excluded). Settings renders one min/max row per entry; do not parse `packets-schema.json` in the renderer.
 - Backend host reachability uses `{ "type": "ping", "ping_ms": number | null }`; the value measures ICMP latency to the configured UDP destination, not command-datagram RTT.
 - Backend errors use `{ "type": "error", "message": "..." }`.
@@ -93,7 +94,8 @@ Preserve this persisted contract:
   "useOnScreenKeyboard": true,
   "ptzIp": "",
   "ptzSpeedMultiplier": 1,
-  "distancePerCount": 1
+  "distancePerCount": 1,
+  "wheelSeparation": 0.5
 }
 ```
 

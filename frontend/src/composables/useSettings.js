@@ -27,6 +27,10 @@ const DEFAULT_RECORDINGS_DIR = ''
 // the robot's gearing and wheel size are what set the real figure, and only
 // the operator knows them.
 const DEFAULT_DISTANCE_PER_COUNT = 1
+// Metres between the two driven wheels. Only the heading depends on it: it
+// converts the difference between the wheels into an angle, and the distance
+// travelled is the mean of the two, which does not involve it at all.
+const DEFAULT_WHEEL_SEPARATION = 0.5
 const EMPTY_CAMERA_SOURCE = Object.freeze({
     url: '',
     type: DEFAULT_CAMERA_TYPE,
@@ -45,6 +49,7 @@ const ptzIp = ref(DEFAULT_PTZ_IP)
 const ptzSpeedMultiplier = ref(DEFAULT_PTZ_SPEED_MULTIPLIER)
 const recordingsDir = ref(DEFAULT_RECORDINGS_DIR)
 const distancePerCount = ref(DEFAULT_DISTANCE_PER_COUNT)
+const wheelSeparation = ref(DEFAULT_WHEEL_SEPARATION)
 // The settings as last read from or written to disk. The Home slider persists
 // itself without going through the Settings form, and the file is rewritten
 // whole, so a partial save is merged over this rather than replacing it.
@@ -279,6 +284,14 @@ function parseDistancePerCount(value) {
     return scale
 }
 
+function parseWheelSeparation(value) {
+    const separation = Number(value)
+    // Zero or less is read as "not measured": the heading stops being tracked
+    // rather than the arithmetic dividing by it.
+    if (!Number.isFinite(separation) || separation < 0) return DEFAULT_WHEEL_SEPARATION
+    return separation
+}
+
 function parsePtzSpeedMultiplier(value) {
     const step = Math.round(Number(value))
     if (!Number.isFinite(step)) return DEFAULT_PTZ_SPEED_MULTIPLIER
@@ -309,6 +322,9 @@ function applySettings(settings) {
         : DEFAULT_RECORDINGS_DIR
     distancePerCount.value = parseDistancePerCount(
         settings?.distancePerCount ?? DEFAULT_DISTANCE_PER_COUNT,
+    )
+    wheelSeparation.value = parseWheelSeparation(
+        settings?.wheelSeparation ?? DEFAULT_WHEEL_SEPARATION,
     )
     packetLimits.value = parsePacketLimits(settings?.packetLimits)
     packetSlew.value = parsePacketSlew(settings?.packetSlew)
@@ -383,6 +399,7 @@ export function useSettings() {
         savePtzSpeedMultiplier,
         recordingsDir: readonly(recordingsDir),
         distancePerCount: readonly(distancePerCount),
+        wheelSeparation: readonly(wheelSeparation),
         ptzControlsActiveCamera,
         packetFieldLimits,
         packetLimits: readonly(packetLimits),

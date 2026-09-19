@@ -7,6 +7,7 @@ import { useGamepad } from '../composables/useGamepad'
 import { useSettings } from '../composables/useSettings'
 import { useBackendConnection } from '../composables/useBackendConnection'
 import { useDeckBattery } from '../composables/useDeckBattery'
+import { useOdometry } from '../composables/useOdometry'
 
 const {
   cameraUrl,
@@ -19,8 +20,8 @@ const {
   ptzSpeedMultiplierMax,
   setPtzSpeedMultiplier,
   savePtzSpeedMultiplier,
-  distancePerCount,
 } = useSettings()
+const { travelled: distanceMetres, headingDegrees } = useOdometry()
 const { gamepadName, registerHandler } = useGamepad()
 const { telemetry, telemetryState, pingMs, pingState, recordingState, recordingStale } = useBackendConnection()
 const { deckBatteryLevel, deckBatteryCharging, deckBatteryState } = useDeckBattery()
@@ -102,36 +103,27 @@ const deviceAddress = computed(() => {
   }
 })
 
-// How far the robot has driven. Frames 1 and 2 of the telemetry packet are the
-// left and right wheel positions; their mean is the robot's own travel, since
-// either wheel on its own reads long or short through every turn. The count is
-// turned into a distance by the metres-per-count the operator measured for
-// their gearing, so the conversion is the renderer's and the wire stays what
-// packets-schema.json says it is.
-const travelledCounts = computed(() => {
-  const sides = [telemetry.value?.position_left, telemetry.value?.position_right]
-    .filter((value) => typeof value === 'number')
-  if (!sides.length) return null
-  return sides.reduce((total, value) => total + value, 0) / sides.length
-})
-const distanceMetres = computed(() => (travelledCounts.value === null
-  ? null
-  : travelledCounts.value * distancePerCount.value))
+// How far the robot has driven, integrated from the two wheel encoders by
+// `useOdometry`. It is signed: reversing winds it back, so it reads travel made
+// good rather than an odometer that only ever climbs.
+const hasOdometry = computed(() => telemetry.value?.position_left !== undefined
+  && telemetry.value?.position_left !== null)
 
 // Metres up to a kilometre, then kilometres: a drive is read at a glance, and
 // a four-digit metre count is neither quick to read nor worth its width here.
+// The thresholds go on the magnitude, since the value can be negative.
 const distanceLabel = computed(() => {
+  if (!hasOdometry.value) return '--'
   const metres = distanceMetres.value
-  if (metres === null) return '--'
-  if (metres >= 1000) return `${(metres / 1000).toFixed(2)} km`
-  if (metres >= 100) return `${Math.round(metres)} m`
+  const size = Math.abs(metres)
+  if (size >= 1000) return `${(metres / 1000).toFixed(2)} km`
+  if (size >= 100) return `${Math.round(metres)} m`
   return `${metres.toFixed(1)} m`
 })
 
-const distanceStatusLabel = computed(() => (distanceMetres.value === null
-  ? 'Waiting for the robot\'s wheel positions'
-  : `Travelled ${distanceLabel.value}, from ${travelledCounts.value.toFixed(1)}`
-    + ' encoder counts averaged across both wheels'))
+const distanceStatusLabel = computed(() => (hasOdometry.value
+  ? `Travelled ${distanceLabel.value}, heading ${headingDegrees.value.toFixed(0)} degrees`
+  : 'Waiting for the robot\'s wheel positions'))
 
 // Pan/tilt speed, as a multiple of the camera's slowest step. Dragging applies
 // it live -- the operator is watching the camera, not the slider -- and letting

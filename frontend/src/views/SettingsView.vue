@@ -17,6 +17,7 @@ const {
   ptzSpeedMultiplier,
   recordingsDir,
   distancePerCount,
+  wheelSeparation,
   packetFieldLimits,
   packetLimits,
   packetSlew,
@@ -80,6 +81,7 @@ const targetHost = ref(udpHost.value)
 const targetPort = ref(udpPort.value || '')
 const listenPort = ref(udpListenPort.value)
 const distanceScale = ref(String(distancePerCount.value))
+const wheelTrack = ref(String(wheelSeparation.value))
 const oskEnabled = ref(useOnScreenKeyboard.value)
 const activeKeyboard = ref(null)
 const settingsForm = ref(null)
@@ -102,10 +104,13 @@ const keyboardFields = {
   targetPort: { label: 'UDP target port', layout: 'integer', maxLength: 5 },
   listenPort: { label: 'UDP telemetry listen port', layout: 'integer', maxLength: 5 },
   distanceScale: { label: 'Distance per encoder count', layout: 'decimal', maxLength: 16 },
+  wheelTrack: { label: 'Wheel separation', layout: 'decimal', maxLength: 16 },
   ptzAddress: { label: 'PTZ camera IP', layout: 'ip', maxLength: 253 },
 }
 
-const fieldValues = { targetHost, targetPort, listenPort, distanceScale, ptzAddress }
+const fieldValues = {
+  targetHost, targetPort, listenPort, distanceScale, wheelTrack, ptzAddress,
+}
 
 // Camera sources and packet limits are lists, so their fields are addressed as
 // `<kind>:<index>:<field>` and the on-screen keyboard can target any row.
@@ -256,6 +261,10 @@ watch(distancePerCount, (next) => {
   distanceScale.value = String(next)
 }, { immediate: true })
 
+watch(wheelSeparation, (next) => {
+  wheelTrack.value = String(next)
+}, { immediate: true })
+
 // The backend announces the send-packet fields on connect, so the rows appear
 // (and re-seed after a save) as `packetFieldLimits` resolves.
 watch(packetFieldLimits, (fields) => {
@@ -361,6 +370,11 @@ async function persistSettings({ focusSave = false } = {}) {
       distancePerCount: Number.isFinite(Number.parseFloat(distanceScale.value))
         ? Math.max(Number.parseFloat(distanceScale.value), 0)
         : 1,
+      // Blank or unreadable leaves the heading untracked rather than the form
+      // refusing to save; the distance does not depend on it either way.
+      wheelSeparation: Number.isFinite(Number.parseFloat(wheelTrack.value))
+        ? Math.max(Number.parseFloat(wheelTrack.value), 0)
+        : 0,
       useOnScreenKeyboard: oskEnabled.value,
     })
     settingsState.value = 'saved'
@@ -550,7 +564,17 @@ defineExpose({ saveBeforeClose })
             :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" min="0" step="any"
             placeholder="1" data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
             @click="openKeyboard('distanceScale')" @keydown="handleInputKeydown($event, 'distanceScale')" />
-          <small class="settings-hint">The distance on Home is the robot's encoder count times this.</small>
+          <small class="settings-hint">Metres of travel per encoder count, for each wheel.</small>
+        </div>
+
+        <div class="settings-field">
+          <label for="wheel-separation">Wheel separation (m)</label>
+          <input id="wheel-separation" v-model="wheelTrack" class="form-control" type="number"
+            :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" min="0" step="any"
+            placeholder="0.5" data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
+            @click="openKeyboard('wheelTrack')" @keydown="handleInputKeydown($event, 'wheelTrack')" />
+          <small class="settings-hint">Distance between the driven wheels, which turns the difference
+            between them into a heading. The distance travelled does not depend on it.</small>
         </div>
       </div>
 
