@@ -1,15 +1,17 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { Battery, Camera, Gamepad2, LoaderCircle, Server } from '@lucide/vue'
+import { Battery, BatteryCharging, Camera, Gamepad2, LoaderCircle, Server } from '@lucide/vue'
 import CameraFeed from '../components/CameraFeed.vue'
 import ControllerPanel from '../components/ControllerPanel.vue'
 import { useGamepad } from '../composables/useGamepad'
 import { useSettings } from '../composables/useSettings'
 import { useBackendConnection } from '../composables/useBackendConnection'
+import { useDeckBattery } from '../composables/useDeckBattery'
 
 const { cameraUrl, cameraSources, activeCameraIndex, cameraFeeds, switchCamera } = useSettings()
 const { gamepadName, registerHandler } = useGamepad()
 const { telemetry, telemetryState, pingMs, pingState, recordingState, recordingStale } = useBackendConnection()
+const { deckBatteryLevel, deckBatteryCharging, deckBatteryState } = useDeckBattery()
 
 // Every configured source is mounted and connected at once; this tracks each
 // feed's status by id so the HUD can reflect just the visible one.
@@ -95,15 +97,44 @@ const pingStatusLabel = computed(() => ({
   waiting: 'Waiting for UDP ping',
 }[pingState.value]))
 
-const batteryLevel = computed(() => telemetry.value?.battery_level)
+// One readout, two batteries: the robot's over telemetry and the Deck's own
+// from sysfs. Tapping it swaps which is on show, because both matter on a
+// drive and the HUD has room for one.
+const batterySource = ref('robot')
+const showingDeckBattery = computed(() => batterySource.value === 'deck')
+
+function toggleBatterySource() {
+  batterySource.value = showingDeckBattery.value ? 'robot' : 'deck'
+}
+
+const batteryLevel = computed(() => (showingDeckBattery.value
+  ? deckBatteryLevel.value ?? undefined
+  : telemetry.value?.battery_level))
 const batteryLabel = computed(() => batteryLevel.value === undefined
   ? '--'
   : `${batteryLevel.value}%`)
-const telemetryStatusLabel = computed(() => ({
-  live: `Battery ${batteryLabel.value}`,
-  stale: `Battery ${batteryLabel.value}, telemetry stale`,
-  waiting: 'Waiting for robot telemetry',
-}[telemetryState.value]))
+// The two sources report health differently -- the robot's telemetry can go
+// stale, the Deck's read can be unavailable -- so each keeps its own wording.
+const batteryState = computed(() => (showingDeckBattery.value
+  ? deckBatteryState.value
+  : telemetryState.value))
+const batteryIcon = computed(() => (showingDeckBattery.value && deckBatteryCharging.value
+  ? BatteryCharging
+  : Battery))
+const batterySourceLabel = computed(() => (showingDeckBattery.value ? 'Deck' : 'Robot'))
+const batteryStatusLabel = computed(() => (showingDeckBattery.value
+  ? {
+    live: `Deck battery ${batteryLabel.value}${deckBatteryCharging.value ? ', charging' : ''}`,
+    unavailable: 'Deck battery unavailable',
+    waiting: 'Reading Deck battery',
+  }[deckBatteryState.value]
+  : {
+    live: `Robot battery ${batteryLabel.value}`,
+    stale: `Robot battery ${batteryLabel.value}, telemetry stale`,
+    waiting: 'Waiting for robot telemetry',
+  }[telemetryState.value]))
+const batteryToggleLabel = computed(() => `${batteryStatusLabel.value}. `
+  + `Show the ${showingDeckBattery.value ? 'robot' : 'Deck'} battery instead.`)
 
 const statusLabel = computed(() => {
   if (cameraState.value === 'connected') return 'Connected'
@@ -161,14 +192,16 @@ const statusLabel = computed(() => {
       <span class="visually-hidden">{{ recordingLabel }}</span>
     </div>
 
-    <div class="battery-telemetry" :title="telemetryStatusLabel" role="status" aria-live="polite">
+    <button class="battery-telemetry" type="button" :title="batteryToggleLabel"
+      :aria-label="batteryToggleLabel" @click="toggleBatterySource">
       <div class="connection-telemetry">
-        <Battery :size="20" aria-hidden="true" />
+        <component :is="batteryIcon" :size="20" aria-hidden="true" />
+        <span class="battery-source" aria-hidden="true">{{ batterySourceLabel }}</span>
         <span class="telemetry-value">{{ batteryLabel }}</span>
-        <span class="connection-dot" :class="{ connected: telemetryState === 'live' }" aria-hidden="true"></span>
-        <span class="visually-hidden">{{ telemetryStatusLabel }}</span>
+        <span class="connection-dot" :class="{ connected: batteryState === 'live' }" aria-hidden="true"></span>
       </div>
-    </div>
+    </button>
+    <span class="visually-hidden" role="status" aria-live="polite">{{ batteryStatusLabel }}</span>
 
     <div class="control-mode" :class="{ connected: gamepadName }"
       :title="gamepadName || 'No hardware controller detected'" role="status" aria-live="polite">

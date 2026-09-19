@@ -31,7 +31,7 @@ Host Steam
                    +-- /app/config bind-mounted from host
 ```
 
-Electron has no robot or camera relay transport code, and neither does the renderer: every camera source is backend-owned and arrives as WebRTC. Electron exposes only `quitApp()`, `loadSettings()`, and `saveSettings(settings)` through a context-isolated preload. `nodeIntegration` remains disabled.
+Electron has no robot or camera relay transport code, and neither does the renderer: every camera source is backend-owned and arrives as WebRTC. Electron exposes only `quitApp()`, `readDeckBattery()`, `loadSettings()`, and `saveSettings(settings)` through a context-isolated preload. `readDeckBattery()` reads `/sys/class/power_supply/<battery>/capacity` and `status` in the main process and answers `{ level, charging }`, or `null` on a host without a battery; the renderer never touches the filesystem itself. `nodeIntegration` remains disabled.
 
 Vue owns input interpretation and UI state. `useBackendConnection.js` owns one WebSocket, reconnects every two seconds, replays latest configuration and control state after connection, and tracks live/stale telemetry. `useControlState.js` owns the packet object and coalesces reactive updates per animation frame. `useSettings.js` persists the frontend settings shape, including the telemetry listening port, keeps RTSP credentials separate from the source URL, and translates them into backend configuration.
 

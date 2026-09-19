@@ -166,6 +166,26 @@ body {
     background: var(--hud-surface);
     box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
     backdrop-filter: blur(12px);
+    // It is a button now -- tapping it swaps the robot battery for the Deck's
+    // -- so it takes the font it used to inherit as a div.
+    font: inherit;
+    cursor: pointer;
+}
+
+.battery-telemetry:hover,
+.battery-telemetry:focus-visible {
+    border-color: var(--hud-accent);
+    outline: 3px solid rgb(245 185 66 / 26%);
+    outline-offset: 2px;
+}
+
+// Which battery is on show. Muted and small: the reading is what is being
+// looked at, the source only has to settle which one it is.
+.battery-source {
+    color: var(--hud-muted);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
 }
 
 .recording-status {

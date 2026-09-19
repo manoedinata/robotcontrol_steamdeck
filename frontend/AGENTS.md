@@ -7,9 +7,10 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 ## Architecture
 
 - `main.js`: BrowserWindow, application lifecycle, settings load/save IPC, and Exit IPC.
-- `electron-components/preload.js`: narrow `quitApp`, `loadSettings`, and `saveSettings` bridge.
+- `electron-components/preload.js`: narrow `quitApp`, `readDeckBattery`, `loadSettings`, and `saveSettings` bridge.
 - `src/App.vue`: persistent command shell (Record/Recordings/Exit/Settings stack on the right, PTZ focus near/far buttons on the left), backend connection lifecycle, and Settings/Recordings page state.
-- `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition.
+- `src/views/HomeView.vue`: camera, UDP ping/battery telemetry, controller status, and control composition. The battery readout shows one of two sources and is tapped to change which.
+- `src/composables/useDeckBattery.js`: the Deck's own battery, polled from the main process; the renderer has no other host-hardware reader.
 - `src/views/SettingsView.vue`: camera sources, UDP destination, velocity limits, and keyboard settings.
 - `src/views/SettingsView.vue` reads `GET /storage/targets` for the recording destination picker. The operator selects a card, never a path; the stored value is the folder the backend reported for it.
 - `src/views/RecordingsView.vue`: the recordings library -- a scrollable list of past sessions, each expandable into its files, with playback, save, and delete. Reads `GET /recordings`; opening one session reads `GET /recordings/<session>`.

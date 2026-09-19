@@ -30,6 +30,50 @@ async function loadSettings() {
     }
 }
 
+// The Deck's own battery, straight from sysfs. The container sees the host's
+// /sys, so this reads the same files in development and under Docker. Anything
+// missing means "not a device with a battery" rather than an error: the HUD
+// shows the source as unavailable and keeps working.
+const POWER_SUPPLY_DIR = '/sys/class/power_supply'
+
+async function readDeckBattery() {
+    let entries
+    try {
+        entries = await fs.readdir(POWER_SUPPLY_DIR)
+    } catch {
+        return null
+    }
+
+    // BAT0/BAT1 sort ahead of the AC adapter, and the Deck's pack is BAT1.
+    for (const entry of entries.sort()) {
+        const supply = path.join(POWER_SUPPLY_DIR, entry)
+        try {
+            const type = await fs.readFile(path.join(supply, 'type'), 'utf8')
+            if (type.trim() !== 'Battery') continue
+
+            const capacity = Number.parseInt(
+                await fs.readFile(path.join(supply, 'capacity'), 'utf8'),
+                10,
+            )
+            if (!Number.isInteger(capacity)) continue
+
+            // Absent on some supplies; the level is the part worth having.
+            const status = await fs
+                .readFile(path.join(supply, 'status'), 'utf8')
+                .catch(() => '')
+
+            return {
+                level: Math.min(100, Math.max(0, capacity)),
+                charging: status.trim() === 'Charging',
+            }
+        } catch {
+            // A supply that cannot be read is not the one we are looking for.
+        }
+    }
+
+    return null
+}
+
 async function saveSettings(_event, settings) {
     await ensureSettingsDir()
     const temporaryPath = path.join(settingsDir, `.settings.json.tmp-${process.pid}`)
@@ -75,6 +119,7 @@ app.whenReady().then(() => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
 
+    ipcMain.handle('deck-battery:read', readDeckBattery)
     ipcMain.handle('settings:load', loadSettings)
     ipcMain.handle('settings:save', saveSettings)
     ipcMain.on('app:quit', () => app.quit())
