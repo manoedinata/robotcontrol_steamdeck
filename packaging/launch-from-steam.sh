@@ -126,6 +126,10 @@ else
 	RECORDINGS_ARGS+=(-v "${RECORDINGS_DIR}:/app/recordings")
 fi
 
+# HACK: If the container is already running, force remove it twice.
+podman rm -f steamdeck-robot-monitor || true
+podman rm -f steamdeck-robot-monitor || true
+
 # -----------------------------------------------------------------------------
 # Run the container
 # -----------------------------------------------------------------------------
