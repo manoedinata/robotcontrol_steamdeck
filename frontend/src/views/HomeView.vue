@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { Battery, BatteryCharging, Camera, Gamepad2, LoaderCircle, Server } from '@lucide/vue'
+import { Battery, BatteryCharging, Camera, Gamepad2, LoaderCircle, Route, Server } from '@lucide/vue'
 import CameraFeed from '../components/CameraFeed.vue'
 import ControllerPanel from '../components/ControllerPanel.vue'
 import { useGamepad } from '../composables/useGamepad'
@@ -19,6 +19,7 @@ const {
   ptzSpeedMultiplierMax,
   setPtzSpeedMultiplier,
   savePtzSpeedMultiplier,
+  distancePerCount,
 } = useSettings()
 const { gamepadName, registerHandler } = useGamepad()
 const { telemetry, telemetryState, pingMs, pingState, recordingState, recordingStale } = useBackendConnection()
@@ -100,6 +101,29 @@ const deviceAddress = computed(() => {
     return '--'
   }
 })
+
+// How far the robot has driven: the motor encoder's running count times the
+// metres-per-count the operator measured for their gearing. The robot reports
+// a count and nothing else, so the conversion is the renderer's and the wire
+// stays what packets-schema.json says it is.
+const encoderCount = computed(() => telemetry.value?.encoder ?? null)
+const distanceMetres = computed(() => (encoderCount.value === null
+  ? null
+  : encoderCount.value * distancePerCount.value))
+
+// Metres up to a kilometre, then kilometres: a drive is read at a glance, and
+// a four-digit metre count is neither quick to read nor worth its width here.
+const distanceLabel = computed(() => {
+  const metres = distanceMetres.value
+  if (metres === null) return '--'
+  if (metres >= 1000) return `${(metres / 1000).toFixed(2)} km`
+  if (metres >= 100) return `${Math.round(metres)} m`
+  return `${metres.toFixed(1)} m`
+})
+
+const distanceStatusLabel = computed(() => (distanceMetres.value === null
+  ? 'Waiting for the robot\'s encoder count'
+  : `Travelled ${distanceLabel.value}, from ${encoderCount.value} encoder counts`))
 
 // Pan/tilt speed, as a multiple of the camera's slowest step. Dragging applies
 // it live -- the operator is watching the camera, not the slider -- and letting
@@ -247,13 +271,21 @@ const statusLabel = computed(() => {
         </div>
       </div>
 
-      <div v-if="ptzControlsActiveCamera" class="ptz-speed-bar" :title="speedLabel"
-        :style="speedBarWidth ? { width: speedBarWidth } : null">
-        <input class="ptz-speed-slider" type="range" min="1" :max="ptzSpeedMultiplierMax"
-          step="1" :value="ptzSpeedMultiplier" :aria-label="speedLabel"
-          :aria-valuetext="`${ptzSpeedMultiplier}x`" @input="onSpeedInput"
-          @change="onSpeedChange">
-        <span class="ptz-speed-value" aria-hidden="true">{{ ptzSpeedMultiplier }}x</span>
+      <div class="telemetry-underbar">
+        <div v-if="ptzControlsActiveCamera" class="ptz-speed-bar" :title="speedLabel"
+          :style="speedBarWidth ? { width: speedBarWidth } : null">
+          <input class="ptz-speed-slider" type="range" min="1" :max="ptzSpeedMultiplierMax"
+            step="1" :value="ptzSpeedMultiplier" :aria-label="speedLabel"
+            :aria-valuetext="`${ptzSpeedMultiplier}x`" @input="onSpeedInput"
+            @change="onSpeedChange">
+          <span class="ptz-speed-value" aria-hidden="true">{{ ptzSpeedMultiplier }}x</span>
+        </div>
+
+        <div class="distance-bar" :title="distanceStatusLabel">
+          <Route :size="16" aria-hidden="true" />
+          <span class="distance-value" aria-hidden="true">{{ distanceLabel }}</span>
+          <span class="visually-hidden" role="status" aria-live="off">{{ distanceStatusLabel }}</span>
+        </div>
       </div>
     </div>
 

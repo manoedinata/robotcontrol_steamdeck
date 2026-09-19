@@ -45,6 +45,7 @@ The persisted contract remains:
   "useOnScreenKeyboard": true,
   "ptzIp": "",
   "ptzSpeedMultiplier": 1,
+  "distancePerCount": 1,
   "recordingsDir": ""
 }
 ```
@@ -146,6 +147,8 @@ Playback and stream history are not part of the app.
 ## PTZ Control
 
 `ptzIp` stores the IP of a PTZ-capable camera (Hikvision ISAPI compatible). The Settings drawer's "Camera rotation (PTZ)" section has one field for it. It is sent to FastAPI inside the `config` message as `ptz_ip`; the camera credentials are hardcoded in the backend (`PTZ_USERNAME`/`PTZ_PASSWORD` in `PTZController.py`) rather than being configurable from the UI. The backend then drives the camera's ISAPI continuous-move, focus, and infrared-light endpoints on behalf of all connected UIs, trying digest auth first and falling back to basic on a `401`. The address is optional: an empty value disables PTZ and keeps the backend from issuing camera HTTP requests.
+
+`distancePerCount` is how far the robot travels per motor-encoder count, in metres. The UDP telemetry packet carries a running count and nothing else, so the conversion is the renderer's: Home shows the count times this, in metres up to a kilometre and in kilometres above it. It lives beside the telemetry listen port in Settings, since it describes what arrives on that port. It defaults to `1`, which shows the count as it arrives -- only the operator knows their gearing and wheel size -- and `0` is allowed, reading as "do not show a distance".
 
 `ptzSpeedMultiplier` is how fast pan and tilt run, as a step from 1 to 6 that the backend multiplies its base speed (15) by. Unlike every other setting here it is set from the Home view, not from the Settings drawer: the slider docked under the camera address applies each step as it is dragged and writes the file when the operator lets go. It is merged over the settings last read rather than replacing them, and the Settings form carries it through its own save, because `settings.json` is rewritten whole.
 

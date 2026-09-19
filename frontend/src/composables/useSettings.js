@@ -22,6 +22,11 @@ const PTZ_SPEED_MULTIPLIER_MAX = 6
 const DEFAULT_PTZ_SPEED_MULTIPLIER = 1
 // Empty means the backend keeps its deployment default (RECORDINGS_DIR).
 const DEFAULT_RECORDINGS_DIR = ''
+// Metres of travel per motor-encoder count, which is what turns the robot's
+// running count into a distance. One leaves the count showing as it arrives:
+// the robot's gearing and wheel size are what set the real figure, and only
+// the operator knows them.
+const DEFAULT_DISTANCE_PER_COUNT = 1
 const EMPTY_CAMERA_SOURCE = Object.freeze({
     url: '',
     type: DEFAULT_CAMERA_TYPE,
@@ -39,6 +44,7 @@ const rtspTransport = ref(DEFAULT_RTSP_TRANSPORT)
 const ptzIp = ref(DEFAULT_PTZ_IP)
 const ptzSpeedMultiplier = ref(DEFAULT_PTZ_SPEED_MULTIPLIER)
 const recordingsDir = ref(DEFAULT_RECORDINGS_DIR)
+const distancePerCount = ref(DEFAULT_DISTANCE_PER_COUNT)
 // The settings as last read from or written to disk. The Home slider persists
 // itself without going through the Settings form, and the file is rewritten
 // whole, so a partial save is merged over this rather than replacing it.
@@ -265,6 +271,14 @@ function parseLegacyRoleLimits(settings) {
     return legacy
 }
 
+function parseDistancePerCount(value) {
+    const scale = Number(value)
+    // Zero is allowed -- it reads as "do not show a distance" rather than as a
+    // mistake -- but a negative distance per count is not a shorter robot.
+    if (!Number.isFinite(scale) || scale < 0) return DEFAULT_DISTANCE_PER_COUNT
+    return scale
+}
+
 function parsePtzSpeedMultiplier(value) {
     const step = Math.round(Number(value))
     if (!Number.isFinite(step)) return DEFAULT_PTZ_SPEED_MULTIPLIER
@@ -293,6 +307,9 @@ function applySettings(settings) {
     recordingsDir.value = typeof settings?.recordingsDir === 'string'
         ? settings.recordingsDir
         : DEFAULT_RECORDINGS_DIR
+    distancePerCount.value = parseDistancePerCount(
+        settings?.distancePerCount ?? DEFAULT_DISTANCE_PER_COUNT,
+    )
     packetLimits.value = parsePacketLimits(settings?.packetLimits)
     packetSlew.value = parsePacketSlew(settings?.packetSlew)
     legacyRoleLimits.value = parseLegacyRoleLimits(settings)
@@ -365,6 +382,7 @@ export function useSettings() {
         setPtzSpeedMultiplier,
         savePtzSpeedMultiplier,
         recordingsDir: readonly(recordingsDir),
+        distancePerCount: readonly(distancePerCount),
         ptzControlsActiveCamera,
         packetFieldLimits,
         packetLimits: readonly(packetLimits),

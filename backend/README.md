@@ -35,8 +35,11 @@ Invalid messages receive `{"type":"error","message":"..."}` without closing the 
 Valid robot telemetry is broadcast to all connected UIs:
 
 ```json
-{"type":"receive","packet":{"battery_level":75}}
+{"type":"receive","packet":{"battery_level":75,"counter":4242,"encoder":18320,"padding_1":[0,...],"padding_2":[0,...]}}
 ```
+
+Every decoded field is broadcast, padding included, because the decoder returns
+the layout as the schema declares it.
 
 Applying a config that changes how a camera is dialed -- a url, its credentials,
 `camera_backend` or `rtsp_transport` -- names the sources whose live connection
@@ -304,7 +307,18 @@ The shipped command is exactly 11 bytes:
 | `3`    | 4    | little-endian `float32` | `vy`     |
 | `7`    | 4    | little-endian `float32` | `vtheta` |
 
-The telemetry receiver binds `0.0.0.0:8889` by default. Its packet is exactly 4 bytes: ASCII `ITS` followed by `battery_level` as a `uint8` percentage constrained to `0..100`. Packets with a wrong header, wrong length, or out-of-range value are discarded.
+The telemetry receiver binds `0.0.0.0:8889` by default. Its packet is exactly 68 bytes, laid out by `packet_types.receive`:
+
+| Offset | Size | Type | Field |
+| ------ | ---- | ---- | ----- |
+| `0` | 3 | ASCII | `its` header |
+| `3` | 1 | `uint8` | `battery_level`, a percentage constrained to `0..100` |
+| `4` | 15 | `uint8[15]` | `padding_1` |
+| `19` | 4 | little-endian `uint32` | `counter`, the robot's telemetry sequence |
+| `23` | 41 | `uint8[41]` | `padding_2` |
+| `64` | 4 | little-endian `uint32` | `encoder`, the motor encoder's running count |
+
+Packets with a wrong header, wrong length, or out-of-range value are discarded. Field names must stay unique within a packet: the decoder keys by name, so a repeated one would silently replace the earlier field and its value would never reach the UI.
 
 Adding a Vue input requires adding its initial value to `useControlState.js`, binding the component through `updatePacket()`, and adding the corresponding ordered field to `packets-schema.json`. The WebSocket dispatcher and UDP encoder require no field-specific handler or offset.
 

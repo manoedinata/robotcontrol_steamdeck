@@ -146,6 +146,10 @@ body {
 }
 
 .telemetry-bar {
+    // Its own width, never the stack's. The speed bar under it is measured
+    // from this bar's divider, so a bar stretched by the row beneath it would
+    // move the divider, remeasure wider, and stretch again.
+    align-self: flex-start;
     min-height: 40px;
     display: flex;
     align-items: center;
@@ -162,14 +166,53 @@ body {
 // The pan/tilt speed belongs to the camera named directly above it, so it is
 // docked to that bar rather than floating as a panel of its own: one border
 // between them, and the pair keeps a single outline against the video.
+// The row under the telemetry bar: the camera's speed on the left, under the
+// camera it belongs to, and the distance driven to the right of it.
+.telemetry-underbar {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.distance-bar {
+    // Takes what the speed bar leaves, so the pair spans the telemetry above
+    // it: the icon sits under the divider and the reading under the ping.
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: -1px;
+    padding: 5px 10px;
+    color: #edf1f3;
+    border: 1px solid var(--hud-border);
+    border-radius: 0 0 6px 6px;
+    background: var(--hud-surface);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+    backdrop-filter: blur(12px);
+    font-size: 0.72rem;
+    font-weight: 650;
+}
+
+.distance-value {
+    // Wide enough for the longest reading it can show, so the bar does not
+    // resize itself every few metres.
+    min-width: 7ch;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
 .ptz-speed-bar {
     // Sized in the view to end at the telemetry divider: the speed is the
     // camera's, so it stops where the camera half of the bar does rather than
     // running on under the ping.
     align-self: flex-start;
-    // Until that measurement lands -- and if it never does -- the bar matches
-    // the telemetry above it rather than collapsing onto the slider.
-    width: 100%;
+    // The measured width is exact, so it is neither grown nor shrunk to fit
+    // the row. Until that measurement lands -- and if it never does -- the
+    // minimum keeps the slider usable instead of collapsing onto it.
+    flex: 0 0 auto;
+    min-width: 120px;
     display: flex;
     align-items: center;
     gap: 10px;

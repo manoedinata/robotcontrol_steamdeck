@@ -75,7 +75,7 @@ The shipped packet is 11 bytes:
 | `3`    | 4    | little-endian `float32` | `vy`         |
 | `7`    | 4    | little-endian `float32` | `vtheta`     |
 
-`packet_types.receive` defines the independent receive layout. The shipped telemetry datagram is 4 bytes: ASCII `ITS` followed by one `uint8 battery_level` percentage. FastAPI listens on the persisted `udpListenPort` setting (`8889` by default), binds all interfaces, and rebinds when the setting changes. Header and total length must match exactly.
+`packet_types.receive` defines the independent receive layout. The shipped telemetry datagram is 68 bytes: ASCII `its`, a `uint8 battery_level` percentage, padding, a `uint32 counter`, more padding, and a `uint32 encoder` carrying the motor encoder's running count. FastAPI listens on the persisted `udpListenPort` setting (`8889` by default), binds all interfaces, and rebinds when the setting changes. Header and total length must match exactly.
 
 To add a command value, add it to the frontend packet state and to the ordered schema fields. No WebSocket dispatcher or encoder changes should be necessary.
 
@@ -157,10 +157,14 @@ Receive packets use the independent `packet_types.receive` schema entry. The bac
 {
   "type": "receive",
   "packet": {
-    "battery_level": 75
+    "battery_level": 75,
+    "counter": 4242,
+    "encoder": 18320
   }
 }
 ```
+
+Padding fields are decoded and broadcast too, as lists; the renderer reads the fields it knows and ignores the rest.
 
 To add a new receive packet or field, update each layer in this order.
 

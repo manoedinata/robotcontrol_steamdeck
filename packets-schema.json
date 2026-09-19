@@ -71,6 +71,14 @@
                     "default": 0,
                     "min": 0,
                     "max": 255
+                },
+                {
+                    "name": "encoder",
+                    "type": "uint32",
+                    "role": "motorEncoder",
+                    "default": 0,
+                    "min": 0,
+                    "max": 4294967295
                 }
             ]
         }

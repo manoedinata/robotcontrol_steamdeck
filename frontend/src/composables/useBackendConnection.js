@@ -166,7 +166,16 @@ function acceptReceive(message) {
         return
     }
 
-    telemetry.value = { battery_level: batteryLevel }
+    // The motor encoder's running count. A robot that reports no encoder is
+    // still reporting telemetry, so a missing or unusable count is carried as
+    // null rather than throwing the battery out with it.
+    const encoder = message?.packet?.encoder
+    const encoderCount = Number.isInteger(encoder) && encoder >= 0 ? encoder : null
+    if (encoderCount === null && encoder !== undefined) {
+        console.warn('[backend] Ignored invalid encoder count:', encoder)
+    }
+
+    telemetry.value = { battery_level: batteryLevel, encoder: encoderCount }
     telemetryState.value = 'live'
     if (telemetryTimer !== null) clearTimeout(telemetryTimer)
     telemetryTimer = setTimeout(() => {

@@ -1,7 +1,13 @@
+import json
+import pathlib
 import struct
 import unittest
 
 import utils
+
+SHIPPED_SCHEMA = json.loads(
+    (pathlib.Path(__file__).resolve().parent.parent / "packets-schema.json").read_text()
+)
 
 SCHEMA = {
     "packet_types": {
@@ -239,6 +245,33 @@ class BinaryPacketTests(unittest.TestCase):
         }
         with self.assertRaises(ValueError):
             utils.decode_binary_packet(b"ITS", invalid_schema, "receive")
+
+
+class ShippedSchemaTests(unittest.TestCase):
+    """Checks against packets-schema.json itself, not a fixture."""
+
+    def test_field_names_are_unique_within_a_packet(self) -> None:
+        # The decoder keys by name, so two fields sharing one means the later
+        # silently replaces the earlier and its value never reaches the UI.
+        for packet_type, definition in SHIPPED_SCHEMA["packet_types"].items():
+            names = [
+                field["name"]
+                for field in definition["fields"]
+                if field.get("role") != "padding"
+            ]
+            with self.subTest(packet_type=packet_type):
+                self.assertCountEqual(names, set(names))
+
+    def test_telemetry_carries_the_counter_and_the_encoder_apart(self) -> None:
+        struct_ = utils.packet_struct(SHIPPED_SCHEMA, "receive")
+        header = utils.packet_header(SHIPPED_SCHEMA, "receive")
+        payload = header + struct_.pack(*([77] + [0] * 15 + [4242] + [0] * 41 + [99]))
+
+        decoded = utils.decode_binary_packet(payload, SHIPPED_SCHEMA, "receive")
+
+        self.assertEqual(decoded["battery_level"], 77)
+        self.assertEqual(decoded["counter"], 4242)
+        self.assertEqual(decoded["encoder"], 99)
 
 
 if __name__ == "__main__":

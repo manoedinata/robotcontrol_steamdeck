@@ -16,6 +16,7 @@ const {
   ptzIp,
   ptzSpeedMultiplier,
   recordingsDir,
+  distancePerCount,
   packetFieldLimits,
   packetLimits,
   packetSlew,
@@ -78,6 +79,7 @@ const limits = ref([])
 const targetHost = ref(udpHost.value)
 const targetPort = ref(udpPort.value || '')
 const listenPort = ref(udpListenPort.value)
+const distanceScale = ref(String(distancePerCount.value))
 const oskEnabled = ref(useOnScreenKeyboard.value)
 const activeKeyboard = ref(null)
 const settingsForm = ref(null)
@@ -99,10 +101,11 @@ const keyboardFields = {
   targetHost: { label: 'UDP target host', layout: 'hostname', maxLength: 253 },
   targetPort: { label: 'UDP target port', layout: 'integer', maxLength: 5 },
   listenPort: { label: 'UDP telemetry listen port', layout: 'integer', maxLength: 5 },
+  distanceScale: { label: 'Distance per encoder count', layout: 'decimal', maxLength: 16 },
   ptzAddress: { label: 'PTZ camera IP', layout: 'ip', maxLength: 253 },
 }
 
-const fieldValues = { targetHost, targetPort, listenPort, ptzAddress }
+const fieldValues = { targetHost, targetPort, listenPort, distanceScale, ptzAddress }
 
 // Camera sources and packet limits are lists, so their fields are addressed as
 // `<kind>:<index>:<field>` and the on-screen keyboard can target any row.
@@ -249,6 +252,10 @@ watch(ptzIp, (next) => {
   ptzAddress.value = next
 }, { immediate: true })
 
+watch(distancePerCount, (next) => {
+  distanceScale.value = String(next)
+}, { immediate: true })
+
 // The backend announces the send-packet fields on connect, so the rows appear
 // (and re-seed after a save) as `packetFieldLimits` resolves.
 watch(packetFieldLimits, (fields) => {
@@ -349,6 +356,11 @@ async function persistSettings({ focusSave = false } = {}) {
       udpHost: targetHost.value.trim(),
       udpPort: targetPort.value === '' ? 0 : Number.parseInt(targetPort.value, 10),
       udpListenPort: Number.parseInt(listenPort.value, 10),
+      // A blank or unreadable scale is 1, which shows the count as it arrives
+      // rather than hiding the readout behind a rejected form.
+      distancePerCount: Number.isFinite(Number.parseFloat(distanceScale.value))
+        ? Math.max(Number.parseFloat(distanceScale.value), 0)
+        : 1,
       useOnScreenKeyboard: oskEnabled.value,
     })
     settingsState.value = 'saved'
@@ -530,6 +542,15 @@ defineExpose({ saveBeforeClose })
             :inputmode="oskEnabled ? 'none' : 'numeric'" :readonly="oskEnabled" min="1" max="65535" placeholder="8889"
             required data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
             @click="openKeyboard('listenPort')" @keydown="handleInputKeydown($event, 'listenPort')" />
+        </div>
+
+        <div class="settings-field">
+          <label for="distance-scale">Metres per encoder count</label>
+          <input id="distance-scale" v-model="distanceScale" class="form-control" type="number"
+            :inputmode="oskEnabled ? 'none' : 'decimal'" :readonly="oskEnabled" min="0" step="any"
+            placeholder="1" data-gamepad-control @pointerdown="oskEnabled && $event.preventDefault()"
+            @click="openKeyboard('distanceScale')" @keydown="handleInputKeydown($event, 'distanceScale')" />
+          <small class="settings-hint">The distance on Home is the robot's encoder count times this.</small>
         </div>
       </div>
 
