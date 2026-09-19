@@ -24,6 +24,10 @@ DEFAULT_TELEMETRY_HOST = "10.157.228.140"
 DEFAULT_TELEMETRY_PORT = 8889
 DEFAULT_BATTERY_LEVEL = 75
 DEFAULT_TELEMETRY_INTERVAL = 1.0
+# Encoder counts per unit of commanded drive, per second. The robot's real
+# figure comes from its gearing; this only has to make the count move at a rate
+# the HUD can be read against.
+DEFAULT_ENCODER_COUNTS_PER_UNIT = 10.0
 LIST_PREVIEW = 6
 
 
@@ -110,6 +114,14 @@ def clamp(field: dict[str, Any], value: Any) -> Any:
     return value
 
 
+def field_by_role(layout: PacketLayout, role: str) -> dict[str, Any] | None:
+    """Find a field by the job it does rather than by its name."""
+    for field in layout.fields:
+        if field.get("role") == role:
+            return field
+    return None
+
+
 def load_layout(packet_type: str) -> PacketLayout:
     with SCHEMA_PATH.open(encoding="utf-8") as schema_file:
         schema = json.load(schema_file)
@@ -137,6 +149,20 @@ def main() -> None:
     parser.add_argument("--telemetry-host", default=DEFAULT_TELEMETRY_HOST)
     parser.add_argument("--telemetry-port", type=int, default=DEFAULT_TELEMETRY_PORT)
     parser.add_argument("--battery-level", type=int, default=DEFAULT_BATTERY_LEVEL)
+    parser.add_argument(
+        "--battery-random",
+        action="store_true",
+        help="report a fresh random battery level instead of --battery-level",
+    )
+    parser.add_argument(
+        "--encoder-counts-per-unit",
+        type=float,
+        default=DEFAULT_ENCODER_COUNTS_PER_UNIT,
+        help=(
+            "encoder counts added per unit of commanded drive per second; "
+            "0 leaves the count still whatever is commanded"
+        ),
+    )
     parser.add_argument(
         "--telemetry-interval",
         type=float,
@@ -171,25 +197,52 @@ def main() -> None:
         f"{args.telemetry_host}:{args.telemetry_port}"
     )
 
+    # The encoder is driven by what is being commanded rather than by the
+    # clock: a robot that is not being driven does not travel, and a distance
+    # readout that climbs while the sticks are centred would test nothing.
+    drive_field = field_by_role(send_layout, "yVelocity")
+    encoder_field = (
+        None if telemetry_layout is None else field_by_role(telemetry_layout, "motorEncoder")
+    )
+    encoder_wrap = int(encoder_field.get("max", 0)) + 1 if encoder_field else 0
+
     last_arrival: float | None = None
     next_telemetry = time.monotonic()
     counter = 0
+    encoder = 0.0
+    commanded_drive = 0.0
+    encoder_advanced_at = time.monotonic()
     try:
         while True:
             now = time.monotonic()
             if telemetry_layout is not None and now >= next_telemetry:
-                battery_level = random.randint(0, 100)
+                battery_level = (
+                    random.randint(0, 100) if args.battery_random else args.battery_level
+                )
                 counter += 1
+                if encoder_wrap:
+                    elapsed = now - encoder_advanced_at
+                    encoder += (
+                        abs(commanded_drive) * args.encoder_counts_per_unit * elapsed
+                    )
+                    # uint32 rolls over on the wire, so roll over here too
+                    # rather than sitting clamped at the top for ever.
+                    encoder %= encoder_wrap
+                encoder_advanced_at = now
                 try:
                     telemetry_sock.sendto(
                         telemetry_layout.encode(
-                            {"battery_level": battery_level, "counter": counter}
+                            {
+                                "battery_level": battery_level,
+                                "counter": counter,
+                                "encoder": int(encoder),
+                            }
                         ),
                         (args.telemetry_host, args.telemetry_port),
                     )
                     print(
                         f"Sent receive packet: battery_level={battery_level}%, "
-                        f"counter={counter}"
+                        f"counter={counter}, encoder={int(encoder)}"
                     )
                 except (OSError, struct.error) as error:
                     print(f"Telemetry send failed: {error}")
@@ -208,6 +261,9 @@ def main() -> None:
             timing = "first packet" if interval_ms is None else f"{interval_ms:.2f} ms"
 
             decoded, notes = send_layout.decode(data)
+            if drive_field is not None:
+                value = decoded.get(drive_field["name"])
+                commanded_drive = value if isinstance(value, (int, float)) else 0.0
             print(f"{address} | {timing} | {len(data)} B | {summarize(decoded)}")
             for note in notes:
                 print(f"  ! {note}")

@@ -70,4 +70,6 @@ After `npm install` and `npm run build`, run `./launch.sh`. It locates Electron'
 
 ## Diagnostics
 
-Run `python scripts/udp_server_simulation.py` from the repository root to receive and decode schema-defined command packets on `0.0.0.0:8888` while periodically sending dummy battery receive packets to `127.0.0.1:8889`. Use `--battery-level`, `--telemetry-interval`, `--listen-port`, and `--telemetry-port` to customize the simulation. The standalone `python scripts/udp_telemetry_simulation.py 75` command remains available for sending one packet. Neither simulator emulates a robot motion watchdog.
+Run `python scripts/udp_server_simulation.py` from the repository root to receive and decode schema-defined command packets on `0.0.0.0:8888` while periodically sending dummy telemetry to `127.0.0.1:8889`. Use `--battery-level`, `--telemetry-interval`, `--listen-port`, and `--telemetry-port` to customize the simulation, `--battery-random` to report a fresh random level each packet instead, and `--encoder-counts-per-unit` to set how fast the motor encoder counts up.
+
+The encoder is driven by the commands the simulator is receiving, not by the clock: it advances with the commanded drive and holds still while the sticks are centred, so the distance on Home moves when the robot would. At the default `10` counts per unit of drive per second, a full-scale command adds 1000 counts a second. The standalone `python scripts/udp_telemetry_simulation.py 75` command remains available for sending one packet. Neither simulator emulates a robot motion watchdog.
