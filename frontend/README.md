@@ -64,6 +64,22 @@ For a single container that launches both frontend and backend from Steam, see t
 
 The backend broadcasts received telemetry as `{"type":"receive","packet":{"battery_level":75}}`. The renderer validates the percentage and marks the value stale after two seconds without another packet.
 
+The backend broadcasts `{"type":"camera","streams":["cam-0"]}` when it has
+re-dialed a source, because its url, its credentials, `camera_backend` or
+`rtsp_transport` changed. The named feeds reconnect at once and show
+"Connecting to camera..." while they do. The renderer deliberately does not
+reconnect when the settings form is saved: the backend is what owns camera
+transport, and it says so only once the change is actually in force.
+
+Each feed also counts the video frames its peer receives. Five seconds without
+one is a dead feed however healthy the connection claims to be -- an unplugged
+camera usually leaves its connection open and simply goes quiet -- so the feed
+blanks, says it is connecting, and offers again with `?restart=1`, which is the
+backend's cue to throw away the connection it holds for that source and dial the
+camera afresh. A feed counts as connected only once frames actually arrive, so a
+camera that answers and then sends nothing never shows as a black rectangle or
+as the last frame of the source before it.
+
 The backend also broadcasts host reachability as `{"type":"ping","ping_ms":12.4}` (or `null` when disabled/unreachable); the Home HUD displays it as `Ping`. This is not exact command-datagram RTT because the current robot protocol has no acknowledgement or sequence ID.
 
 ## Documentation

@@ -1,6 +1,11 @@
 import asyncio
 import logging
+import time
 import unittest
+from unittest import mock
+
+from aiortc import MediaStreamTrack
+from aiortc.mediastreams import MediaStreamError
 
 from PTZController import (
     direction_to_ptz_data,
@@ -14,6 +19,7 @@ from server import (
     SCHEMA_SLEW_RATES,
     advance_packet,
     encode_current_packet,
+    restarted_camera_streams,
     runtime,
     send_field_limits,
     validate_config,
@@ -34,9 +40,16 @@ from CameraWebSocketSource import (
     relay_url,
     should_forward,
 )
+import WebRTCStream as camera_backend
 from WebRTCStream import (
     RTSP_TRANSPORTS,
+    STALL_CHECK_INTERVAL_S,
+    STALL_TIMEOUT_S,
+    _AiortcStream,
+    _cancel_task,
     _resolve_stream_id,
+    _SharedPlayer,
+    WebRTCStream,
     go2rtc_source,
     ingest_url,
     missing_parameter_sets,
@@ -789,6 +802,261 @@ class HubSourceOwnershipTests(unittest.IsolatedAsyncioTestCase):
         # A camera can outlive the config that named it by a moment.
         self.hub.publish("gone", _nal(5))
 
+
+
+class _SilentTrack(MediaStreamTrack):
+    """A camera that holds its connection open and sends nothing."""
+
+    kind = "video"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._ended = asyncio.Event()
+        self.on("ended", self._ended.set)
+
+    async def recv(self):
+        await self._ended.wait()
+        raise MediaStreamError
+
+
+class _TickingTrack(MediaStreamTrack):
+    """A camera delivering video as fast as the test needs it."""
+
+    kind = "video"
+
+    async def recv(self):
+        await asyncio.sleep(0.005)
+        return object()
+
+
+class _FakePlayer:
+    """Enough of a MediaPlayer to be held, drained and stopped."""
+
+    def __init__(self, video: MediaStreamTrack) -> None:
+        self.video = video
+        self.audio = None
+
+
+class CameraStallTests(unittest.IsolatedAsyncioTestCase):
+    """A camera that stops sending without closing its connection.
+
+    This is what an unplugged camera, a dropped link and a router that forgets
+    a flow all look like from here, and none of them reaches any of the error
+    paths: the player waits, the peer stays connected, and the last frame stays
+    on screen until something times the silence.
+    """
+
+    async def asyncSetUp(self) -> None:
+        self.backend = _AiortcStream(
+            (("cam-0", "rtsp://camera/1"),), logging.getLogger("test-camera-stall")
+        )
+        self.shared = _SharedPlayer(
+            "cam-0", "rtsp://camera/1", _FakePlayer(_SilentTrack()), decoded=True
+        )
+        self.shared.holders = 1
+        self.backend._shared["cam-0"] = self.shared
+
+    async def asyncTearDown(self) -> None:
+        await _cancel_task(self.shared.tap)
+        await _cancel_task(self.shared.watchdog)
+
+    async def test_the_silence_is_timed_in_seconds(self) -> None:
+        # Long enough to outlast a hiccup, short enough that the operator sees
+        # the feed come back rather than wonders whether it ever will. The
+        # exact value is the operator's to tune; a watchdog that fires in
+        # milliseconds or in minutes would not be this feature.
+        self.assertGreaterEqual(STALL_TIMEOUT_S, 1.0)
+        self.assertLessEqual(STALL_TIMEOUT_S, 10.0)
+        self.assertLess(STALL_CHECK_INTERVAL_S, STALL_TIMEOUT_S)
+
+    async def test_the_watchdog_drops_a_source_that_stops_delivering(self) -> None:
+        with mock.patch.object(camera_backend, "STALL_TIMEOUT_S", 0.05), \
+                mock.patch.object(camera_backend, "STALL_CHECK_INTERVAL_S", 0.01):
+            await asyncio.wait_for(self.backend._watch(self.shared), 2)
+
+        # Gone from the held connections, so the next offer dials the camera
+        # again instead of joining the one that stopped.
+        self.assertNotIn("cam-0", self.backend._shared)
+        self.assertEqual(self.shared.url, "")
+
+    async def test_a_camera_that_keeps_sending_is_left_alone(self) -> None:
+        loop = asyncio.get_running_loop()
+
+        async def deliver() -> None:
+            while True:
+                self.shared.last_packet_at = loop.time()
+                await asyncio.sleep(0.01)
+
+        delivering = asyncio.create_task(deliver())
+        with mock.patch.object(camera_backend, "STALL_TIMEOUT_S", 0.05), \
+                mock.patch.object(camera_backend, "STALL_CHECK_INTERVAL_S", 0.01):
+            watching = asyncio.create_task(self.backend._watch(self.shared))
+            await asyncio.sleep(0.2)
+            still_watching = not watching.done()
+            await _cancel_task(watching)
+        await _cancel_task(delivering)
+
+        self.assertTrue(still_watching)
+        self.assertIn("cam-0", self.backend._shared)
+
+    async def test_the_tap_times_the_packets_it_drains(self) -> None:
+        # The tap reads every source, not only the relayed ones: a connection
+        # nobody pulls from cannot be told apart from one that has gone quiet.
+        shared = _SharedPlayer(
+            "cam-1", "rtsp://camera/2", _FakePlayer(_TickingTrack()), decoded=True
+        )
+        opened_at = shared.last_packet_at
+        shared.tap = asyncio.create_task(self.backend._tap(shared))
+        await asyncio.sleep(0.05)
+        drained_at = shared.last_packet_at
+        await _cancel_task(shared.tap)
+
+        self.assertGreater(drained_at, opened_at)
+
+    async def test_dropping_ends_the_source_the_relay_is_reading(self) -> None:
+        # The recorder reads the connection the live view holds, and its retry
+        # is driven by this event.
+        self.shared.tap = asyncio.create_task(self.backend._tap(self.shared))
+        await asyncio.sleep(0)
+        await self.backend._drop(self.shared, "test")
+        await asyncio.wait_for(self.shared.ended.wait(), 2)
+
+
+class _WedgedTrack(MediaStreamTrack):
+    """A player whose teardown waits on a camera that is not answering.
+
+    aiortc stops a player by joining its worker thread, and that thread sits in
+    demux() on the camera's socket until ffmpeg's read timeout expires.
+    """
+
+    kind = "video"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stops = 0
+
+    async def recv(self):
+        await asyncio.Event().wait()
+
+    def stop(self) -> None:
+        self.stops += 1
+        time.sleep(0.3)
+
+
+class CameraTeardownTests(unittest.IsolatedAsyncioTestCase):
+    """Stopping a camera must not stop everything else with it."""
+
+    async def test_the_loop_keeps_running_while_a_player_is_torn_down(self) -> None:
+        # The regression this guards: the teardown ran on the event loop, so
+        # dropping a stalled camera froze the 50 Hz command sender, telemetry,
+        # PTZ and the control socket for as long as the camera took to let go.
+        track = _WedgedTrack()
+        shared = _SharedPlayer(
+            "cam-0", "rtsp://camera/1", _FakePlayer(track), decoded=True
+        )
+        ticks = 0
+
+        async def tick() -> None:
+            nonlocal ticks
+            while True:
+                ticks += 1
+                await asyncio.sleep(0.01)
+
+        ticker = asyncio.create_task(tick())
+        await shared.close()
+        await _cancel_task(ticker)
+
+        self.assertGreater(ticks, 5)
+
+    async def test_every_holder_waits_on_one_teardown(self) -> None:
+        # A peer and the recorder let go at the same moment; the camera must
+        # not be told to close twice.
+        track = _WedgedTrack()
+        shared = _SharedPlayer(
+            "cam-0", "rtsp://camera/1", _FakePlayer(track), decoded=True
+        )
+
+        await asyncio.gather(shared.close(), shared.close(), shared.close())
+
+        self.assertEqual(track.stops, 1)
+
+
+class CameraReconfigureTests(unittest.IsolatedAsyncioTestCase):
+    """What a settings change costs the sources that are already connected."""
+
+    def setUp(self) -> None:
+        self.logger = logging.getLogger("test-camera-reconfigure")
+
+    async def test_the_transport_does_not_rebuild_go2rtc(self) -> None:
+        # rtsp_transport picks how *this* process dials RTSP. go2rtc dials in
+        # a child process and never reads it, so rebuilding for it would stop,
+        # start and re-dial every camera to change nothing.
+        stream = WebRTCStream((), self.logger, backend="go2rtc")
+        running = stream._stream
+
+        self.assertFalse(await stream.update_config((), "go2rtc", "udp"))
+        self.assertIs(stream._stream, running)
+        # Still recorded, so switching to aiortc later dials the way the
+        # operator asked.
+        self.assertEqual(stream._rtsp_transport, "udp")
+
+    async def test_the_transport_rebuilds_aiortc(self) -> None:
+        stream = WebRTCStream((), self.logger, backend="aiortc")
+        running = stream._stream
+
+        self.assertTrue(await stream.update_config((), "aiortc", "udp"))
+        self.assertIsNot(stream._stream, running)
+
+    async def test_a_backend_change_rebuilds(self) -> None:
+        stream = WebRTCStream((), self.logger, backend="go2rtc")
+
+        self.assertTrue(await stream.update_config((), "aiortc", "tcp"))
+        self.assertTrue(isinstance(stream._stream, _AiortcStream))
+
+    async def test_an_unchanged_config_keeps_every_connection(self) -> None:
+        stream = WebRTCStream((), self.logger, backend="aiortc")
+        running = stream._stream
+
+        self.assertFalse(await stream.update_config((), "aiortc", "tcp"))
+        self.assertIs(stream._stream, running)
+
+
+class CameraRestartNoticeTests(unittest.TestCase):
+    """Which feeds the renderer is told to connect to again."""
+
+    def test_an_edited_source_is_named_and_the_others_are_not(self) -> None:
+        self.assertEqual(
+            restarted_camera_streams(
+                (("cam-0", "rtsp://a/1"), ("cam-1", "rtsp://b/1")),
+                (("cam-0", "rtsp://a/2"), ("cam-1", "rtsp://b/1")),
+                False,
+            ),
+            ("cam-0",),
+        )
+
+    def test_a_new_source_is_named(self) -> None:
+        self.assertEqual(
+            restarted_camera_streams((), (("cam-0", "rtsp://a/1"),), False),
+            ("cam-0",),
+        )
+
+    def test_an_unchanged_config_names_nothing(self) -> None:
+        streams = (("cam-0", "rtsp://a/1"), ("cam-1", "ws://b:1/"))
+        self.assertEqual(restarted_camera_streams(streams, streams, False), ())
+
+    def test_a_removed_source_names_nothing(self) -> None:
+        # It has no connection to replace; the renderer drops the feed when the
+        # stream leaves the config.
+        self.assertEqual(
+            restarted_camera_streams((("cam-0", "rtsp://a/1"),), (), False), ()
+        )
+
+    def test_a_backend_or_transport_change_names_every_source(self) -> None:
+        # Both decide how a connection is opened, so every one is re-dialed.
+        streams = (("cam-0", "rtsp://a/1"), ("cam-1", "ws://b:1/"))
+        self.assertEqual(
+            restarted_camera_streams(streams, streams, True), ("cam-0", "cam-1")
+        )
 
 
 if __name__ == "__main__":

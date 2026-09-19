@@ -7,7 +7,7 @@ Two source kinds share one path. An RTSP url is dialed by the camera backend dir
 ## Endpoints
 
 - `WS /ws/controls`: typed configuration and control messages.
-- `POST /offer?src=<stream id>`: WebRTC SDP signaling for a receive-only video peer, for every source kind. `src` selects which configured stream the answer is for; it may be omitted only when exactly one stream is configured.
+- `POST /offer?src=<stream id>`: WebRTC SDP signaling for a receive-only video peer, for every source kind. `src` selects which configured stream the answer is for; it may be omitted only when exactly one stream is configured. `?restart=1` says that this source stopped delivering pictures: the connection held for it is thrown away and the camera dialed again before the offer is answered, instead of the new peer joining a feed that has already stopped.
 - `GET /camera/<stream id>/stream`: the raw bytestream of one source the backend holds a connection to — every WebSocket camera, and every RTSP camera while `camera_backend` is `aiortc`. This is an internal seam between the WebSocket hub and the camera backend, not a renderer endpoint. `?preroll=1` starts the stream at the camera's last keyframe rather than its next one; only recording asks for it, because the live path would open on video that is already seconds old.
 - `GET /storage/targets`: the recording destinations Settings offers — internal storage plus each mounted removable filesystem, with capacity and writability.
 - `GET /recordings`: every session in the folder the record button writes to, newest first, with each configured source and whether it produced video. Nothing is probed here.
@@ -37,6 +37,19 @@ Valid robot telemetry is broadcast to all connected UIs:
 ```json
 {"type":"receive","packet":{"battery_level":75}}
 ```
+
+Applying a config that changes how a camera is dialed -- a url, its credentials,
+`camera_backend` or `rtsp_transport` -- names the sources whose live connection
+was replaced:
+
+```json
+{"type":"camera","streams":["cam-0"]}
+```
+
+It is sent after the new configuration is in force, so an offer answering it
+cannot reach the old settings, and only the feeds it names reconnect. A config
+that leaves camera transport alone (a different UDP destination, a different
+recordings folder, a different active camera) sends nothing.
 
 ## Recording
 
@@ -300,9 +313,35 @@ UDP transmission runs only while at least one controls WebSocket is connected an
 
 `camera_backend` defaults to `go2rtc`; `aiortc` remains available as an explicit alternative. With go2rtc, FastAPI starts one localhost-only go2rtc process on demand and registers every configured source as a named stream (the renderer's stream id), then proxies `/offer?src=<id>` SDP to go2rtc. A relayed WebSocket source is registered as an `exec:` ffmpeg source rather than a plain url, because the relay serves a bare bytestream with no container to identify it and the demuxer has to be named; the backend sniffs the camera's first payload to pick `h264` or `mjpeg`. A renderer that holds one peer per stream keeps every source connected, so switching is instant. The go2rtc API listens on `127.0.0.1:1984` and WebRTC media uses port `8555`. Set `GO2RTC_BINARY` to override the executable path during local development. A selected but unavailable go2rtc binary reports a camera error and does not silently fall back to aiortc.
 
-`rtsp_transport` defaults to `tcp` and may be `udp`. It selects how the aiortc dial carries RTP: TCP interleaves it inside the RTSP connection, UDP gives it its own datagrams. UDP is lower latency where the network allows it, and a VPN or filtered network drops it outright -- the camera then completes the RTSP handshake and delivers nothing, which looks like a broken camera rather than a blocked port. It reaches only this process's own dial; go2rtc runs in a child process and chooses its own transport. Recording is always TCP, because a dropped RTP packet is permanent corruption of that GOP in a stream copy and a recording has no latency requirement to trade for it. Changing the setting re-dials every source.
+`rtsp_transport` defaults to `tcp` and may be `udp`. It selects how the aiortc dial carries RTP: TCP interleaves it inside the RTSP connection, UDP gives it its own datagrams. UDP is lower latency where the network allows it, and a VPN or filtered network drops it outright -- the camera then completes the RTSP handshake and delivers nothing, which looks like a broken camera rather than a blocked port. It reaches only this process's own dial; go2rtc runs in a child process and chooses its own transport. Recording is always TCP, because a dropped RTP packet is permanent corruption of that GOP in a stream copy and a recording has no latency requirement to trade for it. Changing the setting re-dials every source **under aiortc only**: go2rtc never reads it, so stopping that process, starting it again and re-dialing every camera would be seconds of black screen bought for nothing. It is still recorded while go2rtc runs, so a later switch to aiortc dials the way the operator asked.
 
 With aiortc, each `/offer` creates an aiortc peer and RTSP media player for the requested stream. A config change closes only the peers whose source id or url actually changed; removing a stream or switching backend closes its peers, and FastAPI shutdown closes everything. The current deployment assumes the renderer and backend share the Steam Deck host; no STUN/TURN service is configured.
+
+Releasing one of those connections is done off the event loop. aiortc stops a
+player by joining its worker thread and closing the container, and that thread
+is sitting in `demux()` on the camera's socket -- on a camera that stopped
+sending it stays there until ffmpeg's read timeout expires. Done on the loop,
+that freezes the 50 Hz command sender, the telemetry receiver, the PTZ deadman
+and the control socket for the whole of it, which turned a camera reconnect into
+the robot going unresponsive. The tracks are ended on the loop, so everything
+reading the connection sees it stop immediately, and the blocking half runs on a
+detached thread that every holder waits on.
+
+A camera that is unplugged, loses its link, or is dropped by a router usually
+leaves its connection open and simply stops sending. Nothing below notices:
+ffmpeg keeps waiting, the peer stays connected, and the renderer holds the last
+frame it decoded. So each shared aiortc connection is drained continuously and
+timed: five seconds without a packet (`STALL_TIMEOUT_S`) drops the connection
+and closes every peer reading it, which is what makes the renderer reconnect and
+the next offer dial the camera again. A recording reading that source through
+the relay survives the gap and keeps writing -- the hub redials the reader the
+same way it does for a camera that disconnected outright.
+
+go2rtc holds its connections in a child process, where none of that is visible,
+so there the renderer's own five-second frame watchdog is what reports the
+silence, and `?restart=1` is what makes go2rtc dial again: the source is
+de-registered and re-registered, because go2rtc keeps a source it believes is
+healthy and a camera that went quiet looks exactly like that.
 
 ## Validation
 

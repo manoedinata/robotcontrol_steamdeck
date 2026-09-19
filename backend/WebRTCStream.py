@@ -42,6 +42,17 @@ RTSP_TRANSPORTS = ("tcp", "udp")
 DEFAULT_RTSP_TRANSPORT = RTSP_TRANSPORTS[0]
 
 
+# How long a held camera connection may go without a packet before it is taken
+# to be dead. A camera that is unplugged, loses its link, or is quietly dropped
+# by a router usually leaves its connection open and simply stops sending:
+# ffmpeg keeps waiting, the peer stays "connected", and the renderer holds the
+# last frame it decoded. Nothing below this notices, so the silence is timed
+# here and the connection torn down, which is what turns a frozen picture into
+# a reconnect.
+STALL_TIMEOUT_S = 3.0
+STALL_CHECK_INTERVAL_S = 1.0
+
+
 def rtsp_open_options(
     timeout_us: str, transport: str = DEFAULT_RTSP_TRANSPORT
 ) -> dict[str, str]:
@@ -165,15 +176,38 @@ class _SharedPlayer:
         self.source = player.video if decoded else _AnnexBTrack(player.video)
         self.relay = MediaRelay()
         self.holders = 0
-        # Feeds the relay endpoint's buffer for as long as this connection
-        # lives, so a recording started later begins at a keyframe.
+        # Drains this connection for as long as it lives: it feeds the relay
+        # endpoint's buffer, so a recording started later begins at a keyframe,
+        # and it is what times the stall watchdog below.
         self.tap: asyncio.Task | None = None
+        # Watches the clock below and drops this connection when it stops.
+        self.watchdog: asyncio.Task | None = None
         # Set when the camera stops being readable, so the hub can retry.
         self.ended = asyncio.Event()
+        # The teardown, once it has been asked for. Every holder waits on this
+        # same one rather than starting another.
+        self._closing: asyncio.Future | None = None
+        # Loop time of the last packet off this connection, seeded at creation
+        # so a camera that never sends one is dropped on the same deadline as
+        # one that stops halfway through.
+        self.last_packet_at = asyncio.get_running_loop().time()
 
     def track(self) -> Any:
         """A proxy track for one more consumer of this connection."""
         return self.relay.subscribe(self.source)
+
+    async def close(self) -> None:
+        """Release this camera connection, once, and off the event loop."""
+        if self._closing is None:
+            _end_tracks(self.player)
+            self._closing = utils.run_detached(
+                _close_player,
+                self.player,
+                thread_name=f"camera-stop-{self.stream_id}",
+            )
+        # Shielded: every holder waits on this one teardown, so one of them
+        # being cancelled must not cancel it for the rest.
+        await asyncio.shield(self._closing)
 
 
 def _prefer_h264(peer: RTCPeerConnection) -> None:
@@ -213,22 +247,81 @@ def _resolve_stream_id(streams: dict[str, str], requested: str | None) -> str:
     raise ValueError("camera stream id (?src=) is required with multiple streams")
 
 
+# Teardowns nothing is waiting for, held so the loop cannot collect one
+# mid-flight.
+_DISCARDED: set[asyncio.Future] = set()
+
+
 def _discard_dialed_player(dial: asyncio.Future) -> None:
-    """Tear down a player that finished opening after we stopped waiting."""
+    """Tear down a player that finished opening after we stopped waiting.
+
+    This lands while the backend is shutting down, so the teardown is queued
+    rather than waited for. If the loop has already gone, so has the process,
+    and the camera session goes with it.
+    """
     if dial.cancelled() or dial.exception() is not None:
         return
-    with suppress(Exception):
-        _stop_player(dial.result())
+    with suppress(RuntimeError):
+        discard = asyncio.ensure_future(_stop_player(dial.result()))
+        _DISCARDED.add(discard)
+        discard.add_done_callback(_DISCARDED.discard)
 
 
-def _stop_player(player: MediaPlayer | None) -> None:
-    """Release the RTSP connection behind a player."""
-    if player is None:
+async def _cancel_task(task: asyncio.Task | None) -> None:
+    """Stop one of a connection's background tasks and wait for it to end.
+
+    A task that asks for its own connection to be dropped ends up here asking
+    to be cancelled, which would abandon the teardown it is in the middle of,
+    so the task doing the asking is left to finish on its own.
+    """
+    if task is None or task is asyncio.current_task():
         return
+    task.cancel()
+    with suppress(asyncio.CancelledError, Exception):
+        await task
+
+
+def _end_tracks(player: MediaPlayer) -> None:
+    """Announce that a player's tracks have ended. Loop thread only.
+
+    ``stop()`` does two things: it announces the end, which reaches the event
+    loop, and it tears the player down, which blocks. They have to happen on
+    different threads, so the announcement is made here first -- announcing
+    twice is a no-op, which is what lets the blocking half repeat it from a
+    thread. Everything reading this connection sees it stop now rather than
+    when the camera finally lets go.
+    """
+    for track in (player.video, player.audio):
+        if track is not None:
+            MediaStreamTrack.stop(track)
+
+
+def _close_player(player: MediaPlayer) -> None:
+    """Release the camera connection behind a player. Blocking: thread only.
+
+    aiortc stops a player by joining its worker thread and then closing the
+    container. That thread is usually sitting in ``demux()`` on the camera's
+    socket, and on a camera that has stopped sending it stays there until
+    ffmpeg's own read timeout expires -- seconds, and it is exactly the camera
+    that stopped sending whose player we are most often stopping. Closing the
+    container then talks to the camera as well (RTSP TEARDOWN).
+
+    Run on the event loop, that stops the 50 Hz command sender, the telemetry
+    receiver, the PTZ deadman and the control socket for the whole of it, which
+    is how a camera reconnect became the robot going unresponsive.
+    """
     if player.video is not None:
         player.video.stop()
     if player.audio is not None:
         player.audio.stop()
+
+
+async def _stop_player(player: MediaPlayer | None) -> None:
+    """Release a connection nothing has taken a hold on, off the loop."""
+    if player is None:
+        return
+    _end_tracks(player)
+    await utils.run_detached(_close_player, player, thread_name="camera-stop")
 
 
 class _AiortcStream:
@@ -295,9 +388,7 @@ class _AiortcStream:
         return MediaPlayer(
             camera_url,
             format="rtsp",
-            options=rtsp_open_options(
-                self.RTSP_OPEN_TIMEOUT_US, self._rtsp_transport
-            ),
+            options=rtsp_open_options(self.RTSP_OPEN_TIMEOUT_US, self._rtsp_transport),
             # Hand out the camera's own packets instead of decoding them. The
             # Deck stops paying for a decode and an encode per peer, and the
             # packets stay in a form a recording can stream-copy -- which is
@@ -317,7 +408,10 @@ class _AiortcStream:
         await asyncio.gather(*(self.close_peer(peer) for peer in stale))
 
     async def create_answer(
-        self, offer: RTCSessionDescription, stream_id: str | None = None
+        self,
+        offer: RTCSessionDescription,
+        stream_id: str | None = None,
+        restart: bool = False,
     ) -> RTCSessionDescription:
         async with self._lock:
             resolved_id = _resolve_stream_id(self._streams, stream_id)
@@ -327,6 +421,15 @@ class _AiortcStream:
                     f"camera stream {resolved_id!r} is already being opened"
                 )
             self._dialing.add(resolved_id)
+
+        if restart:
+            # The renderer saw the picture stop. Whatever is held for this
+            # source is not delivering, so it goes before the offer is
+            # answered; otherwise this peer would simply join the dead
+            # connection and freeze on the same frame.
+            held = self._shared.get(resolved_id)
+            if held is not None:
+                await self._drop(held, "the renderer asked for a fresh connection")
 
         peer = RTCPeerConnection()
         shared: _SharedPlayer | None = None
@@ -405,7 +508,7 @@ class _AiortcStream:
             # loop, telemetry and PTZ along with it.
             player = await self._dial(stream_id, camera_url, input_format)
             if player.video is None:
-                _stop_player(player)
+                await _stop_player(player)
                 # aiortc hands out a video track for h264 and vp8 only when
                 # it is not decoding, and it is not decoding because this one
                 # connection feeds every peer and the recorder. An H.265
@@ -420,11 +523,12 @@ class _AiortcStream:
                 stream_id, camera_url, player, decoded=input_format is not None
             )
             shared.holders = 1
-            if not shared.decoded and self._ws_hub is not None:
-                if self._ws_hub.has_stream(stream_id):
-                    shared.tap = asyncio.create_task(
-                        self._tap(shared), name=f"camera-tap-{stream_id}"
-                    )
+            shared.tap = asyncio.create_task(
+                self._tap(shared), name=f"camera-tap-{stream_id}"
+            )
+            shared.watchdog = asyncio.create_task(
+                self._watch(shared), name=f"camera-watchdog-{stream_id}"
+            )
             previous = self._shared.get(stream_id)
             self._shared[stream_id] = shared
             if previous is not None:
@@ -442,13 +546,11 @@ class _AiortcStream:
                 return
             if self._shared.get(shared.stream_id) is shared:
                 del self._shared[shared.stream_id]
-            tap = shared.tap
-            shared.tap = None
-            if tap is not None:
-                tap.cancel()
-                with suppress(asyncio.CancelledError, Exception):
-                    await tap
-            _stop_player(shared.player)
+            tap, shared.tap = shared.tap, None
+            watchdog, shared.watchdog = shared.watchdog, None
+            await _cancel_task(tap)
+            await _cancel_task(watchdog)
+            await shared.close()
 
     def packet_source(self, stream_id: str, camera_url: str) -> SourceReader:
         """A reader the hub can use to serve this source from the relay.
@@ -477,13 +579,29 @@ class _AiortcStream:
         return reader
 
     async def _tap(self, shared: _SharedPlayer) -> None:
-        """Feed one camera's packets to the relay for as long as it is held."""
-        assert self._ws_hub is not None
+        """Drain one camera's packets for as long as its connection is held.
+
+        Two jobs, one read: it feeds the relay for the sources the hub serves,
+        and it stamps every packet for the watchdog below. It runs for every
+        source rather than only the relayed ones, because a connection nobody
+        is pulling from cannot be told apart from one that has gone quiet.
+        """
+        loop = asyncio.get_running_loop()
+        # MJPEG arrives decoded and has no bytestream to republish; the hub
+        # serves a source only when something in this process holds it.
+        relayed = (
+            not shared.decoded
+            and self._ws_hub is not None
+            and self._ws_hub.has_stream(shared.stream_id)
+        )
         track = shared.track()
         try:
             while True:
                 packet = await track.recv()
-                self._ws_hub.publish(shared.stream_id, bytes(packet))
+                shared.last_packet_at = loop.time()
+                if relayed:
+                    assert self._ws_hub is not None
+                    self._ws_hub.publish(shared.stream_id, bytes(packet))
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -493,6 +611,58 @@ class _AiortcStream:
         finally:
             track.stop()
             shared.ended.set()
+
+    async def _watch(self, shared: _SharedPlayer) -> None:
+        """Drop a held connection once it stops delivering video.
+
+        The tap ending is one way a camera goes; the other, and the common one,
+        is that it keeps its connection open and says nothing. Both end here,
+        because a viewer cannot tell them apart -- either way the picture stops
+        and the connection has to be dialed again.
+        """
+        loop = asyncio.get_running_loop()
+        while True:
+            await asyncio.sleep(STALL_CHECK_INTERVAL_S)
+            if shared.ended.is_set():
+                await self._drop(shared, "the camera connection ended")
+                return
+            idle = loop.time() - shared.last_packet_at
+            if idle >= STALL_TIMEOUT_S:
+                await self._drop(shared, f"no video for {idle:.1f}s")
+                return
+
+    async def _drop(self, shared: _SharedPlayer, reason: str) -> None:
+        """Tear down one camera connection and every peer reading it.
+
+        Closing the peers is the point. A renderer whose peer stays up has no
+        way to tell a quiet camera from a frozen one, so it would sit on its
+        last frame; dropped this way it sees the connection close, says it is
+        connecting, and offers again -- and that offer dials the camera afresh,
+        because the dead connection is no longer here for anything to join.
+        """
+        async with self._lock:
+            peers = [
+                peer
+                for peer, (_, _, session) in self._sessions.items()
+                if session is shared
+            ]
+
+        lock = self._acquiring.setdefault(shared.stream_id, asyncio.Lock())
+        async with lock:
+            held = self._shared.get(shared.stream_id) is shared
+            if held:
+                del self._shared[shared.stream_id]
+            # Nothing new may join it, whichever way it went.
+            shared.url = ""
+        if held:
+            self._logger.warning(
+                "Camera %s dropped: %s; reconnecting", shared.stream_id, reason
+            )
+        # Started before the peers are closed, so the tap is already unblocked
+        # when the last hold goes; awaited with them, so a camera that takes its
+        # time being torn down does not hold up the peers' half of it -- the
+        # renderer cannot start reconnecting until its peer is closed.
+        await asyncio.gather(shared.close(), *(self.close_peer(peer) for peer in peers))
 
     async def close_peer(self, peer: RTCPeerConnection) -> None:
         async with self._lock:
@@ -658,15 +828,9 @@ class _Go2RtcStream:
         for stream_id, url in self._streams.items():
             if self._registered.get(stream_id) == url:
                 continue
-            if stream_id in self._registered:
-                # The URL changed; drop the stale source before re-adding so
-                # go2rtc does not keep both.
-                with suppress(OSError, SocketTimeout):
-                    await self._api_request(
-                        "DELETE",
-                        f"/api/streams?src={stream_id}",
-                        phase="RTSP stream refresh",
-                    )
+            # The URL changed; drop the stale source before re-adding so
+            # go2rtc does not keep both.
+            await self._forget_stream(stream_id, "RTSP stream refresh")
             source = await self._source_string(stream_id, url)
             query = urlencode({"name": stream_id, "src": source})
             await self._api_request(
@@ -679,13 +843,17 @@ class _Go2RtcStream:
         for stream_id in tuple(self._registered):
             if stream_id in self._streams:
                 continue
-            with suppress(OSError, SocketTimeout):
-                await self._api_request(
-                    "DELETE",
-                    f"/api/streams?src={stream_id}",
-                    phase="RTSP stream removal",
-                )
-            self._registered.pop(stream_id, None)
+            await self._forget_stream(stream_id, "RTSP stream removal")
+
+    async def _forget_stream(self, stream_id: str, phase: str) -> None:
+        """Drop one source from the running go2rtc, if it has it."""
+        if self._process is None or stream_id not in self._registered:
+            return
+        with suppress(OSError, SocketTimeout):
+            await self._api_request(
+                "DELETE", f"/api/streams?src={stream_id}", phase=phase
+            )
+        self._registered.pop(stream_id, None)
 
     async def update_streams(self, streams: CameraStreams) -> None:
         async with self._lock:
@@ -696,10 +864,19 @@ class _Go2RtcStream:
             await self._sync_streams()
 
     async def create_answer(
-        self, offer: RTCSessionDescription, stream_id: str | None = None
+        self,
+        offer: RTCSessionDescription,
+        stream_id: str | None = None,
+        restart: bool = False,
     ) -> RTCSessionDescription:
         async with self._lock:
             resolved_id = _resolve_stream_id(self._streams, stream_id)
+            if restart:
+                # go2rtc holds the camera in a child process, so the only way
+                # to make it dial again is to take the source away from it.
+                # Dropping the registration is enough: the sync below puts it
+                # back, and go2rtc opens the camera for the first consumer.
+                await self._forget_stream(resolved_id, "camera restart")
             await self._sync_streams()
 
         # The SDP exchange waits on go2rtc dialing the camera, which is bounded
@@ -757,21 +934,35 @@ class WebRTCStream:
         streams: CameraStreams,
         backend: str,
         rtsp_transport: str = DEFAULT_RTSP_TRANSPORT,
-    ) -> None:
+    ) -> bool:
+        """Apply a camera configuration. True if every connection was replaced.
+
+        A backend change replaces all of them: the new backend holds nothing.
+        A transport change does too, but only under aiortc -- that is the
+        backend that dials RTSP in this process, and a transport is chosen when
+        a connection is opened. go2rtc dials inside a child process and picks
+        its own transport, so rebuilding it for this setting would stop, start
+        and re-dial every camera to change something it never reads, which is
+        seconds of black screen bought for nothing.
+        """
         streams = tuple(streams)
-        # A transport change is as disruptive as a backend change: it decides
-        # how a connection is opened, so every open one has to be dialed again.
-        if backend != self._backend or rtsp_transport != self._rtsp_transport:
-            await self.close()
-            self._backend = backend
-            self._rtsp_transport = rtsp_transport
-            self._streams = streams
-            self._set_backend(backend)
-            if streams:
-                await self._stream.update_streams(streams)
-            return
+        rebuild = backend != self._backend or (
+            backend == "aiortc" and rtsp_transport != self._rtsp_transport
+        )
+        # Recorded either way, so a later switch to aiortc opens its dials with
+        # the transport the operator chose while go2rtc was running.
+        self._rtsp_transport = rtsp_transport
         self._streams = streams
-        await self._stream.update_streams(streams)
+        if not rebuild:
+            await self._stream.update_streams(streams)
+            return False
+
+        await self.close()
+        self._backend = backend
+        self._set_backend(backend)
+        if streams:
+            await self._stream.update_streams(streams)
+        return True
 
     def packet_source(self, stream_id: str, camera_url: str) -> SourceReader:
         """A reader for one source, resolved when a subscriber first attaches.
@@ -797,9 +988,19 @@ class WebRTCStream:
         return tuple(stream_id for stream_id, _ in self._streams)
 
     async def create_answer(
-        self, offer: RTCSessionDescription, stream_id: str | None = None
+        self,
+        offer: RTCSessionDescription,
+        stream_id: str | None = None,
+        restart: bool = False,
     ) -> RTCSessionDescription:
-        return await self._stream.create_answer(offer, stream_id)
+        """Answer one receive-only offer.
+
+        ``restart`` is the renderer reporting that this source stopped
+        delivering: the connection held for it is thrown away and the camera
+        dialed again, instead of the new peer joining a feed that has already
+        stopped.
+        """
+        return await self._stream.create_answer(offer, stream_id, restart)
 
     async def close(self) -> None:
         await self._stream.close()

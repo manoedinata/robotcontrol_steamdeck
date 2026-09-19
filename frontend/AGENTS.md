@@ -43,6 +43,7 @@ The default backend base URL is `http://127.0.0.1:8000`; `VITE_BACKEND_URL` may 
 WebSocket messages are separated by `type`:
 
 - `{ "type": "record", "action": "start" | "stop" }` — records every configured source at once. Never replayed on reconnect: the backend owns whether a recording is running and pushes `{ "type": "recording", ... }` on connect and on every change.
+- `{ "type": "camera", "streams": ["cam-0"] }` — backend-pushed: these sources were just re-dialed because a url, a credential, `camera_backend` or `rtsp_transport` changed. The named feeds reconnect; the renderer must not reconnect a feed when settings are saved, which would race the config it just sent.
 - `{ "type": "config", "config": { "udp_host", "udp_port", "udp_listen_port", "camera_streams", "camera_backend", "rtsp_transport", "ptz_ip", "recordings_dir" } }` — `camera_streams` is `[{ "id", "url" }]`, one entry per configured source. A url is `rtsp://`, `ws://`, or `wss://`; the backend owns all of them.
 - `{ "type": "send", "packet": { ...schemaFields } }`
 - `{ "type": "ptz", "direction", "zoom", "focus" }` — held PTZ requests; any field null when nothing is held.
@@ -109,7 +110,9 @@ A source listed with `recorded: false` is the reason the page exists: it was con
 
 ### Camera
 
-`HomeView.vue` renders one `CameraFeed.vue` per source from `useSettings().cameraFeeds`, keyed so an edited source remounts while a plain switch does not, and `v-show`s only the active one. Each `CameraFeed` holds its connection for its whole lifetime regardless of visibility, so switching never reconnects. It negotiates backend `/offer?src=<streamId>` for every source kind, whatever transport the backend uses upstream. An empty stream id shows idle. Errors retry every two seconds; transports close on prop change and unmount. The selectable `cameraBackend` setting applies to every source (`go2rtc` default, or `aiortc`), and `rtspTransport` (`tcp` default, or `udp`) selects how aiortc dials RTSP; recording stays on TCP regardless. Do not silently fall back between backends, add Electron camera relays, or give the renderer a direct camera connection. Keeping every source warm scales CPU/GPU/bandwidth with the source count — a deliberate trade for instant switching.
+`HomeView.vue` renders one `CameraFeed.vue` per source from `useSettings().cameraFeeds`, keyed by stream id, and `v-show`s only the active one. Each `CameraFeed` holds its connection for its whole lifetime regardless of visibility, so switching never reconnects. It negotiates backend `/offer?src=<streamId>` for every source kind, whatever transport the backend uses upstream. An empty stream id shows idle. Errors retry every two seconds; transports close on prop change and unmount.
+
+A feed is `connected` only once video actually arrives (a receiver frame count or the `<video>` element's `playing`), never on `ontrack` alone, and five seconds without a frame blanks it back to `loading` and re-offers with `?restart=1`. Do not restart a feed from the settings form: reconnects that a config change causes are driven by the backend's `camera` message, so the offer cannot race the config. Count frames at the receiver, not at the element — every feed but one is hidden. The selectable `cameraBackend` setting applies to every source (`go2rtc` default, or `aiortc`), and `rtspTransport` (`tcp` default, or `udp`) selects how aiortc dials RTSP; recording stays on TCP regardless. Do not silently fall back between backends, add Electron camera relays, or give the renderer a direct camera connection. Keeping every source warm scales CPU/GPU/bandwidth with the source count — a deliberate trade for instant switching.
 
 ### UI and Navigation
 

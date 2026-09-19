@@ -60,12 +60,49 @@ Empty UDP host and port `0` disable command transmission. `udpListenPort` remain
 
 Every source, `cameraBackend`, and `rtspTransport` are sent to the backend as `camera_streams` (a list of `{ id, url }`, `id` = `cam-<sourceIndex>`), `camera_backend`, and `rtsp_transport`.
 
-`rtspTransport` selects how the live path carries RTP for an RTSP source: `tcp` (default) interleaves it inside the RTSP connection, `udp` gives it its own datagrams. UDP has lower latency where the network allows it; a VPN or a filtered network drops it and the camera then connects and stays silent, which reads as a broken camera rather than a blocked port. It is sent as `rtsp_transport` and applies to the aiortc backend, which is where this process dials RTSP itself; go2rtc dials in its own child process and chooses for itself. Recording is always TCP: a dropped RTP packet is permanent corruption of that GOP in a stream copy, and a recording has no latency requirement to trade for it. Changing it re-dials every source, since a transport is chosen when a connection is opened.
+`rtspTransport` selects how the live path carries RTP for an RTSP source: `tcp` (default) interleaves it inside the RTSP connection, `udp` gives it its own datagrams. UDP has lower latency where the network allows it; a VPN or a filtered network drops it and the camera then connects and stays silent, which reads as a broken camera rather than a blocked port. It is sent as `rtsp_transport` and applies to the aiortc backend, which is where this process dials RTSP itself; go2rtc dials in its own child process and chooses for itself. Recording is always TCP: a dropped RTP packet is permanent corruption of that GOP in a stream copy, and a recording has no latency requirement to trade for it. Changing it re-dials every source while `aiortc` is the running backend, since a transport is chosen when a connection is opened. Under `go2rtc` nothing is torn down: that backend dials in its own child process and never reads the setting, so the value is stored for the next time aiortc runs and the live feeds carry on untouched.
  With the default `go2rtc` backend, FastAPI starts one local go2rtc process on demand, registers one named stream per source, and proxies receive-only WebRTC signaling through `POST /offer?src=<id>`. `aiortc` remains available as an explicit alternative. Each `CameraFeed.vue` negotiates one peer with FastAPI for its stream and renders the media track in `<video>`; holding that peer open is what keeps the source warm.
 
 Both transports reach the renderer this way. For WebSocket mode, Settings still stores `ws://<IP>:<port>`, but the renderer no longer touches the camera: the backend opens the socket, sends `PlayStream2`, ignores text status messages, and re-serves the binary payloads at `GET /camera/<id>/stream` for its own camera backend to consume. This costs some latency compared with the previous renderer-direct WebCodecs path, and buys one camera transport instead of two — the renderer has no camera code, and anything the backend does across "all sources" works for every source kind. Nothing is re-encoded on the relay hop.
 
-Camera errors are surfaced by the WebRTC connection and retried by the existing camera lifecycle. A WebSocket source that drops is redialed by the backend hub with backoff, independently of the renderer's own retry. Camera source URLs are not logged in full because they may contain credentials. Local development can override the go2rtc executable with `GO2RTC_BINARY`; Docker bundles a pinned, checksum-verified binary.
+Camera errors are surfaced by the WebRTC connection and retried by the existing camera lifecycle. A WebSocket source that drops is redialed by the backend hub with backoff, independently of the renderer's own retry.
+
+### When a feed stops moving
+
+A camera that is unplugged, loses its link, or is dropped by a router usually
+leaves its connection open and simply stops sending. No error is raised
+anywhere: the peer stays connected and the renderer holds the last frame it
+decoded, which reads exactly like a working camera pointed at something still.
+
+So each `CameraFeed.vue` counts the frames its peer receives, once per second.
+Five seconds without one and the feed blanks, shows "Connecting to camera...",
+and offers again with `?restart=1` — which tells the backend to throw away the
+connection it holds for that source and dial the camera again, rather than hand
+out a second peer onto a feed that has already stopped. The count comes from the
+receiver rather than from the `<video>` element, because every source but one is
+off screen at any moment and a hidden feed is still a working feed. The aiortc
+backend times the same silence on its own side, where it can drop the shared
+connection a recording is also reading; go2rtc holds its connections in a child
+process, so there the renderer's watchdog is the only thing that can see it.
+
+A feed is "connected" only once video is actually arriving, not when the track
+is negotiated. A track is a promise of video, not video.
+
+A feed that keeps stalling says why under "Connecting to camera...": a source
+that connects and then sends nothing at all is usually an RTSP transport the
+network drops, which is a setting the operator can act on, and an unexplained
+spinner is not.
+
+### When a setting changes
+
+Editing a camera's address or credentials, or changing `cameraBackend` or
+`rtspTransport`, replaces live connections. The renderer does not act on saving
+the form: it waits for `{"type":"camera","streams":[...]}`, which the backend
+sends once the new configuration is in force, and reconnects exactly the feeds
+it names. Reconnecting on save instead would race the config message and
+negotiate against settings the backend has not applied yet. A feed that began
+connecting after the change was sent is already negotiating against it and is
+left alone. Camera source URLs are not logged in full because they may contain credentials. Local development can override the go2rtc executable with `GO2RTC_BINARY`; Docker bundles a pinned, checksum-verified binary.
 
 ## Recording
 

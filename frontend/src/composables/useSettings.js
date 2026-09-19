@@ -138,11 +138,12 @@ function buildBackendCameraUrl(source) {
 const cameraFeeds = computed(() => cameraSources.value.map((source, index) => {
     const url = (source.url ?? '').trim()
     return {
-        // Stable per slot so HUD status tracking survives a remount.
+        // Stable per slot, for the HUD's per-feed status and for Vue's keying.
+        // Editing a source deliberately does NOT remount its feed: the backend
+        // owns camera transport, and it tells the renderer when a connection
+        // has been replaced, which is after the new settings are in force
+        // rather than the moment the form was saved.
         id: cameraStreamId(index),
-        // Changes when the source is edited so Vue remounts (reconnects)
-        // that one feed; unchanged when only the active source switches.
-        key: `${cameraStreamId(index)}:${source.type}:${url}`,
         index,
         // Empty until the source is actually configured, so an unconfigured
         // slot shows "idle" instead of retrying against the backend. Every

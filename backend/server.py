@@ -344,6 +344,29 @@ def validate_config(
     )
 
 
+def restarted_camera_streams(
+    previous: tuple[tuple[str, str], ...],
+    current: tuple[tuple[str, str], ...],
+    redialed_everything: bool,
+) -> tuple[str, ...]:
+    """The sources whose live connection this config change has replaced.
+
+    Editing one camera's address or credentials moves that source alone;
+    changing the camera backend or the RTSP transport re-dials every one of
+    them. Naming the ids rather than saying "something changed" is what lets
+    the renderer reconnect the feed that moved and leave the others alone.
+
+    A source that was removed is not here: it has no connection to replace,
+    and the renderer drops its feed when the stream leaves the config.
+    """
+    if redialed_everything:
+        return tuple(stream_id for stream_id, _ in current)
+    before = dict(previous)
+    return tuple(
+        stream_id for stream_id, url in current if before.get(stream_id) != url
+    )
+
+
 async def send_client_message(websocket: WebSocket, message: dict[str, Any]) -> bool:
     """Serialize writes to one client and report whether it remains usable."""
     lock = runtime.clients.get(websocket)
@@ -385,6 +408,26 @@ async def broadcast_ping(ping_ms: float | None) -> None:
                 websocket,
                 {"type": "ping", "ping_ms": ping_ms},
             )
+            for websocket in tuple(runtime.clients)
+        )
+    )
+
+
+async def broadcast_camera_restart(stream_ids: tuple[str, ...]) -> None:
+    """Tell every UI which camera sources it must connect to again.
+
+    The backend owns camera transport, so it is also what knows when a live
+    connection has been thrown away -- and it says so only once the new
+    configuration is in force, which is what keeps a renderer from offering
+    against settings that have not been applied yet.
+    """
+    if not runtime.clients or not stream_ids:
+        return
+
+    message = {"type": "camera", "streams": list(stream_ids)}
+    await asyncio.gather(
+        *(
+            send_client_message(websocket, message)
             for websocket in tuple(runtime.clients)
         )
     )
@@ -1050,9 +1093,14 @@ async def video_offer(request: Request) -> JSONResponse:
         # The renderer names the camera source through ?src=<stream id>; it is
         # optional for a single-stream setup.
         stream_id = request.query_params.get("src") or None
+        # ?restart=1 is the renderer reporting that this source stopped
+        # delivering pictures. A camera that goes quiet without closing its
+        # connection looks healthy from here, so the renderer -- the only thing
+        # that can see frames stop -- is what asks for it to be dialed again.
+        restart = request.query_params.get("restart") in {"1", "true", "yes"}
 
         answer = await video_stream.create_answer(
-            RTCSessionDescription(sdp=sdp, type=offer_type), stream_id
+            RTCSessionDescription(sdp=sdp, type=offer_type), stream_id, restart
         )
         return JSONResponse(
             {"sdp": answer.sdp, "type": answer.type},
@@ -1128,6 +1176,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         recordings_dir,
                         rtsp_transport,
                     ) = validate_config(config)
+                    # Read before it is overwritten: the renderer is told
+                    # which camera connections this change threw away, and only
+                    # a comparison with what was in force can say.
+                    previous_streams = runtime.config.camera_streams
                     runtime.config.udp_ip = udp_host
                     runtime.config.udp_port = udp_port
                     runtime.config.udp_listen_port = udp_listen_port
@@ -1142,12 +1194,31 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     # The hub must know a WebSocket source before the camera
                     # backend is pointed at its relay URL, or the first dial
                     # 404s.
+                    started = asyncio.get_running_loop().time()
                     await camera_ws_hub.update_streams(camera_streams, camera_backend)
-                    await video_stream.update_config(
+                    # The camera backend says whether it replaced everything;
+                    # guessing here would have the renderer reconnect feeds
+                    # that never moved -- a transport change under go2rtc, for
+                    # one, applies to nothing that backend does.
+                    redialed_everything = await video_stream.update_config(
                         camera_streams, camera_backend, rtsp_transport
                     )
                     recorder.update_sources(camera_streams)
                     recorder.set_root(recordings_dir)
+                    restarted = restarted_camera_streams(
+                        previous_streams, camera_streams, redialed_everything
+                    )
+                    # After the backend has actually been reconfigured, so an
+                    # offer answering this can only reach the new settings.
+                    await broadcast_camera_restart(restarted)
+                    if restarted:
+                        # The operator is watching a black screen for exactly
+                        # this long, so it is worth being able to read it back.
+                        LOGGER.info(
+                            "Camera sources re-dialed in %.1fs: %s",
+                            asyncio.get_running_loop().time() - started,
+                            ", ".join(restarted),
+                        )
                     LOGGER.info(
                         "UDP config accepted: "
                         f"enabled={udp_enabled} destination="

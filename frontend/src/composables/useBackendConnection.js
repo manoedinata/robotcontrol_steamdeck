@@ -25,7 +25,15 @@ const recordingState = ref(null)
 // True while the socket is down and the last known recording state may have
 // moved on without us.
 const recordingStale = ref(false)
-const signalingUrl = new URL('/offer', backendUrl).toString()
+// Stream ids the backend has just re-dialed, each with a count of how often it
+// has said so. The backend owns camera transport, so it -- not the settings
+// form -- is what knows a live connection has been thrown away, and it says so
+// only once the new configuration is actually in force.
+const cameraRestarts = ref({})
+// Bumped when a config that changes how cameras are dialed leaves here. A feed
+// that began connecting at the current value is already negotiating against
+// that config, so the acknowledgement of it must not restart it again.
+const cameraConfigSeq = ref(0)
 // Recording destinations the operator can pick between, read on demand by
 // Settings rather than pushed, since it only changes when media is inserted.
 const storageTargetsUrl = new URL('/storage/targets', backendUrl).toString()
@@ -52,12 +60,15 @@ function recordingFileUrl(sessionId, filename, kind, params = {}) {
     return url.toString()
 }
 
-// Receive-only WebRTC signaling for one backend-dialed RTSP stream. The
-// stream id selects which warm source the answer is for.
-function cameraSignalingUrl(streamId) {
-    if (!streamId) return signalingUrl
+// Receive-only WebRTC signaling for one backend-held camera source. The stream
+// id selects which warm source the answer is for; `restart` reports that this
+// one stopped delivering pictures, so the backend throws away the connection it
+// holds for it and dials the camera again instead of handing out a second peer
+// onto a feed that has already stopped.
+function cameraSignalingUrl(streamId, restart = false) {
     const url = new URL('/offer', backendUrl)
-    url.searchParams.set('src', streamId)
+    if (streamId) url.searchParams.set('src', streamId)
+    if (restart) url.searchParams.set('restart', '1')
     return url.toString()
 }
 let socket = null
@@ -112,6 +123,18 @@ function acceptRecording(message) {
     }
     recordingState.value = message
     recordingStale.value = false
+}
+
+function acceptCamera(message) {
+    const streams = message?.streams
+    if (!Array.isArray(streams) || streams.some((id) => typeof id !== 'string')) {
+        console.warn('[backend] Ignored invalid camera message:', message)
+        return
+    }
+
+    const restarts = { ...cameraRestarts.value }
+    for (const streamId of streams) restarts[streamId] = (restarts[streamId] ?? 0) + 1
+    cameraRestarts.value = restarts
 }
 
 function acceptSchema(message) {
@@ -176,6 +199,8 @@ function connect() {
                 acceptSchema(message)
             } else if (message.type === 'recording') {
                 acceptRecording(message)
+            } else if (message.type === 'camera') {
+                acceptCamera(message)
             }
         } catch (error) {
             console.warn('[backend] Ignored invalid WebSocket response:', error)
@@ -206,8 +231,26 @@ function disconnect() {
     clearTelemetry()
 }
 
+// The part of a config that decides how a camera is dialed. Everything else in
+// a config -- the UDP destination, the ramp rates, where recordings are written
+// -- leaves the live connections alone.
+function cameraTransportOf(config) {
+    return JSON.stringify([
+        config?.camera_streams ?? [],
+        config?.camera_backend ?? '',
+        config?.rtsp_transport ?? '',
+    ])
+}
+
+let sentCameraTransport = null
+
 function updateConfig(config) {
     latestConfig = { ...config }
+    const cameraTransport = cameraTransportOf(latestConfig)
+    if (cameraTransport !== sentCameraTransport) {
+        sentCameraTransport = cameraTransport
+        cameraConfigSeq.value += 1
+    }
     send({ type: 'config', config: latestConfig })
 }
 
@@ -261,7 +304,8 @@ export function useBackendConnection() {
         packetFields: readonly(packetFields),
         recordingState: readonly(recordingState),
         recordingStale: readonly(recordingStale),
-        signalingUrl,
+        cameraRestarts: readonly(cameraRestarts),
+        cameraConfigSeq: readonly(cameraConfigSeq),
         cameraSignalingUrl,
         storageTargetsUrl,
         recordingsUrl,
