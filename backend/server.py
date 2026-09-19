@@ -632,25 +632,6 @@ async def udp_loop() -> None:
                             )
                             last_error_log = now
 
-                # The light gets its own attempt: it is the one command with
-                # no stop behind it, so a failure has to be retried rather
-                # than left for the next press, and it must not be reported
-                # as a failed move.
-                if light != runtime.ptz_light_sent:
-                    try:
-                        await controller.set_light(light)
-                        runtime.ptz_light_sent = light
-                    except Exception as error:
-                        now = loop.time()
-                        if now - last_light_error_log >= 1.0:
-                            LOGGER.warning(
-                                "PTZ light %s to %s failed: %s",
-                                "on" if light else "off",
-                                controller.ip,
-                                error,
-                            )
-                            last_light_error_log = now
-
             next_send += interval
             delay = next_send - loop.time()
             if delay > 0:

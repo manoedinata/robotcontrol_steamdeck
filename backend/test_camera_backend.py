@@ -25,6 +25,7 @@ from server import (
     encode_current_packet,
     ptz_loop,
     restarted_camera_streams,
+    udp_loop,
     runtime,
     send_field_limits,
     validate_config,
@@ -470,6 +471,55 @@ class _FakePTZ:
         if self._failed_lights > 0:
             self._failed_lights -= 1
             raise RuntimeError("camera refused the aux control")
+
+
+class _FakeSocket:
+    """Stands in for the bound socket the send and receive loops share."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[bytes, tuple[str, int]]] = []
+
+    def sendto(self, payload: bytes, address: tuple[str, int]) -> None:
+        self.sent.append((payload, address))
+
+
+class UDPSendLoopTests(unittest.IsolatedAsyncioTestCase):
+    """The 50 Hz sender keeps running, whatever else is added beside it."""
+
+    def setUp(self) -> None:
+        self._saved = (
+            dict(runtime.clients),
+            runtime.udp_enabled,
+            runtime.udp_socket,
+        )
+        runtime.clients = {object(): asyncio.Lock()}
+        runtime.udp_enabled = True
+
+    def tearDown(self) -> None:
+        clients, enabled, sock = self._saved
+        runtime.clients = clients
+        runtime.udp_enabled = enabled
+        runtime.udp_socket = sock
+
+    async def test_a_connected_ui_keeps_datagrams_going_out(self) -> None:
+        # This loop swallows its own exceptions so a bad tick cannot kill the
+        # task silently, which also means a mistake in it goes unheard: the UI
+        # stays connected, nothing is logged twice, and the robot simply stops
+        # being driven. So it is exercised end to end rather than by reading.
+        sock = _FakeSocket()
+        runtime.udp_socket = sock
+        loop_task = asyncio.create_task(udp_loop())
+        try:
+            await asyncio.sleep(0.1)
+        finally:
+            await _cancel_task(loop_task)
+
+        self.assertGreater(len(sock.sent), 1)
+        payload, address = sock.sent[0]
+        self.assertEqual(payload, runtime.packet_payload)
+        self.assertEqual(
+            address, (runtime.config.udp_ip, runtime.config.udp_port)
+        )
 
 
 class PTZLightLoopTests(unittest.IsolatedAsyncioTestCase):
