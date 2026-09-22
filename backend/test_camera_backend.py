@@ -686,6 +686,25 @@ class CameraIngestTests(unittest.TestCase):
         self.assertEqual(options["rtsp_transport"], "tcp")
         self.assertEqual(options["timeout"], "5000000")
 
+    def test_the_relayed_dial_is_bounded_the_same_as_rtsp(self) -> None:
+        # detect_format caches the demuxer per url, so a relayed source that
+        # has gone offline since it last connected skips that probe's own
+        # timeout and goes straight into this open, which must not be allowed
+        # to hang forever on a relay body that never delivers a byte.
+        backend = _AiortcStream((), logging.getLogger("test-camera-ingest"))
+        captured: dict = {}
+
+        def fake_media_player(url, **kwargs):
+            captured.update(kwargs)
+            return mock.Mock()
+
+        with mock.patch.object(camera_backend, "MediaPlayer", fake_media_player):
+            backend._open_player("http://127.0.0.1:8000/camera/cam-0/stream", "h264")
+
+        self.assertEqual(
+            captured["options"]["timeout"], _AiortcStream.CAMERA_OPEN_TIMEOUT_US
+        )
+
     def test_the_live_path_is_never_prerolled(self) -> None:
         # go2rtc opens this url for the live view; replaying a buffered GOP
         # into it would start the view on video that is already seconds old.

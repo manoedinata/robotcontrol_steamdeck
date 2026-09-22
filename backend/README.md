@@ -346,6 +346,8 @@ UDP transmission runs only while at least one controls WebSocket is connected an
 
 With aiortc, each `/offer` creates an aiortc peer and RTSP media player for the requested stream. A config change closes only the peers whose source id or url actually changed; removing a stream or switching backend closes its peers, and FastAPI shutdown closes everything. The current deployment assumes the renderer and backend share the Steam Deck host; no STUN/TURN service is configured.
 
+Opening that player is itself bounded (`CAMERA_OPEN_TIMEOUT_US`, five seconds), the same way for an RTSP source and for a relayed WebSocket one: ffmpeg otherwise waits its own ~7s, or forever, for a source that accepts the connection and then goes quiet. This matters more for the relayed source than it sounds -- `detect_format` caches the demuxer per url, so a camera that goes offline after connecting once skips that probe's own timeout on the next dial and would otherwise hang the open on a relay body that never delivers a byte, leaving `/offer` never answering and the renderer stuck on "Connecting to camera...".
+
 Releasing one of those connections is done off the event loop. aiortc stops a
 player by joining its worker thread and closing the container, and that thread
 is sitting in `demux()` on the camera's socket -- on a camera that stopped

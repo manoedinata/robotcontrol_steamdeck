@@ -335,9 +335,13 @@ class _AiortcStream:
     it over WebRTC.
     """
 
-    # Microseconds. ffmpeg waits ~7s (or forever, on a camera that accepts the
-    # connection then goes quiet) before giving up on an RTSP dial, so bound it.
-    RTSP_OPEN_TIMEOUT_US = "5000000"
+    # Microseconds. ffmpeg waits ~7s (or forever, on a source that accepts the
+    # connection then goes quiet) before giving up on a dial, so bound it. This
+    # also covers the relayed WebSocket path: its format is cached per url, so
+    # a source that has gone offline skips detect_format's own probe timeout
+    # and goes straight into a MediaPlayer() open that would otherwise hang
+    # forever on a relay body that never delivers a byte.
+    CAMERA_OPEN_TIMEOUT_US = "5000000"
 
     def __init__(
         self,
@@ -383,12 +387,13 @@ class _AiortcStream:
                     "fflags": "nobuffer",
                     "flags": "low_delay",
                     "use_wallclock_as_timestamps": "1",
+                    "timeout": self.CAMERA_OPEN_TIMEOUT_US,
                 },
             )
         return MediaPlayer(
             camera_url,
             format="rtsp",
-            options=rtsp_open_options(self.RTSP_OPEN_TIMEOUT_US, self._rtsp_transport),
+            options=rtsp_open_options(self.CAMERA_OPEN_TIMEOUT_US, self._rtsp_transport),
             # Hand out the camera's own packets instead of decoding them. The
             # Deck stops paying for a decode and an encode per peer, and the
             # packets stay in a form a recording can stream-copy -- which is
