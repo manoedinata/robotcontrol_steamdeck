@@ -75,7 +75,7 @@ Each feed also counts the video frames its peer receives. Five seconds without
 one is a dead feed however healthy the connection claims to be -- an unplugged
 camera usually leaves its connection open and simply goes quiet -- so the feed
 drops into the same error state as any other WebRTC failure: a "Hubungkan
-lagi" button plus a background retry every four seconds, either of which
+lagi" button plus a background retry every two seconds, either of which
 re-offers with `?restart=1`, the backend's cue to throw away the connection it
 holds for that source and dial the camera afresh. A feed counts as connected
 only once frames actually arrive, so a camera that answers and then sends

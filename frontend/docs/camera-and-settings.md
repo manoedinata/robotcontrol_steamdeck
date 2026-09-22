@@ -69,7 +69,7 @@ Every source, `cameraBackend`, and `rtspTransport` are sent to the backend as `c
 Both transports reach the renderer this way. For WebSocket mode, Settings still stores `ws://<IP>:<port>`, but the renderer no longer touches the camera: the backend opens the socket, sends `PlayStream2`, ignores text status messages, and re-serves the binary payloads at `GET /camera/<id>/stream` for its own camera backend to consume. This costs some latency compared with the previous renderer-direct WebCodecs path, and buys one camera transport instead of two — the renderer has no camera code, and anything the backend does across "all sources" works for every source kind. Nothing is re-encoded on the relay hop.
 
 Camera errors are surfaced by the WebRTC connection and shown as an error
-state, with two ways back: a background retry every four seconds, and an
+state, with two ways back: a background retry every two seconds, and an
 operator tap on the feed's "Hubungkan lagi" button for a camera known to be
 back already. Both re-offer with `?restart=1`. The background retry keeps the
 error banner and the button on screen the whole time -- it is not the operator
@@ -89,7 +89,7 @@ decoded, which reads exactly like a working camera pointed at something still.
 So each `CameraFeed.vue` counts the frames its peer receives, once per second.
 Five seconds without one and the feed is treated as failed: it drops into the
 same error state as any other WebRTC failure, showing "Camera feed error" and
-a "Hubungkan lagi" button, and begins retrying every four seconds in the
+a "Hubungkan lagi" button, and begins retrying every two seconds in the
 background. A successful retry tells the backend to throw away the connection
 it holds for that source and dial the camera again (`?restart=1`), rather than
 hand out a second peer onto a feed that has already stopped. The count comes

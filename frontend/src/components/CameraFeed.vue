@@ -31,7 +31,7 @@ const FRAME_CHECK_MS = 1000
 // A failed feed keeps retrying on its own, on top of the "Hubungkan lagi"
 // button, so a camera that comes back on its own is picked back up without
 // the operator having to notice and tap anything.
-const RECONNECT_DELAY_MS = 4000
+const RECONNECT_DELAY_MS = 2000
 let connectionRequest = 0
 let reconnectTimer = null
 let frameWatchTimer = null
