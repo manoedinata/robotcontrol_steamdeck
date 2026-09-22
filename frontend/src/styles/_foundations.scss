@@ -20,6 +20,32 @@ textarea {
     letter-spacing: 0;
 }
 
+*::-webkit-scrollbar {
+    width: 32px;
+    height: 32px;
+}
+
+*::-webkit-scrollbar-track {
+    background: #eceff1;
+}
+
+*::-webkit-scrollbar-thumb {
+    border: 6px solid transparent;
+    border-radius: 16px;
+    background: #9aa4ad;
+    background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:active {
+    background: #6f7a84;
+    background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-corner {
+    background: #eceff1;
+}
+
 .app-shell {
     height: 100vh;
     display: flex;
