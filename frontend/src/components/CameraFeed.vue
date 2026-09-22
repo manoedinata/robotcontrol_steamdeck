@@ -226,7 +226,6 @@ async function connectCamera(preserveErrorState = false, restart = false) {
     watchFrames(peer, requestId)
   } catch (error) {
     if (peerConnection !== peer || requestId !== connectionRequest) return
-    await closePeer()
     handleCameraError(error.message || 'WebRTC camera connection failed.')
   }
 }
@@ -241,6 +240,12 @@ function markConnected() {
 }
 
 function handleCameraError(detail = 'WebRTC camera stream could not be loaded.') {
+  // The peer that reported this failure must not be left attached: a
+  // connectionstatechange it fires again later -- browsers do not always
+  // settle on one terminal state -- would call this a second time and reset
+  // the timer scheduleReconnect just started, so the background retry below
+  // could keep getting pushed back and never actually fire.
+  void closePeer()
   cameraState.value = 'error'
   cameraError.value = detail
   console.error('[camera] Stream failed', { streamId: props.streamId })
