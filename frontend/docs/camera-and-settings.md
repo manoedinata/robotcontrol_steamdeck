@@ -68,7 +68,16 @@ Every source, `cameraBackend`, and `rtspTransport` are sent to the backend as `c
 
 Both transports reach the renderer this way. For WebSocket mode, Settings still stores `ws://<IP>:<port>`, but the renderer no longer touches the camera: the backend opens the socket, sends `PlayStream2`, ignores text status messages, and re-serves the binary payloads at `GET /camera/<id>/stream` for its own camera backend to consume. This costs some latency compared with the previous renderer-direct WebCodecs path, and buys one camera transport instead of two — the renderer has no camera code, and anything the backend does across "all sources" works for every source kind. Nothing is re-encoded on the relay hop.
 
-Camera errors are surfaced by the WebRTC connection and retried by the existing camera lifecycle. A WebSocket source that drops is redialed by the backend hub with backoff, independently of the renderer's own retry.
+Camera errors are surfaced by the WebRTC connection and shown as an error
+state, with two ways back: a background retry every four seconds, and an
+operator tap on the feed's "Hubungkan lagi" button for a camera known to be
+back already. Both re-offer with `?restart=1`. The background retry keeps the
+error banner and the button on screen the whole time -- it is not the operator
+asking, so nothing should flash to "Connecting..." only to flash right back if
+it fails again -- while a manual tap shows "Connecting to camera..." so the
+operator sees the attempt happen. A WebSocket source that drops is separately
+redialed by the backend hub with backoff -- that keeps the connection the
+backend holds for it warm regardless of whether the renderer is watching.
 
 ### When a feed stops moving
 
@@ -78,23 +87,25 @@ anywhere: the peer stays connected and the renderer holds the last frame it
 decoded, which reads exactly like a working camera pointed at something still.
 
 So each `CameraFeed.vue` counts the frames its peer receives, once per second.
-Five seconds without one and the feed blanks, shows "Connecting to camera...",
-and offers again with `?restart=1` — which tells the backend to throw away the
-connection it holds for that source and dial the camera again, rather than hand
-out a second peer onto a feed that has already stopped. The count comes from the
-receiver rather than from the `<video>` element, because every source but one is
-off screen at any moment and a hidden feed is still a working feed. The aiortc
-backend times the same silence on its own side, where it can drop the shared
-connection a recording is also reading; go2rtc holds its connections in a child
-process, so there the renderer's watchdog is the only thing that can see it.
+Five seconds without one and the feed is treated as failed: it drops into the
+same error state as any other WebRTC failure, showing "Camera feed error" and
+a "Hubungkan lagi" button, and begins retrying every four seconds in the
+background. A successful retry tells the backend to throw away the connection
+it holds for that source and dial the camera again (`?restart=1`), rather than
+hand out a second peer onto a feed that has already stopped. The count comes
+from the receiver rather than from the `<video>` element, because every source
+but one is off screen at any moment and a hidden feed is still a working feed.
+The aiortc backend times the same silence on its own side, where it can drop
+the shared connection a recording is also reading; go2rtc holds its
+connections in a child process, so there the renderer's watchdog is the only
+thing that can see it.
 
 A feed is "connected" only once video is actually arriving, not when the track
 is negotiated. A track is a promise of video, not video.
 
-A feed that keeps stalling says why under "Connecting to camera...": a source
-that connects and then sends nothing at all is usually an RTSP transport the
-network drops, which is a setting the operator can act on, and an unexplained
-spinner is not.
+A feed that stalled says why under "Camera feed error": a source that connects
+and then sends nothing at all is usually an RTSP transport the network drops,
+which is a setting the operator can act on, and an unexplained error is not.
 
 ### When a setting changes
 

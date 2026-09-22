@@ -74,11 +74,13 @@ transport, and it says so only once the change is actually in force.
 Each feed also counts the video frames its peer receives. Five seconds without
 one is a dead feed however healthy the connection claims to be -- an unplugged
 camera usually leaves its connection open and simply goes quiet -- so the feed
-blanks, says it is connecting, and offers again with `?restart=1`, which is the
-backend's cue to throw away the connection it holds for that source and dial the
-camera afresh. A feed counts as connected only once frames actually arrive, so a
-camera that answers and then sends nothing never shows as a black rectangle or
-as the last frame of the source before it.
+drops into the same error state as any other WebRTC failure: a "Hubungkan
+lagi" button plus a background retry every four seconds, either of which
+re-offers with `?restart=1`, the backend's cue to throw away the connection it
+holds for that source and dial the camera afresh. A feed counts as connected
+only once frames actually arrive, so a camera that answers and then sends
+nothing never shows as a black rectangle or as the last frame of the source
+before it.
 
 The backend also broadcasts host reachability as `{"type":"ping","ping_ms":12.4}` (or `null` when disabled/unreachable); the Home HUD displays it as `Ping`. This is not exact command-datagram RTT because the current robot protocol has no acknowledgement or sequence ID.
 

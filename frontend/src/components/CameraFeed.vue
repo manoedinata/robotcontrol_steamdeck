@@ -21,12 +21,6 @@ const { cameraSignalingUrl, cameraRestarts, cameraConfigSeq } = useBackendConnec
 const videoElement = ref(null)
 const cameraState = ref('idle')
 const cameraError = ref(null)
-// Why a feed is still connecting, when it is connecting again rather than for
-// the first time. A camera that answers and then sends nothing would otherwise
-// be an unexplained spinner, and the usual cause -- an RTSP transport the
-// network drops -- is a setting the operator can act on.
-const cameraNotice = ref(null)
-const RECONNECT_DELAY_MS = 2000
 // A camera that is unplugged, loses its link, or is dropped by a router keeps
 // its connection open and simply stops sending. Nothing raises an error over
 // that -- the peer stays connected and the last frame stays on screen, which
@@ -34,6 +28,10 @@ const RECONNECT_DELAY_MS = 2000
 // arriving frames are counted instead: five seconds without one is a dead feed.
 const FRAME_STALL_MS = 5000
 const FRAME_CHECK_MS = 1000
+// A failed feed keeps retrying on its own, on top of the "Hubungkan lagi"
+// button, so a camera that comes back on its own is picked back up without
+// the operator having to notice and tap anything.
+const RECONNECT_DELAY_MS = 4000
 let connectionRequest = 0
 let reconnectTimer = null
 let frameWatchTimer = null
@@ -100,18 +98,12 @@ function watchFrames(peer, requestId) {
     if (Date.now() - movedAt < FRAME_STALL_MS) return
 
     stopFrameWatch()
-    console.warn('[camera] No video for %ss; reconnecting', FRAME_STALL_MS / 1000, {
+    console.warn('[camera] No video for %ss', FRAME_STALL_MS / 1000, {
       streamId: props.streamId,
     })
-    clearReconnectTimer()
-    cameraNotice.value = seen === null
+    handleCameraError(seen === null
       ? 'The camera connected but sent no video. Check the RTSP transport setting.'
-      : 'The camera stopped sending video.'
-    // Straight into a fresh connection rather than through the error state:
-    // the camera did not refuse anything, it went quiet, and the operator
-    // needs to see that the feed is coming back rather than the last frame it
-    // sent, which reads exactly like a working camera.
-    void connectCamera(false, true)
+      : 'The camera stopped sending video.')
   }, FRAME_CHECK_MS)
 }
 
@@ -146,8 +138,9 @@ function scheduleReconnect() {
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
-    // Ask for a fresh dial: whatever the backend holds for this source did not
-    // produce a usable feed, so joining it again would fail the same way.
+    // Preserve the error banner and the button through the attempt: this is
+    // the background retry, not the operator asking, so nothing should flash
+    // to "Connecting..." only to flash right back if it fails again.
     void connectCamera(true, true)
   }, RECONNECT_DELAY_MS)
 }
@@ -165,13 +158,13 @@ async function closePeer() {
 }
 
 async function connectCamera(preserveErrorState = false, restart = false) {
+  clearReconnectTimer()
   connectionRequest += 1
   const requestId = connectionRequest
   const target = currentTarget()
   attemptConfigSeq = cameraConfigSeq.value
 
   if (!target) {
-    clearReconnectTimer()
     await closePeer()
     cameraState.value = 'idle'
     cameraError.value = null
@@ -244,7 +237,6 @@ function markConnected() {
   if (cameraState.value === 'connected' || !currentTarget()) return
   cameraState.value = 'connected'
   cameraError.value = null
-  cameraNotice.value = null
   clearReconnectTimer()
 }
 
@@ -255,9 +247,13 @@ function handleCameraError(detail = 'WebRTC camera stream could not be loaded.')
   scheduleReconnect()
 }
 
+// The operator can also retry by hand, for a camera they know is back before
+// the next scheduled attempt reaches it.
+function retryConnection() {
+  void connectCamera(false, true)
+}
+
 watch(() => props.streamId, () => {
-  clearReconnectTimer()
-  cameraNotice.value = null
   connectCamera()
 }, { immediate: true })
 
@@ -276,7 +272,6 @@ watch(() => cameraRestarts.value[props.streamId] ?? 0, (restarts, previous) => {
   console.info('[camera] Backend re-dialed the source; reconnecting', {
     streamId: props.streamId,
   })
-  clearReconnectTimer()
   void connectCamera()
 })
 watch(cameraState, (state) => emit('statusChange', state), { immediate: true })
@@ -304,8 +299,9 @@ onUnmounted(() => {
         <strong v-else>Camera not connected</strong>
 
         <span v-if="cameraState === 'error'">{{ cameraError }}</span>
-        <span v-else-if="cameraState === 'loading' && cameraNotice">{{ cameraNotice }}</span>
         <span v-else-if="cameraState === 'idle'">Set the camera URL in Settings to start the feed.</span>
+        <button v-if="cameraState === 'error'" type="button" class="btn btn-secondary btn-sm"
+          @click="retryConnection">Hubungkan lagi</button>
       </div>
     </div>
   </section>
