@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { Battery, BatteryCharging, Camera, Gamepad2, LoaderCircle, Route, Server } from '@lucide/vue'
 import CameraFeed from '../components/CameraFeed.vue'
+import CameraGuides from '../components/CameraGuides.vue'
 import ControllerPanel from '../components/ControllerPanel.vue'
 import { useGamepad } from '../composables/useGamepad'
 import { useSettings } from '../composables/useSettings'
@@ -294,6 +295,7 @@ const statusLabel = computed(() => {
   <div class="home-layout">
     <CameraFeed v-for="feed in cameraFeeds" v-show="feed.index === activeCameraIndex" :key="feed.id"
       :stream-id="feed.streamId" @status-change="(state) => onFeedStatus(feed.id, state)" />
+    <CameraGuides v-if="cameraState === 'connected'" />
 
     <header class="hud-brand" aria-label="Application title">
       <span>

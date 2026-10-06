@@ -41,7 +41,7 @@ The left stick travels up only. Which way the robot goes is a mode, not a side o
 
 Pushing the stick down does nothing in either mode. The pointer puck cannot be dragged past centre and the lower half of the ring is dimmed to say so; the hardware stick's lower half is clamped away, so holding it down is exactly as if it were centred. Reverse motion needs a `yVelocity` minimum below zero -- a limit narrowed to `0` in Settings leaves reverse with nothing to send.
 
-When Y velocity is negative, `ControllerPanel.vue` negates theta before sending it, so steering stays relative to the driver's view while reversing. In reverse mode that applies to every stick push, since they all publish a negative Y. The displayed theta value is the pre-negation input; the backend sends whatever the renderer publishes without further transformation.
+In reverse mode, `ControllerPanel.vue` negates theta before sending it, so steering stays relative to the driver's view while reversing -- including while pivoting in place with the left stick centred. The displayed theta value is the pre-negation input; the backend sends whatever the renderer publishes without further transformation.
 
 ## Camera Controls (PTZ)
 

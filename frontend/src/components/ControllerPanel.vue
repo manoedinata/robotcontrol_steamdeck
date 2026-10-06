@@ -135,9 +135,9 @@ function publishVelocity() {
   const theta = Math.round(thetaVelocity.value)
   updatePacket({
     pwm: y,
-    // Reversing while driving backwards keeps steering relative to the driver's
-    // view instead of the robot's heading.
-    steering: y < 0 ? -theta : theta,
+    // Reversing keeps steering relative to the driver's view instead of the
+    // robot's heading, including while pivoting in place with no Y travel.
+    steering: reversing.value ? theta : theta,
   })
 }
 

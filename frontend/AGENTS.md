@@ -21,6 +21,7 @@ This directory is the Steam Deck UI. Electron provides the desktop window, appli
 - `src/composables/useRecordingsGamepadNavigation.js`: D-pad/A/B for that page, scoped to the player while it is open.
 - `src/utils/formatRecording.js`: sizes, durations, session times, and the wording for a source that recorded nothing.
 - `src/components/CameraFeed.vue`: one always-connected camera source, negotiated as backend WebRTC via `/offer?src=<id>`, with its own reconnect state. Every source kind arrives this way. `HomeView.vue` mounts one per source and shows only the active one.
+- `src/components/CameraGuides.vue`: the centre guides drawn over the active feed while it is connected, white at 70% opacity with a 50% black outline -- two perspective lines rising toward the middle and a cross on the exact centre. Decoration only: `pointer-events: none`, below every HUD control.
 - `src/components/ControllerPanel.vue`: Y/theta input mapping and generic packet updates.
 - `src/composables/useBackendConnection.js`: singleton typed WebSocket transport, telemetry freshness, reconnect, replay, and backend WebRTC signaling URL.
 - `src/composables/useControlState.js`: generic reactive command packet and frame-coalesced publication.
@@ -65,7 +66,7 @@ Current control mapping remains:
 
 - Left stick vertical axis controls `vy` and travels up only, in both pointer and hardware input. Direction is `useDriveMode()`: forward publishes the travel positive, reverse publishes it negated. The mode lives in the renderer, is not persisted, and never reaches the wire as a field of its own -- the backend only ever sees the signed velocity.
 - Right stick horizontal axis controls `vtheta`; right is positive.
-- Theta is negated before publishing when `vy` is negative, so steering stays driver-relative while reversing. In reverse mode that is every non-zero push.
+- Theta is negated before publishing whenever `useDriveMode()` is in reverse, so steering stays driver-relative while reversing -- including while pivoting in place with no `vy`.
 - Gamepad dead zone is `0.12`; pointer/touch has no dead zone.
 - Each axis is scaled by the `packetLimits` entry of the send field carrying its role (`yVelocity`, `thetaVelocity`): the positive half of the stick reaches `max`, the negative half `min`, and the result is clamped into that range. Limits default to the schema bounds and may only narrow them.
 - Face buttons on Home: A switches the drive direction, X focuses the camera (tap nearer, hold further), Y switches the infrared light, B switches the camera source. A and B still reach overlays as `activate`/`cancel`, so each Home binding yields while one is open; X and Y are read from `useGamepad().faceButtons`, which is live state rather than an event, because the tap-versus-hold split needs to know how long a button is down.
@@ -99,7 +100,7 @@ Preserve this persisted contract:
 }
 ```
 
-`ptzIp` is the renderer source of truth for PTZ and is sent to the backend as `ptz_ip`. `ptzSpeedMultiplier` (1-6) is the only setting written from outside the Settings form -- the Home slider saves it on release, merged over the settings last read, since the file is rewritten whole. Any form that saves the file must carry it through for the same reason. The PTZ camera credentials are not a setting: they are hardcoded in the backend (`PTZ_USERNAME`/`PTZ_PASSWORD` in `PTZController.py`).
+`ptzIp` is the renderer source of truth for PTZ and is sent to the backend as `ptz_ip`. `ptzSpeedMultiplier` (1-6) is the only setting written from outside the Settings form -- the Home slider saves it on release, merged over the settings last read, since the file is rewritten whole. That save also writes the live `activeCameraIndex`: switching camera does not write the file, and the save re-applies what it wrote, so the stored index would switch the view back. Any form that saves the file must carry it through for the same reason. The PTZ camera credentials are not a setting: they are hardcoded in the backend (`PTZ_USERNAME`/`PTZ_PASSWORD` in `PTZController.py`).
 
 Legacy top-level `cameraType`/`cameraUrl`/`cameraUsername`/`cameraPassword` files must keep loading as a single source and be rewritten into `cameraSources` on save.
 

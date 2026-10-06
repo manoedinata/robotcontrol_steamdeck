@@ -369,7 +369,14 @@ async function savePtzSpeedMultiplier(value) {
     setPtzSpeedMultiplier(value)
     if (!settingsRead) return
     if (storedSettings.ptzSpeedMultiplier === ptzSpeedMultiplier.value) return
-    await saveSettings({ ...storedSettings, ptzSpeedMultiplier: ptzSpeedMultiplier.value })
+    // `storedSettings` is the file as last read, but the shown camera moves
+    // without a write (B, or Show in Settings). Carry the live one, or the
+    // save's re-apply would switch the view back to the stored index.
+    await saveSettings({
+        ...storedSettings,
+        activeCameraIndex: activeCameraIndex.value,
+        ptzSpeedMultiplier: ptzSpeedMultiplier.value,
+    })
 }
 
 async function saveSettings(nextSettings) {
